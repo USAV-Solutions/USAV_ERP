@@ -12,6 +12,13 @@ RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
 # Copy source code
 COPY . .
 
+# Set build arguments for environment variables
+ARG VITE_SEATALK_APP_ID
+ARG VITE_SEATALK_REDIRECT_URI
+
+ENV VITE_SEATALK_APP_ID=$VITE_SEATALK_APP_ID
+ENV VITE_SEATALK_REDIRECT_URI=$VITE_SEATALK_REDIRECT_URI
+
 # Build the application 
 # If TypeScript errors occur, use vite build directly (skip tsc check)
 RUN npm run build || npm run build:no-check

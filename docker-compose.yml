@@ -154,13 +154,13 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        - VITE_SEATALK_APP_ID=${SEATALK_APP_ID:-}
+        - VITE_SEATALK_REDIRECT_URI=${VITE_SEATALK_REDIRECT_URI:-}
     container_name: usav_frontend
     profiles:
       - prod
     restart: unless-stopped
-    environment:
-      - VITE_SEATALK_APP_ID=${SEATALK_APP_ID:-}
-      - VITE_SEATALK_REDIRECT_URI=${VITE_SEATALK_REDIRECT_URI:-}
     ports:
       - "3636:3636"
     depends_on:
