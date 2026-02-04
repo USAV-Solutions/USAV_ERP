@@ -156,7 +156,7 @@ services:
       dockerfile: Dockerfile
       args:
         - VITE_SEATALK_APP_ID=${SEATALK_APP_ID:-}
-        - VITE_SEATALK_REDIRECT_URI=${VITE_SEATALK_REDIRECT_URI:-}
+        - VITE_SEATALK_REDIRECT_URI=${SEATALK_REDIRECT_URI:-}
     container_name: usav_frontend
     profiles:
       - prod
