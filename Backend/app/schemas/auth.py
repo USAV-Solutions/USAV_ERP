@@ -97,3 +97,35 @@ class PasswordChange(BaseModel):
     """Password change request."""
     current_password: str
     new_password: str = Field(..., min_length=8, max_length=100)
+
+
+# ============================================================================
+# SEATALK OAUTH SCHEMAS
+# ============================================================================
+
+class SeaTalkEmployee(BaseModel):
+    """SeaTalk employee data from code2employee API."""
+    employee_code: str
+    name: str
+    email: Optional[str] = None
+    avatar: Optional[str] = None
+    mobile: Optional[str] = None
+
+
+class SeaTalkCodeResponse(BaseModel):
+    """Response from SeaTalk code2employee API."""
+    code: int
+    employee: Optional[SeaTalkEmployee] = None
+
+
+class SeaTalkAppTokenResponse(BaseModel):
+    """Response from SeaTalk app_access_token API."""
+    code: int
+    app_access_token: Optional[str] = None
+    expire: Optional[int] = None
+
+
+class SeaTalkCallbackRequest(BaseModel):
+    """Request from frontend with SeaTalk authorization code."""
+    code: str
+    state: Optional[str] = None

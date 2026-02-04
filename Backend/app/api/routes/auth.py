@@ -2,14 +2,19 @@
 Authentication API endpoints.
 Handles login, token generation, and user management.
 """
+import secrets
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Optional
+import logging
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AdminUser, CurrentUser
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import create_access_token, get_password_hash, verify_password
 from app.models import User, UserRole
@@ -17,6 +22,9 @@ from app.repositories.user import UserRepository
 from app.schemas import (
     PaginatedResponse,
     PasswordChange,
+    SeaTalkAppTokenResponse,
+    SeaTalkCallbackRequest,
+    SeaTalkCodeResponse,
     Token,
     UserCreate,
     UserResponse,
@@ -24,6 +32,13 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+logger = logging.getLogger(__name__)
+
+# Cache for SeaTalk app access token
+_seatalk_token_cache: dict[str, any] = {
+    "token": None,
+    "expires_at": None,
+}
 
 
 # ============================================================================
@@ -93,6 +108,203 @@ async def change_own_password(
     
     current_user.hashed_password = get_password_hash(password_data.new_password)
     await db.flush()
+
+
+# ============================================================================
+# SEATALK OAUTH ENDPOINTS
+# ============================================================================
+
+async def _get_seatalk_app_token() -> str:
+    """
+    Get SeaTalk app access token, using cached version if valid.
+    Tokens are valid for 2 hours (7200 seconds).
+    """
+    global _seatalk_token_cache
+    
+    # Check if we have a valid cached token
+    if (_seatalk_token_cache["token"] and 
+        _seatalk_token_cache["expires_at"] and 
+        datetime.now().timestamp() < _seatalk_token_cache["expires_at"]):
+        logger.info("Using cached SeaTalk app access token")
+        return _seatalk_token_cache["token"]
+    
+    # Request new token
+    logger.info("Requesting new SeaTalk app access token")
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"{settings.seatalk_api_base_url}/auth/app_access_token",
+            json={
+                "app_id": settings.seatalk_app_id,
+                "app_secret": settings.seatalk_app_secret,
+            },
+        )
+        
+        logger.info(f"SeaTalk app token response status: {response.status_code}")
+        if response.status_code != 200:
+            logger.error(f"Failed to obtain SeaTalk app access token: {response.text}")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to obtain SeaTalk app access token",
+            )
+        
+        data = SeaTalkAppTokenResponse(**response.json())
+        logger.info(f"SeaTalk app token response code: {data.code}")
+        
+        if data.code != 0 or not data.app_access_token:
+            logger.error(f"SeaTalk API error: code {data.code}")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"SeaTalk API error: code {data.code}",
+            )
+        
+        # Cache the token (expire 5 minutes early for safety)
+        _seatalk_token_cache["token"] = data.app_access_token
+        _seatalk_token_cache["expires_at"] = (
+            datetime.now().timestamp() + (data.expire or 7200) - 300
+        )
+        
+        logger.info("SeaTalk app access token obtained and cached")
+        return data.app_access_token
+
+
+async def _get_seatalk_employee(code: str) -> SeaTalkCodeResponse:
+    """
+    Exchange authorization code for employee information.
+    """
+    logger.info(f"Getting SeaTalk employee with code: {code[:10]}...")
+    app_token = await _get_seatalk_app_token()
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{settings.seatalk_api_base_url}/open_login/code2employee",
+            params={"code": code},
+            headers={"Authorization": f"Bearer {app_token}"},
+        )
+        
+        logger.info(f"SeaTalk code2employee response status: {response.status_code}")
+        if response.status_code != 200:
+            logger.error(f"Failed to verify SeaTalk authorization code: {response.text}")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to verify SeaTalk authorization code",
+            )
+        
+        data = SeaTalkCodeResponse(**response.json())
+        logger.info(f"SeaTalk code2employee response code: {data.code}")
+        
+        if data.code != 0 or not data.employee:
+            logger.error(f"SeaTalk authentication failed: code {data.code}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"SeaTalk authentication failed: code {data.code}",
+            )
+        
+        return data
+
+
+@router.get("/seatalk/callback", response_model=Token)
+async def seatalk_oauth_callback(
+    code: Annotated[str, Query(description="Authorization code from SeaTalk")],
+    state: Annotated[Optional[str], Query(description="State parameter for CSRF protection")] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Handle SeaTalk OAuth callback.
+    
+    Exchanges authorization code for user identity and creates/links user account.
+    Returns JWT access token for the authenticated user.
+    """
+    logger.info(f"SeaTalk callback received - code: {code[:10]}..., state: {state}")
+    
+    # Step 1: Verify code and get employee data from SeaTalk
+    logger.info("Exchanging code for employee data from SeaTalk API")
+    seatalk_response = await _get_seatalk_employee(code)
+    employee = seatalk_response.employee
+    
+    if not employee:
+        logger.error("Failed to retrieve employee information from SeaTalk")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Failed to retrieve employee information from SeaTalk",
+        )
+    
+    logger.info(f"SeaTalk employee retrieved - code: {employee.employee_code}, name: {employee.name}, email: {employee.email}")
+    
+    repo = UserRepository(db)
+    user: Optional[User] = None
+    
+    # Step 2: Check if user exists by SeaTalk ID
+    logger.info(f"Checking if user exists with SeaTalk ID: {employee.employee_code}")
+    user = await repo.get_by_seatalk_id(employee.employee_code)
+    
+    if not user and employee.email:
+        # Step 3: Check if user exists by email and link SeaTalk ID
+        logger.info(f"User not found by SeaTalk ID, checking by email: {employee.email}")
+        user = await repo.get_by_email(employee.email)
+        if user:
+            # Link SeaTalk ID to existing user
+            logger.info(f"Linking SeaTalk ID to existing user: {user.username}")
+            user.seatalk_id = employee.employee_code
+            if not user.full_name and employee.name:
+                user.full_name = employee.name
+            await db.flush()
+    
+    if not user:
+        # Step 4: Create new user
+        logger.info(f"Creating new user for SeaTalk employee: {employee.employee_code}")
+        # Generate a random placeholder password (user authenticates via SeaTalk)
+        random_password = secrets.token_urlsafe(32)
+        
+        # Create username from email or employee code
+        username = (
+            employee.email.split("@")[0] if employee.email 
+            else f"seatalk_{employee.employee_code}"
+        )
+        
+        # Ensure username is unique
+        base_username = username
+        counter = 1
+        while await repo.username_exists(username):
+            username = f"{base_username}_{counter}"
+            counter += 1
+        
+        logger.info(f"Creating user with username: {username}")
+        user = User(
+            username=username,
+            email=employee.email,
+            seatalk_id=employee.employee_code,
+            full_name=employee.name,
+            hashed_password=get_password_hash(random_password),
+            role=UserRole.SALES_REP,  # Default role for new SeaTalk users
+            is_active=True,
+        )
+        db.add(user)
+        await db.flush()
+        await db.refresh(user)
+        logger.info(f"New user created with ID: {user.id}")
+    
+    # Check if user is active
+    if not user.is_active:
+        logger.warning(f"User account is disabled: {user.username}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is disabled",
+        )
+    
+    # Update last login timestamp
+    user.last_login = datetime.now()
+    await db.flush()
+    
+    logger.info(f"Generating access token for user: {user.username} (ID: {user.id})")
+    # Create access token
+    access_token = create_access_token(
+        subject=user.id,
+        role=user.role.value,
+        extra_data={"username": user.username},
+    )
+    
+    logger.info("SeaTalk login successful")
+    return Token(access_token=access_token, token_type="bearer")
 
 
 # ============================================================================

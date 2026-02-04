@@ -42,6 +42,8 @@ services:
       - DB_USER=${DB_USER:-postgres}
       - DB_PASS=${DB_PASS:-devpassword123}
       - DB_NAME=${DB_NAME:-inventory_system}
+      - SEATALK_APP_ID=${SEATALK_APP_ID:-}
+      - SEATALK_APP_SECRET=${SEATALK_APP_SECRET:-}
       - ZOHO_CLIENT_ID=${ZOHO_CLIENT_ID:-}
       - ZOHO_CLIENT_SECRET=${ZOHO_CLIENT_SECRET:-}
       - ZOHO_REFRESH_TOKEN=${ZOHO_REFRESH_TOKEN:-}
@@ -81,6 +83,8 @@ services:
       - DB_USER=${DB_USER:-postgres}
       - DB_PASS=${DB_PASS:-devpassword123}
       - DB_NAME=${DB_NAME:-inventory_system}
+      - SEATALK_APP_ID=${SEATALK_APP_ID:-}
+      - SEATALK_APP_SECRET=${SEATALK_APP_SECRET:-}
     ports:
       - "8080:8080"
     depends_on:
@@ -154,6 +158,9 @@ services:
     profiles:
       - prod
     restart: unless-stopped
+    environment:
+      - VITE_SEATALK_APP_ID=${SEATALK_APP_ID:-}
+      - VITE_SEATALK_REDIRECT_URI=${VITE_SEATALK_REDIRECT_URI:-}
     ports:
       - "3636:3636"
     depends_on:
@@ -185,6 +192,9 @@ services:
       - ./frontend/vite.config.ts:/app/vite.config.ts
       - ./frontend/tsconfig.json:/app/tsconfig.json
       - ./frontend/tsconfig.node.json:/app/tsconfig.node.json
+    environment:
+      - VITE_SEATALK_APP_ID=${SEATALK_APP_ID:-}
+      - VITE_SEATALK_REDIRECT_URI=${SEATALK_REDIRECT_URI:-}
     ports:
       - "3636:3636"
     depends_on:

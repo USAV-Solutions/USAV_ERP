@@ -3,6 +3,10 @@ Pydantic schemas for all API endpoints.
 """
 from app.schemas.auth import (
     PasswordChange,
+    SeaTalkAppTokenResponse,
+    SeaTalkCallbackRequest,
+    SeaTalkCodeResponse,
+    SeaTalkEmployee,
     Token,
     TokenData,
     UserCreate,

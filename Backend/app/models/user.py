@@ -59,6 +59,13 @@ class User(Base):
         nullable=True,
         comment="User email address (optional).",
     )
+    seatalk_id: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        unique=True,
+        nullable=True,
+        index=True,
+        comment="SeaTalk employee code for OAuth login.",
+    )
     hashed_password: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
@@ -70,7 +77,7 @@ class User(Base):
         comment="Display name.",
     )
     role: Mapped[UserRole] = mapped_column(
-        Enum(UserRole, name="user_role_enum"),
+        Enum(UserRole, name="user_role"),
         nullable=False,
         default=UserRole.WAREHOUSE_OP,
         comment="User role for access control.",

@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24  # 24 hours
     
+    # SeaTalk OAuth Integration
+    seatalk_app_id: str = ""
+    seatalk_app_secret: str = ""
+    seatalk_redirect_uri: str = "http://localhost:3636/auth/seatalk/callback"
+    seatalk_api_base_url: str = "https://openapi.seatalk.io"
+    
     # Zoho Integration
     zoho_client_id: str = ""
     zoho_client_secret: str = ""

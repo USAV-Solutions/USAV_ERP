@@ -7,6 +7,7 @@ interface AuthContextType {
   isAuthenticated: boolean
   isLoading: boolean
   login: (credentials: LoginCredentials) => Promise<void>
+  loginWithToken: (token: string) => Promise<void>
   logout: () => void
   hasRole: (roles: UserRole[]) => boolean
 }
@@ -79,6 +80,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  const loginWithToken = async (token: string) => {
+    localStorage.setItem('access_token', token)
+
+    // Decode token to get user info
+    const decoded = decodeToken(token)
+    if (decoded) {
+      const userData: User = {
+        id: parseInt(decoded.sub) || 0,
+        username: decoded.username || decoded.sub,
+        role: decoded.role,
+        is_active: true,
+      }
+      setUser(userData)
+      localStorage.setItem('user', JSON.stringify(userData))
+    }
+  }
+
   const logout = () => {
     localStorage.removeItem('access_token')
     localStorage.removeItem('user')
@@ -97,6 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!user,
         isLoading,
         login,
+        loginWithToken,
         logout,
         hasRole,
       }}

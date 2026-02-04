@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './hooks/useAuth'
 import Login from './pages/Login'
+import SeaTalkCallback from './pages/SeaTalkCallback'
 import Dashboard from './pages/Dashboard'
 import WarehouseOps from './pages/WarehouseOps'
 import StockLookup from './pages/StockLookup'
@@ -15,11 +16,12 @@ function App() {
 
   return (
     <Routes>
-      {/* Public Route */}
+      {/* Public Routes */}
       <Route
         path="/login"
         element={isAuthenticated ? <Navigate to="/" replace /> : <Login />}
       />
+      <Route path="/auth/seatalk/callback" element={<SeaTalkCallback />} />
 
       {/* Protected Routes */}
       <Route

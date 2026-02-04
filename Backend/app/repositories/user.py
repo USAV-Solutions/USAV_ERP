@@ -28,6 +28,12 @@ class UserRepository(BaseRepository[User]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
     
+    async def get_by_seatalk_id(self, seatalk_id: str) -> Optional[User]:
+        """Get user by SeaTalk employee code."""
+        stmt = select(User).where(User.seatalk_id == seatalk_id)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+    
     async def get_active_users(
         self,
         skip: int = 0,

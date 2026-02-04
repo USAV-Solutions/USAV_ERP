@@ -8,10 +8,12 @@ import {
   Typography,
   Alert,
   CircularProgress,
+  Divider,
 } from '@mui/material'
 import { Lock } from '@mui/icons-material'
 import { useAuth } from '../hooks/useAuth'
 import { useNavigate } from 'react-router-dom'
+import SeaTalkLoginButton from '../components/common/SeaTalkLoginButton'
 
 export default function Login() {
   const [username, setUsername] = useState('')
@@ -96,6 +98,14 @@ export default function Login() {
               {loading ? <CircularProgress size={24} /> : 'Sign In'}
             </Button>
           </form>
+
+          <Divider sx={{ my: 3 }}>
+            <Typography variant="body2" color="text.secondary">
+              OR
+            </Typography>
+          </Divider>
+
+          <SeaTalkLoginButton size="large" align="center" />
         </CardContent>
       </Card>
     </Box>
