@@ -5,7 +5,7 @@ Handles database operations for ProductFamily, ProductIdentity, and ProductVaria
 import hashlib
 from typing import Any, Optional, Sequence
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -14,6 +14,7 @@ from app.models import (
     ProductFamily,
     ProductIdentity,
     ProductVariant,
+    ZohoSyncStatus,
 )
 from app.repositories.base import BaseRepository
 
@@ -26,8 +27,6 @@ class ProductFamilyRepository(BaseRepository[ProductFamily]):
     
     async def get_max_product_id(self) -> Optional[int]:
         """Get the maximum product_id currently in use."""
-        from sqlalchemy import func
-        
         stmt = select(func.max(ProductFamily.product_id))
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
@@ -97,8 +96,6 @@ class ProductIdentityRepository(BaseRepository[ProductIdentity]):
     
     async def get_next_lci(self, product_id: int) -> int:
         """Get the next available LCI for a product family."""
-        from sqlalchemy import func
-        
         stmt = (
             select(func.coalesce(func.max(ProductIdentity.lci), 0) + 1)
             .where(ProductIdentity.product_id == product_id)
@@ -191,8 +188,6 @@ class ProductVariantRepository(BaseRepository[ProductVariant]):
         limit: int = 100
     ) -> Sequence[ProductVariant]:
         """Get variants pending Zoho sync."""
-        from app.models import ZohoSyncStatus
-        
         stmt = (
             select(ProductVariant)
             .where(ProductVariant.zoho_sync_status.in_([
@@ -255,3 +250,10 @@ class ProductVariantRepository(BaseRepository[ProductVariant]):
         )
         
         return await self.create(data)
+
+
+__all__ = [
+    "ProductFamilyRepository",
+    "ProductIdentityRepository",
+    "ProductVariantRepository",
+]

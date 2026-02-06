@@ -1,42 +1,27 @@
 """
-Pydantic schemas for all API endpoints.
+Inventory Module Schemas.
 
-Auth schemas have been moved to app/modules/auth/schemas/
-Inventory schemas are in app/modules/inventory/schemas/
-This module re-exports them for backward compatibility.
+All inventory-related Pydantic schemas.
 """
-# Auth schemas imported from new module location
-from app.modules.auth.schemas import (
-    PasswordChange,
-    SeaTalkAppTokenResponse,
-    SeaTalkCallbackRequest,
-    SeaTalkCodeResponse,
-    SeaTalkEmployee,
-    Token,
-    TokenData,
-    UserCreate,
-    UserResponse,
-    UserUpdate,
-)
-
-# Re-export inventory schemas from new module location for backward compatibility
-from app.modules.inventory.schemas import (
-    # Bundles
+from app.modules.inventory.schemas.bundles import (
     BundleComponentCreate,
     BundleComponentResponse,
     BundleComponentUpdate,
     BundleComponentWithDetails,
-    # Families
+)
+from app.modules.inventory.schemas.families import (
     ProductFamilyCreate,
     ProductFamilyResponse,
     ProductFamilyUpdate,
     ProductFamilyWithIdentities,
-    # Identities
+)
+from app.modules.inventory.schemas.identities import (
     ProductIdentityCreate,
     ProductIdentityResponse,
     ProductIdentityUpdate,
     ProductIdentityWithVariants,
-    # Inventory
+)
+from app.modules.inventory.schemas.inventory import (
     InventoryAuditItem,
     InventoryAuditResponse,
     InventoryItemCreate,
@@ -48,11 +33,13 @@ from app.modules.inventory.schemas import (
     InventoryReceiveRequest,
     InventoryReceiveResponse,
     InventorySummary,
-    # Listings
+)
+from app.modules.inventory.schemas.listings import (
     PlatformListingCreate,
     PlatformListingResponse,
     PlatformListingUpdate,
-    # Lookups
+)
+from app.modules.inventory.schemas.lookups import (
     BrandCreate,
     BrandResponse,
     BrandUpdate,
@@ -65,9 +52,9 @@ from app.modules.inventory.schemas import (
     LCIDefinitionCreate,
     LCIDefinitionResponse,
     LCIDefinitionUpdate,
-    # Pagination
-    PaginatedResponse,
-    # Variants
+)
+from app.modules.inventory.schemas.pagination import PaginatedResponse
+from app.modules.inventory.schemas.variants import (
     ProductVariantCreate,
     ProductVariantResponse,
     ProductVariantUpdate,
@@ -75,17 +62,6 @@ from app.modules.inventory.schemas import (
 )
 
 __all__ = [
-    # Auth
-    "PasswordChange",
-    "SeaTalkAppTokenResponse",
-    "SeaTalkCallbackRequest",
-    "SeaTalkCodeResponse",
-    "SeaTalkEmployee",
-    "Token",
-    "TokenData",
-    "UserCreate",
-    "UserResponse",
-    "UserUpdate",
     # Bundles
     "BundleComponentCreate",
     "BundleComponentResponse",
@@ -102,17 +78,17 @@ __all__ = [
     "ProductIdentityUpdate",
     "ProductIdentityWithVariants",
     # Inventory
+    "InventoryAuditItem",
+    "InventoryAuditResponse",
     "InventoryItemCreate",
     "InventoryItemResponse",
     "InventoryItemUpdate",
     "InventoryItemWithVariant",
-    "InventorySummary",
-    "InventoryReceiveRequest",
-    "InventoryReceiveResponse",
     "InventoryMoveRequest",
     "InventoryMoveResponse",
-    "InventoryAuditItem",
-    "InventoryAuditResponse",
+    "InventoryReceiveRequest",
+    "InventoryReceiveResponse",
+    "InventorySummary",
     # Listings
     "PlatformListingCreate",
     "PlatformListingResponse",
@@ -138,3 +114,4 @@ __all__ = [
     "ProductVariantUpdate",
     "ProductVariantWithListings",
 ]
+

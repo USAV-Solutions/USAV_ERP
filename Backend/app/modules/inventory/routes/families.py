@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.repositories import ProductFamilyRepository
-from app.schemas import (
+from app.modules.inventory.schemas import (
     PaginatedResponse,
     ProductFamilyCreate,
     ProductFamilyResponse,
@@ -93,13 +93,14 @@ async def get_family(
     return ProductFamilyWithIdentities.model_validate(family)
 
 
+@router.put("/{product_id}", response_model=ProductFamilyResponse)
 @router.patch("/{product_id}", response_model=ProductFamilyResponse)
 async def update_family(
     product_id: int,
     data: ProductFamilyUpdate,
     db: AsyncSession = Depends(get_db),
 ):
-    """Update a product family."""
+    """Update a product family (supports both PUT and PATCH)."""
     repo = ProductFamilyRepository(db)
     family = await repo.get(product_id)
     

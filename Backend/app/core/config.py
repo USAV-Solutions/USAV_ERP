@@ -55,6 +55,25 @@ class Settings(BaseSettings):
     zoho_refresh_token: str = ""
     zoho_organization_id: str = ""
     
+    # Amazon SP-API Integration
+    amazon_refresh_token: str = ""
+    amazon_client_id: str = ""
+    amazon_client_secret: str = ""
+    amazon_marketplace_id: str = "ATVPDKIKX0DER"  # US marketplace
+    
+    # eBay Integration (multiple stores)
+    ebay_mekong_app_id: str = ""
+    ebay_mekong_cert_id: str = ""
+    ebay_mekong_user_token: str = ""
+    
+    ebay_usav_app_id: str = ""
+    ebay_usav_cert_id: str = ""
+    ebay_usav_user_token: str = ""
+    
+    ebay_dragon_app_id: str = ""
+    ebay_dragon_cert_id: str = ""
+    ebay_dragon_user_token: str = ""
+    
     @computed_field
     @property
     def database_url(self) -> str:

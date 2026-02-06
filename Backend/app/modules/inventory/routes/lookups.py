@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models import Brand, Color, Condition, LCIDefinition, ProductFamily
-from app.schemas import (
+from app.modules.inventory.schemas import (
     BrandCreate,
     BrandResponse,
     BrandUpdate,

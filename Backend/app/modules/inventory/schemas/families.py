@@ -7,7 +7,7 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.schemas.lookups import BrandResponse
+from app.modules.inventory.schemas.lookups import BrandResponse
 
 
 class ProductFamilyBase(BaseModel):

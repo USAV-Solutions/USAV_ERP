@@ -123,6 +123,82 @@ services:
       - usav_network
 
   # ==============================================                                      
+  # Background Worker Service (Order Sync, Stock Updates)
+  # ==============================================                                      
+  worker:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+    container_name: usav_worker
+    profiles:
+      - prod
+    command: python -m app.worker
+    restart: unless-stopped
+    environment:
+      - DEBUG=${DEBUG:-false}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASS=${DB_PASS:-devpassword123}
+      - DB_NAME=${DB_NAME:-inventory_system}
+      # Zoho
+      - ZOHO_CLIENT_ID=${ZOHO_CLIENT_ID:-}
+      - ZOHO_CLIENT_SECRET=${ZOHO_CLIENT_SECRET:-}
+      - ZOHO_REFRESH_TOKEN=${ZOHO_REFRESH_TOKEN:-}
+      - ZOHO_ORGANIZATION_ID=${ZOHO_ORGANIZATION_ID:-}
+      # Amazon
+      - AMAZON_REFRESH_TOKEN=${AMAZON_REFRESH_TOKEN:-}
+      - AMAZON_CLIENT_ID=${AMAZON_CLIENT_ID:-}
+      - AMAZON_CLIENT_SECRET=${AMAZON_CLIENT_SECRET:-}
+      # eBay
+      - EBAY_MEKONG_APP_ID=${EBAY_MEKONG_APP_ID:-}
+      - EBAY_MEKONG_CERT_ID=${EBAY_MEKONG_CERT_ID:-}
+      - EBAY_MEKONG_USER_TOKEN=${EBAY_MEKONG_USER_TOKEN:-}
+      - EBAY_USAV_APP_ID=${EBAY_USAV_APP_ID:-}
+      - EBAY_USAV_CERT_ID=${EBAY_USAV_CERT_ID:-}
+      - EBAY_USAV_USER_TOKEN=${EBAY_USAV_USER_TOKEN:-}
+      - EBAY_DRAGON_APP_ID=${EBAY_DRAGON_APP_ID:-}
+      - EBAY_DRAGON_CERT_ID=${EBAY_DRAGON_CERT_ID:-}
+      - EBAY_DRAGON_USER_TOKEN=${EBAY_DRAGON_USER_TOKEN:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - usav_network
+
+  # ==============================================                                      
+  # Development Worker (with hot reload)
+  # ==============================================                                      
+  worker-dev:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+    container_name: usav_worker_dev
+    profiles:
+      - dev
+    command: python -m app.worker
+    volumes:
+      - ./Backend:/app
+    environment:
+      - DEBUG=true
+      - ENVIRONMENT=development
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASS=${DB_PASS:-devpassword123}
+      - DB_NAME=${DB_NAME:-inventory_system}
+      - ZOHO_CLIENT_ID=${ZOHO_CLIENT_ID:-}
+      - ZOHO_CLIENT_SECRET=${ZOHO_CLIENT_SECRET:-}
+      - ZOHO_REFRESH_TOKEN=${ZOHO_REFRESH_TOKEN:-}
+      - ZOHO_ORGANIZATION_ID=${ZOHO_ORGANIZATION_ID:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - usav_network
+
+  # ==============================================                                      
   # Automatic Backups
   # ==============================================                                      
   db-backup:

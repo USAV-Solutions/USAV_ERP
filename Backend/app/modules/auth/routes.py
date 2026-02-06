@@ -19,7 +19,7 @@ from app.core.database import get_db
 from app.core.security import create_access_token, get_password_hash, verify_password
 from app.models import User, UserRole
 from app.repositories.user import UserRepository
-from app.schemas import (
+from app.modules.auth.schemas import (
     PaginatedResponse,
     PasswordChange,
     SeaTalkAppTokenResponse,
@@ -202,51 +202,57 @@ async def _get_seatalk_employee(code: str) -> SeaTalkCodeResponse:
         return data
 
 
-@router.get("/seatalk/callback", response_model=Token)
-async def seatalk_oauth_callback(
-    code: Annotated[str, Query(description="Authorization code from SeaTalk")],
-    state: Annotated[Optional[str], Query(description="State parameter for CSRF protection")] = None,
+@router.get("/seatalk/login")
+async def seatalk_login():
+    """
+    Initiate SeaTalk OAuth login flow.
+    Redirects user to SeaTalk authorization endpoint.
+    """
+    state = secrets.token_urlsafe(16)
+    
+    auth_url = (
+        f"{settings.seatalk_api_base_url}/oauth2/authorize?"
+        f"app_id={settings.seatalk_app_id}&"
+        f"redirect_uri={settings.seatalk_redirect_uri}&"
+        f"scope=openid&"
+        f"state={state}"
+    )
+    
+    logger.info(f"Initiating SeaTalk login with state: {state}")
+    return RedirectResponse(url=auth_url)
+
+
+@router.get("/seatalk/callback")
+async def seatalk_callback(
+    code: str = Query(..., description="Authorization code from SeaTalk"),
+    state: str = Query(..., description="State parameter from SeaTalk"),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Handle SeaTalk OAuth callback.
-    
-    Exchanges authorization code for user identity and creates/links user account.
-    Returns JWT access token for the authenticated user.
+    SeaTalk OAuth callback handler.
+    Exchanges authorization code for user token.
     """
-    logger.info(f"SeaTalk callback received - code: {code[:10]}..., state: {state}")
+    logger.info(f"SeaTalk callback received with state: {state}")
     
-    # Step 1: Verify code and get employee data from SeaTalk
-    logger.info("Exchanging code for employee data from SeaTalk API")
-    seatalk_response = await _get_seatalk_employee(code)
-    employee = seatalk_response.employee
+    # Step 1: Get employee info from SeaTalk
+    code_response = await _get_seatalk_employee(code)
+    employee = code_response.employee
     
-    if not employee:
-        logger.error("Failed to retrieve employee information from SeaTalk")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Failed to retrieve employee information from SeaTalk",
-        )
+    logger.info(f"SeaTalk employee retrieved: {employee.employee_code}")
     
-    logger.info(f"SeaTalk employee retrieved - code: {employee.employee_code}, name: {employee.name}, email: {employee.email}")
-    
+    # Step 2: Get or create user from database
     repo = UserRepository(db)
-    user: Optional[User] = None
-    
-    # Step 2: Check if user exists by SeaTalk ID
-    logger.info(f"Checking if user exists with SeaTalk ID: {employee.employee_code}")
     user = await repo.get_by_seatalk_id(employee.employee_code)
     
-    if not user and employee.email:
-        # Step 3: Check if user exists by email and link SeaTalk ID
-        logger.info(f"User not found by SeaTalk ID, checking by email: {employee.email}")
-        user = await repo.get_by_email(employee.email)
-        if user:
-            # Link SeaTalk ID to existing user
-            logger.info(f"Linking SeaTalk ID to existing user: {user.username}")
-            user.seatalk_id = employee.employee_code
-            if not user.full_name and employee.name:
-                user.full_name = employee.name
+    if user:
+        # Step 3: Update user if needed
+        logger.info(f"Existing user found for SeaTalk ID: {employee.employee_code}")
+        if user.email != employee.email:
+            user.email = employee.email
+            logger.info(f"Updated email for user {user.id}")
+        if user.full_name != employee.name:
+            user.full_name = employee.name
+            logger.info(f"Updated name for user {user.id}")
             await db.flush()
     
     if not user:

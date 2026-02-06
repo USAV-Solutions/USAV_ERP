@@ -46,6 +46,7 @@ interface User {
   username: string
   email?: string
   full_name?: string
+  seatalk_id?: string
   role: UserRole
   is_active: boolean
   is_superuser: boolean
@@ -293,6 +294,7 @@ export default function UserManagement() {
                 <TableCell>Username</TableCell>
                 <TableCell>Full Name</TableCell>
                 <TableCell>Email</TableCell>
+                <TableCell>SeaTalk ID</TableCell>
                 <TableCell>Role</TableCell>
                 <TableCell align="center">Status</TableCell>
                 <TableCell>Last Login</TableCell>
@@ -302,13 +304,13 @@ export default function UserManagement() {
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
                     <CircularProgress size={32} />
                   </TableCell>
                 </TableRow>
               ) : users.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
                     No users found
                   </TableCell>
                 </TableRow>
@@ -320,6 +322,20 @@ export default function UserManagement() {
                     </TableCell>
                     <TableCell>{user.full_name || '-'}</TableCell>
                     <TableCell>{user.email || '-'}</TableCell>
+                    <TableCell>
+                      {user.seatalk_id ? (
+                        <Tooltip title="Linked via SeaTalk">
+                          <Chip
+                            size="small"
+                            label={user.seatalk_id}
+                            variant="outlined"
+                            icon={<CheckCircle />}
+                          />
+                        </Tooltip>
+                      ) : (
+                        <Typography variant="body2" color="text.secondary">-</Typography>
+                      )}
+                    </TableCell>
                     <TableCell>
                       <Chip
                         size="small"

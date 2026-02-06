@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.models import IdentityType
 from app.repositories import BundleComponentRepository, ProductIdentityRepository
-from app.schemas import (
+from app.modules.inventory.schemas import (
     BundleComponentCreate,
     BundleComponentResponse,
     BundleComponentUpdate,

@@ -51,7 +51,9 @@ class InventoryItemWithVariant(InventoryItemResponse):
 
 class InventorySummary(BaseModel):
     """Summary of inventory counts by status."""
-    total_items: int = Field(default=0)
+    variant_id: int
+    full_sku: str
+    total: int = Field(default=0)
     available: int = Field(default=0)
     sold: int = Field(default=0)
     reserved: int = Field(default=0)
@@ -116,4 +118,3 @@ class InventoryAuditResponse(BaseModel):
     """Response for inventory audit/lookup."""
     items: List[InventoryAuditItem] = Field(default_factory=list)
     total_count: int = Field(default=0)
-

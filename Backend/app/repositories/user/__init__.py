@@ -77,3 +77,6 @@ class UserRepository(BaseRepository[User]):
             return False
         user = await self.get_by_email(email)
         return user is not None
+
+
+__all__ = ["UserRepository"]

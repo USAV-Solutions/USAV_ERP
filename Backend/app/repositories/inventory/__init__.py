@@ -294,3 +294,10 @@ class InventoryItemRepository(BaseRepository[InventoryItem]):
         result = await self.session.execute(stmt)
         total = result.scalar_one_or_none()
         return float(total) if total else 0.0
+
+
+__all__ = [
+    "BundleComponentRepository",
+    "PlatformListingRepository",
+    "InventoryItemRepository",
+]

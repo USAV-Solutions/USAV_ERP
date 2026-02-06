@@ -88,15 +88,23 @@ class UserInDB(UserResponse):
 # ============================================================================
 
 class LoginRequest(BaseModel):
-    """Login request with username and password."""
+    """Login request body."""
     username: str
     password: str
 
 
 class PasswordChange(BaseModel):
-    """Password change request."""
+    """Schema for password change request."""
     current_password: str
-    new_password: str = Field(..., min_length=8, max_length=100)
+    new_password: str = Field(..., min_length=8)
+    new_password_confirm: str
+    
+    @field_validator("new_password_confirm")
+    @classmethod
+    def passwords_match(cls, v, info):
+        if "new_password" in info.data and v != info.data["new_password"]:
+            raise ValueError("Passwords do not match")
+        return v
 
 
 # ============================================================================
@@ -104,28 +112,40 @@ class PasswordChange(BaseModel):
 # ============================================================================
 
 class SeaTalkEmployee(BaseModel):
-    """SeaTalk employee data from code2employee API."""
+    """SeaTalk employee information from OAuth."""
     employee_code: str
     name: str
     email: Optional[str] = None
-    avatar: Optional[str] = None
-    mobile: Optional[str] = None
-
-
-class SeaTalkCodeResponse(BaseModel):
-    """Response from SeaTalk code2employee API."""
-    code: int
-    employee: Optional[SeaTalkEmployee] = None
 
 
 class SeaTalkAppTokenResponse(BaseModel):
-    """Response from SeaTalk app_access_token API."""
+    """SeaTalk app access token response."""
     code: int
+    msg: Optional[str] = None
     app_access_token: Optional[str] = None
     expire: Optional[int] = None
 
 
+class SeaTalkCodeResponse(BaseModel):
+    """SeaTalk code2employee response."""
+    code: int
+    msg: Optional[str] = None
+    employee: Optional[SeaTalkEmployee] = None
+
+
 class SeaTalkCallbackRequest(BaseModel):
-    """Request from frontend with SeaTalk authorization code."""
+    """SeaTalk OAuth callback request."""
     code: str
     state: Optional[str] = None
+
+
+# ============================================================================
+# PAGINATED RESPONSE
+# ============================================================================
+
+class PaginatedResponse(BaseModel):
+    """Generic paginated response wrapper."""
+    total: int
+    skip: int
+    limit: int
+    items: list

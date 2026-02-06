@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.models import Platform, PlatformSyncStatus
 from app.repositories import PlatformListingRepository, ProductVariantRepository
-from app.schemas import (
+from app.modules.inventory.schemas import (
     PaginatedResponse,
     PlatformListingCreate,
     PlatformListingResponse,
@@ -125,13 +125,14 @@ async def get_listing_by_external_ref(
     return PlatformListingResponse.model_validate(listing)
 
 
+@router.put("/{listing_id}", response_model=PlatformListingResponse)
 @router.patch("/{listing_id}", response_model=PlatformListingResponse)
 async def update_platform_listing(
     listing_id: int,
     data: PlatformListingUpdate,
     db: AsyncSession = Depends(get_db),
 ):
-    """Update a platform listing."""
+    """Update a platform listing (supports both PUT and PATCH)."""
     repo = PlatformListingRepository(db)
     listing = await repo.get(listing_id)
     

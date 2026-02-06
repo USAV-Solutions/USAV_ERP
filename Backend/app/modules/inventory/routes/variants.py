@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.models import ZohoSyncStatus
 from app.repositories import ProductIdentityRepository, ProductVariantRepository
-from app.schemas import (
+from app.modules.inventory.schemas import (
     PaginatedResponse,
     ProductVariantCreate,
     ProductVariantResponse,
@@ -121,13 +121,14 @@ async def get_variant_by_sku(
     return ProductVariantResponse.model_validate(variant)
 
 
+@router.put("/{variant_id}", response_model=ProductVariantResponse)
 @router.patch("/{variant_id}", response_model=ProductVariantResponse)
 async def update_variant(
     variant_id: int,
     data: ProductVariantUpdate,
     db: AsyncSession = Depends(get_db),
 ):
-    """Update a product variant."""
+    """Update a product variant (supports both PUT and PATCH)."""
     repo = ProductVariantRepository(db)
     variant = await repo.get(variant_id)
     

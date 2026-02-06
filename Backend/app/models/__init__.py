@@ -31,6 +31,18 @@ except ImportError as e:
     print(f"Failed to import from user: {e}")
     raise
 
+try:
+    from app.modules.orders.models import (
+        Order,
+        OrderItem,
+        OrderPlatform,
+        OrderStatus,
+        OrderItemStatus,
+    )
+except ImportError as e:
+    print(f"Failed to import from orders: {e}")
+    raise
+
 __all__ = [
     # Base
     "Base",
@@ -49,7 +61,7 @@ __all__ = [
     "Color",
     "Condition",
     "LCIDefinition",
-    # Models
+    # Core Models
     "ProductFamily",
     "ProductIdentity",
     "ProductVariant",
@@ -57,4 +69,10 @@ __all__ = [
     "PlatformListing",
     "InventoryItem",
     "User",
+    # Order Models
+    "Order",
+    "OrderItem",
+    "OrderPlatform",
+    "OrderStatus",
+    "OrderItemStatus",
 ]

@@ -14,7 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.core.database import get_db
 from app.models import InventoryStatus, InventoryItem, ProductVariant
 from app.repositories import InventoryItemRepository, ProductVariantRepository
-from app.schemas import (
+from app.modules.inventory.schemas import (
     InventoryItemCreate,
     InventoryItemResponse,
     InventoryItemUpdate,
@@ -129,13 +129,14 @@ async def get_inventory_by_serial(
     return InventoryItemResponse.model_validate(item)
 
 
+@router.put("/{item_id}", response_model=InventoryItemResponse)
 @router.patch("/{item_id}", response_model=InventoryItemResponse)
 async def update_inventory_item(
     item_id: int,
     data: InventoryItemUpdate,
     db: AsyncSession = Depends(get_db),
 ):
-    """Update an inventory item."""
+    """Update an inventory item (supports both PUT and PATCH)."""
     repo = InventoryItemRepository(db)
     item = await repo.get(item_id)
     

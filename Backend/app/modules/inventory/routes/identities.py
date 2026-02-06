@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.models import IdentityType
 from app.repositories import ProductFamilyRepository, ProductIdentityRepository
-from app.schemas import (
+from app.modules.inventory.schemas import (
     PaginatedResponse,
     ProductIdentityCreate,
     ProductIdentityResponse,
@@ -129,6 +129,7 @@ async def get_identity_by_upis(
     return ProductIdentityResponse.model_validate(identity)
 
 
+@router.put("/{identity_id}", response_model=ProductIdentityResponse)
 @router.patch("/{identity_id}", response_model=ProductIdentityResponse)
 async def update_identity(
     identity_id: int,
@@ -136,7 +137,7 @@ async def update_identity(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Update a product identity.
+    Update a product identity (supports both PUT and PATCH).
     
     Note: Only physical_class can be updated. The UPIS-H and hex signature
     are immutable after creation.
