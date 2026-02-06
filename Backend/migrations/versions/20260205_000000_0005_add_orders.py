@@ -1,7 +1,7 @@
 """Add order tables.
 
 Revision ID: 0005
-Revises: 20260203_000000_0004_add_seatalk_id
+Revises: 0004
 Create Date: 2026-02-05 00:00:00.000000
 
 """
@@ -12,43 +12,55 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '20260205_000000_0005_add_orders'
-down_revision: Union[str, None] = '20260203_000000_0004_add_seatalk_id'
+revision: str = '0005'
+down_revision: Union[str, None] = '0004'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Create order_platform_enum
-    order_platform_enum = postgresql.ENUM(
-        'AMAZON', 'EBAY_MEKONG', 'EBAY_USAV', 'EBAY_DRAGON', 'ZOHO', 'MANUAL',
-        name='order_platform_enum'
-    )
-    order_platform_enum.create(op.get_bind(), checkfirst=True)
+    # Create order_platform_enum using raw SQL to avoid duplicate error
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE order_platform_enum AS ENUM (
+                'AMAZON', 'EBAY_MEKONG', 'EBAY_USAV', 'EBAY_DRAGON', 'ZOHO', 'MANUAL'
+            );
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
     
-    # Create order_status_enum
-    order_status_enum = postgresql.ENUM(
-        'PENDING', 'PROCESSING', 'READY_TO_SHIP', 'SHIPPED', 
-        'DELIVERED', 'CANCELLED', 'REFUNDED', 'ON_HOLD', 'ERROR',
-        name='order_status_enum'
-    )
-    order_status_enum.create(op.get_bind(), checkfirst=True)
+    # Create order_status_enum using raw SQL to avoid duplicate error
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE order_status_enum AS ENUM (
+                'PENDING', 'PROCESSING', 'READY_TO_SHIP', 'SHIPPED', 
+                'DELIVERED', 'CANCELLED', 'REFUNDED', 'ON_HOLD', 'ERROR'
+            );
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
     
-    # Create order_item_status_enum
-    order_item_status_enum = postgresql.ENUM(
-        'UNMATCHED', 'MATCHED', 'ALLOCATED', 'SHIPPED', 'CANCELLED',
-        name='order_item_status_enum'
-    )
-    order_item_status_enum.create(op.get_bind(), checkfirst=True)
+    # Create order_item_status_enum using raw SQL to avoid duplicate error
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE order_item_status_enum AS ENUM (
+                'UNMATCHED', 'MATCHED', 'ALLOCATED', 'SHIPPED', 'CANCELLED'
+            );
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
     
     # Create order table
     op.create_table(
         'order',
         sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
-        sa.Column('platform', sa.Enum('AMAZON', 'EBAY_MEKONG', 'EBAY_USAV', 'EBAY_DRAGON', 'ZOHO', 'MANUAL', name='order_platform_enum'), nullable=False, comment='Source platform (AMAZON, EBAY, etc.).'),
+        sa.Column('platform', postgresql.ENUM('AMAZON', 'EBAY_MEKONG', 'EBAY_USAV', 'EBAY_DRAGON', 'ZOHO', 'MANUAL', name='order_platform_enum', create_type=False), nullable=False, comment='Source platform (AMAZON, EBAY, etc.).'),
         sa.Column('external_order_id', sa.String(length=100), nullable=False, comment='Order ID on the external platform.'),
         sa.Column('external_order_number', sa.String(length=100), nullable=True, comment='Human-readable order number (if different from ID).'),
-        sa.Column('status', sa.Enum('PENDING', 'PROCESSING', 'READY_TO_SHIP', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'REFUNDED', 'ON_HOLD', 'ERROR', name='order_status_enum'), nullable=False, comment='Current order processing status.'),
+        sa.Column('status', postgresql.ENUM('PENDING', 'PROCESSING', 'READY_TO_SHIP', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'REFUNDED', 'ON_HOLD', 'ERROR', name='order_status_enum', create_type=False), nullable=False, comment='Current order processing status.'),
         
         # Customer info
         sa.Column('customer_name', sa.String(length=200), nullable=True, comment='Customer full name.'),
@@ -112,7 +124,7 @@ def upgrade() -> None:
         sa.Column('variant_id', sa.BigInteger(), nullable=True, comment='Matched internal product variant.'),
         sa.Column('allocated_inventory_id', sa.BigInteger(), nullable=True, comment='Allocated physical inventory item.'),
         
-        sa.Column('status', sa.Enum('UNMATCHED', 'MATCHED', 'ALLOCATED', 'SHIPPED', 'CANCELLED', name='order_item_status_enum'), nullable=False, comment='Item processing status.'),
+        sa.Column('status', postgresql.ENUM('UNMATCHED', 'MATCHED', 'ALLOCATED', 'SHIPPED', 'CANCELLED', name='order_item_status_enum', create_type=False), nullable=False, comment='Item processing status.'),
         
         # Item details
         sa.Column('item_name', sa.String(length=500), nullable=False, comment='Item name/title from the platform.'),
@@ -160,23 +172,8 @@ def downgrade() -> None:
     op.drop_index('ix_order_platform', table_name='order')
     op.drop_table('order')
     
-    # Drop enums
-    order_item_status_enum = postgresql.ENUM(
-        'UNMATCHED', 'MATCHED', 'ALLOCATED', 'SHIPPED', 'CANCELLED',
-        name='order_item_status_enum'
-    )
-    order_item_status_enum.drop(op.get_bind(), checkfirst=True)
-    
-    order_status_enum = postgresql.ENUM(
-        'PENDING', 'PROCESSING', 'READY_TO_SHIP', 'SHIPPED', 
-        'DELIVERED', 'CANCELLED', 'REFUNDED', 'ON_HOLD', 'ERROR',
-        name='order_status_enum'
-    )
-    order_status_enum.drop(op.get_bind(), checkfirst=True)
-    
-    order_platform_enum = postgresql.ENUM(
-        'AMAZON', 'EBAY_MEKONG', 'EBAY_USAV', 'EBAY_DRAGON', 'ZOHO', 'MANUAL',
-        name='order_platform_enum'
-    )
-    order_platform_enum.drop(op.get_bind(), checkfirst=True)
+    # Drop enums using raw SQL
+    op.execute("DROP TYPE IF EXISTS order_item_status_enum")
+    op.execute("DROP TYPE IF EXISTS order_status_enum")
+    op.execute("DROP TYPE IF EXISTS order_platform_enum")
 
