@@ -42,6 +42,85 @@ _seatalk_token_cache: dict[str, any] = {
 
 
 # ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+async def _generate_unique_username(
+    email: Optional[str],
+    full_name: Optional[str],
+    seatalk_id: str,
+    repo: UserRepository,
+) -> str:
+    """
+    Generate a unique username for a new SeaTalk user.
+    
+    Tries multiple strategies in order:
+    1. Email prefix (e.g., "john.smith" from "john.smith@company.com")
+    2. First name + last initial (e.g., "john_s" from "John Smith")
+    3. Name initials (e.g., "js" from "John Smith") - if < 3 chars, add counter
+    4. SeaTalk ID prefix (e.g., "seatalk_e_x3bt5dvz")
+    
+    Ensures result matches pattern: ^[a-zA-Z0-9_.]+$ and is 3-50 chars.
+    Adds numeric suffix if base username already exists.
+    """
+    import re
+    
+    candidates = []
+    
+    # Strategy 1: Email prefix (already alphanumeric with dots)
+    if email and "@" in email:
+        email_prefix = email.split("@")[0]
+        # Validate it matches pattern and is 3+ chars
+        if re.match(r"^[a-zA-Z0-9_.]{3,50}$", email_prefix):
+            candidates.append(email_prefix)
+    
+    # Strategy 2: First name + last initial
+    if full_name:
+        parts = full_name.strip().split()
+        if len(parts) >= 2:
+            first = parts[0].lower()
+            last_initial = parts[-1][0].lower() if parts[-1] else ""
+            candidate = f"{first}_{last_initial}"
+            if re.match(r"^[a-zA-Z][a-zA-Z0-9_]*$", candidate):
+                candidates.append(candidate)
+        elif len(parts) == 1:
+            # Single name - use as is if valid
+            simple = parts[0].lower()
+            if re.match(r"^[a-zA-Z][a-zA-Z0-9_.]*$", simple) and len(simple) >= 3:
+                candidates.append(simple)
+    
+    # Strategy 3: SeaTalk ID (shortened)
+    if seatalk_id:
+        seatalk_short = f"seatalk_{seatalk_id[:8]}"  # First 8 chars of ID
+        if len(seatalk_short) >= 3:
+            candidates.append(seatalk_short)
+    
+    # Try to find an available username from candidates
+    for base_username in candidates:
+        if not await repo.username_exists(base_username):
+            return base_username
+        
+        # If base exists, try with numeric suffixes
+        for counter in range(1, 100):
+            candidate = f"{base_username}_{counter}"
+            if not await repo.username_exists(candidate):
+                return candidate
+    
+    # Fallback: use sequential counter with seatalk ID
+    logger.warning(
+        f"Could not generate username from email/name, using seatalk ID: {seatalk_id}"
+    )
+    fallback_base = f"seatalk_{seatalk_id[:6]}"
+    for counter in range(1, 1000):
+        username = f"{fallback_base}_{counter}"
+        if not await repo.username_exists(username):
+            return username
+    
+    # Should never reach here
+    raise RuntimeError(f"Could not generate unique username for SeaTalk user {seatalk_id}")
+
+
+# ============================================================================
 # AUTHENTICATION ENDPOINTS
 # ============================================================================
 
@@ -261,18 +340,13 @@ async def seatalk_callback(
         # Generate a random placeholder password (user authenticates via SeaTalk)
         random_password = secrets.token_urlsafe(32)
         
-        # Create username from email or employee code
-        username = (
-            employee.email.split("@")[0] if employee.email 
-            else f"seatalk_{employee.employee_code}"
+        # Generate a refined username using multiple strategies
+        username = await _generate_unique_username(
+            email=employee.email,
+            full_name=employee.name,
+            seatalk_id=employee.employee_code,
+            repo=repo,
         )
-        
-        # Ensure username is unique
-        base_username = username
-        counter = 1
-        while await repo.username_exists(username):
-            username = f"{base_username}_{counter}"
-            counter += 1
         
         logger.info(f"Creating user with username: {username}")
         user = User(
@@ -287,7 +361,7 @@ async def seatalk_callback(
         db.add(user)
         await db.flush()
         await db.refresh(user)
-        logger.info(f"New user created with ID: {user.id}")
+        logger.info(f"New user created with ID: {user.id} and username: {username}")
     
     # Check if user is active
     if not user.is_active:

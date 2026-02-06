@@ -28,8 +28,8 @@ INSERT INTO users (
     updated_at
 ) VALUES (
     'sysad',                          -- username
-    'it@usavshop.com',              -- email (optional, can be NULL)
-    '$2b$12$rc9ZyEQTTBdG7Igb74aqmubS4ZP3F8iMWTfDKZSxbbUZ3H8a9jGBW',                     -- hashed_password (bcrypt hash - REPLACE THIS!)
+    'lebach.kara@gmail.com',              -- email (optional, can be NULL)
+    '$2b$12$RNwVwlnRfvYPW.O4T8lVZ.BlSC29WRJBGl0PSYZ5nmgZOlVY2MR2K',                     -- hashed_password (bcrypt hash - REPLACE THIS!)
     'System Administrator',                  -- full_name (optional, can be NULL)
     'ADMIN',                          -- role (must be ADMIN, WAREHOUSE_OP, SALES_REP, or SYSTEM_BOT)
     true,                             -- is_active

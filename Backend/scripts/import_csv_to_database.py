@@ -62,8 +62,8 @@ from typing import Any
 import httpx
 
 # Default configuration
-DEFAULT_API_URL = "http://localhost:8000/api/v1"
-DEFAULT_CSV_PATH = "../misc/product_attributes_extracted_merged.csv"
+DEFAULT_API_URL = "http://localhost:8080/api/v1"
+DEFAULT_CSV_PATH = "/app/product_attributes_extracted_merged.csv"
 DEFAULT_USERNAME = "sysad"
 DEFAULT_PASSWORD = "bach9999"
 
