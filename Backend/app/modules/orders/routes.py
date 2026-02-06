@@ -3,6 +3,7 @@ Order API Routes.
 
 Handles all order-related HTTP endpoints.
 """
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -372,3 +373,71 @@ async def bulk_allocate_inventory(
     
     return results
 
+
+# ============================================================================
+# ORDER SYNC ENDPOINTS
+# ============================================================================
+
+@router.post("/sync/{platform}")
+async def sync_orders_from_platform(
+    platform: OrderPlatform,
+    order_date: Annotated[date, Query(description="Date to fetch orders from (YYYY-MM-DD)")] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Sync orders from an external platform for a specific date.
+    
+    Supported platforms:
+    - EBAY_MEKONG
+    - EBAY_USAV
+    - EBAY_DRAGON
+    - ECWID
+    
+    Args:
+        platform: The platform to sync from
+        order_date: Date to fetch orders (defaults to today)
+    
+    Returns:
+        Sync result with counts of new, existing, and errored orders
+    """
+    # Validate platform
+    supported_platforms = [
+        OrderPlatform.EBAY_MEKONG,
+        OrderPlatform.EBAY_USAV,
+        OrderPlatform.EBAY_DRAGON,
+        OrderPlatform.ECWID,
+    ]
+    
+    if platform not in supported_platforms:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Platform {platform.value} not supported for sync. "
+                   f"Supported: {[p.value for p in supported_platforms]}"
+        )
+    
+    # Default to today if no date provided
+    if order_date is None:
+        from datetime import date as date_module
+        order_date = date_module.today()
+    
+    # Sync orders
+    service = OrderService(db)
+    
+    try:
+        result = await service.sync_orders_from_platform(platform, order_date)
+        return {
+            "success": True,
+            "platform": platform.value,
+            "date": order_date.isoformat(),
+            **result,
+        }
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error syncing orders: {str(e)}"
+        )

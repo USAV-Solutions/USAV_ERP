@@ -48,6 +48,8 @@ services:
       - ZOHO_CLIENT_SECRET=${ZOHO_CLIENT_SECRET:-}
       - ZOHO_REFRESH_TOKEN=${ZOHO_REFRESH_TOKEN:-}
       - ZOHO_ORGANIZATION_ID=${ZOHO_ORGANIZATION_ID:-}
+      - ECWID_STORE_ID=${ECWID_STORE_ID:-}
+      - ECWID_SECRET=${ECWID_SECRET:-}
     ports:
       - "8080:8080"
     depends_on:
@@ -85,6 +87,8 @@ services:
       - DB_NAME=${DB_NAME:-inventory_system}
       - SEATALK_APP_ID=${SEATALK_APP_ID:-}
       - SEATALK_APP_SECRET=${SEATALK_APP_SECRET:-}
+      - ECWID_STORE_ID=${ECWID_STORE_ID:-}
+      - ECWID_SECRET=${ECWID_SECRET:-}
     ports:
       - "8080:8080"
     depends_on:

@@ -46,3 +46,18 @@ export const LISTINGS = {
   MARK_SYNCED: (id: number) => `/listings/${id}/mark-synced`,
   MARK_ERROR: (id: number) => `/listings/${id}/mark-error`,
 }
+
+// Order endpoints
+export const ORDERS = {
+  LIST: '/orders',
+  ORDER: (id: number) => `/orders/${id}`,
+  SUMMARY: '/orders/summary',
+  SYNC: (platform: string) => `/orders/sync/${platform}`,
+  UNMATCHED_ITEMS: '/orders/items/unmatched',
+  MATCH_ITEM: (itemId: number) => `/orders/items/${itemId}/match`,
+  ALLOCATE_ITEM: (itemId: number) => `/orders/items/${itemId}/allocate`,
+  PROCESS: (orderId: number) => `/orders/${orderId}/process`,
+  READY_TO_SHIP: (orderId: number) => `/orders/${orderId}/ready-to-ship`,
+  SHIP: (orderId: number) => `/orders/${orderId}/ship`,
+  CANCEL: (orderId: number) => `/orders/${orderId}/cancel`,
+}

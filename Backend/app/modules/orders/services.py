@@ -3,7 +3,7 @@ Order Services.
 
 Business logic for order processing, SKU matching, and inventory allocation.
 """
-from datetime import datetime
+from datetime import datetime, date
 from decimal import Decimal
 from typing import Optional, List
 
@@ -13,6 +13,12 @@ from sqlalchemy.orm import selectinload
 
 from app.modules.orders.models import Order, OrderItem, OrderPlatform, OrderStatus, OrderItemStatus
 from app.models.entities import PlatformListing, ProductVariant, InventoryItem, InventoryStatus, Platform
+from app.integrations.base import ExternalOrder
+from app.core.config import settings
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class OrderService:
@@ -168,6 +174,7 @@ class OrderService:
             OrderPlatform.EBAY_MEKONG: Platform.EBAY_MEKONG,
             OrderPlatform.EBAY_USAV: Platform.EBAY_USAV,
             OrderPlatform.EBAY_DRAGON: Platform.EBAY_DRAGON,
+            OrderPlatform.ECWID: Platform.ECWID,
         }
         
         # Get parent order for platform info
@@ -313,6 +320,159 @@ class OrderService:
         
         await self.db.flush()
         return order
+    
+    async def sync_orders_from_platform(
+        self,
+        platform: OrderPlatform,
+        order_date: date
+    ) -> dict:
+        """
+        Sync orders from an external platform for a specific date.
+        
+        Args:
+            platform: The platform to sync from (EBAY_MEKONG, EBAY_USAV, EBAY_DRAGON, ECWID)
+            order_date: The date to fetch orders from
+            
+        Returns:
+            Dictionary with sync results (total, new, existing, errors)
+        """
+        logger.info(f"Starting order sync from {platform.value} for date {order_date}")
+        
+        # Import clients here to avoid circular imports
+        from app.integrations.ebay.client import EbayClient
+        from app.integrations.ecwid.client import EcwidClient
+        
+        # Initialize the appropriate client based on platform
+        client = None
+        
+        if platform == OrderPlatform.EBAY_MEKONG:
+            client = EbayClient(
+                store_name="MEKONG",
+                app_id=settings.ebay_app_id,
+                cert_id=settings.ebay_cert_id,
+                refresh_token=settings.ebay_refresh_token_mekong,
+                sandbox=settings.ebay_sandbox,
+            )
+        elif platform == OrderPlatform.EBAY_USAV:
+            client = EbayClient(
+                store_name="USAV",
+                app_id=settings.ebay_app_id,
+                cert_id=settings.ebay_cert_id,
+                refresh_token=settings.ebay_refresh_token_usav,
+                sandbox=settings.ebay_sandbox,
+            )
+        elif platform == OrderPlatform.EBAY_DRAGON:
+            client = EbayClient(
+                store_name="DRAGON",
+                app_id=settings.ebay_app_id,
+                cert_id=settings.ebay_cert_id,
+                refresh_token=settings.ebay_refresh_token_dragon,
+                sandbox=settings.ebay_sandbox,
+            )
+        elif platform == OrderPlatform.ECWID:
+            client = EcwidClient(
+                store_id=settings.ecwid_store_id,
+                access_token=settings.ecwid_secret,
+                api_base_url=settings.ecwid_api_base_url,
+            )
+        else:
+            raise ValueError(f"Platform {platform} not supported for sync")
+        
+        if not client.is_configured:
+            raise ValueError(f"Platform {platform} is not properly configured")
+        
+        # Fetch orders from the platform
+        try:
+            external_orders: List[ExternalOrder] = await client.fetch_daily_orders(order_date)
+            logger.info(f"Fetched {len(external_orders)} orders from {platform.value}")
+        except Exception as e:
+            logger.error(f"Error fetching orders from {platform.value}: {e}", exc_info=True)
+            return {
+                "total_fetched": 0,
+                "new_orders": 0,
+                "existing_orders": 0,
+                "errors": 1,
+                "error_message": str(e)
+            }
+        
+        # Process each order
+        new_count = 0
+        existing_count = 0
+        error_count = 0
+        
+        for ext_order in external_orders:
+            try:
+                # Check if order already exists
+                existing = await self.get_order_by_external_id(
+                    platform=platform,
+                    external_order_id=ext_order.platform_order_id
+                )
+                
+                if existing:
+                    logger.debug(f"Order {ext_order.platform_order_id} already exists, skipping")
+                    existing_count += 1
+                    continue
+                
+                # Create order data
+                order_data = {
+                    "platform": platform,
+                    "external_order_id": ext_order.platform_order_id,
+                    "external_order_number": ext_order.platform_order_number,
+                    "customer_name": ext_order.customer_name,
+                    "customer_email": ext_order.customer_email,
+                    "ship_address_line1": ext_order.ship_address_line1,
+                    "ship_address_line2": ext_order.ship_address_line2,
+                    "ship_city": ext_order.ship_city,
+                    "ship_state": ext_order.ship_state,
+                    "ship_postal_code": ext_order.ship_postal_code,
+                    "ship_country": ext_order.ship_country,
+                    "subtotal_amount": ext_order.subtotal,
+                    "tax_amount": ext_order.tax,
+                    "shipping_amount": ext_order.shipping,
+                    "total_amount": ext_order.total,
+                    "currency": ext_order.currency,
+                    "ordered_at": ext_order.ordered_at,
+                    "order_metadata": ext_order.raw_data,
+                }
+                
+                # Prepare items data
+                items_data = []
+                for ext_item in ext_order.items:
+                    item_data = {
+                        "item_name": ext_item.title,
+                        "quantity": ext_item.quantity,
+                        "unit_price": ext_item.unit_price,
+                        "external_item_id": ext_item.platform_item_id,
+                        "external_sku": ext_item.platform_sku,
+                        "external_asin": ext_item.asin,
+                        "item_metadata": ext_item.raw_data,
+                    }
+                    items_data.append(item_data)
+                
+                # Process the order (create + auto-match)
+                await self.process_incoming_order(order_data, items_data)
+                new_count += 1
+                logger.info(f"Created order {ext_order.platform_order_id} from {platform.value}")
+                
+            except Exception as e:
+                logger.error(
+                    f"Error processing order {ext_order.platform_order_id}: {e}",
+                    exc_info=True
+                )
+                error_count += 1
+        
+        # Commit all changes
+        await self.db.commit()
+        
+        result = {
+            "total_fetched": len(external_orders),
+            "new_orders": new_count,
+            "existing_orders": existing_count,
+            "errors": error_count,
+        }
+        
+        logger.info(f"Order sync completed: {result}")
+        return result
     
     async def get_order_summary(self) -> dict:
         """Get summary statistics for orders."""

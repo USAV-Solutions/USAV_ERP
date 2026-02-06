@@ -3,9 +3,10 @@ eBay Trading API Client.
 
 Implements the BasePlatformClient interface for eBay stores.
 """
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from typing import List, Optional
 import logging
+import httpx
 
 from app.integrations.base import (
     BasePlatformClient,
@@ -22,13 +23,11 @@ class EbayClient(BasePlatformClient):
     """
     eBay API client for order management and inventory sync.
     
-    Supports multiple eBay stores (MEKONG, USAV, DRAGON) via different credentials.
+    Supports multiple eBay stores (MEKONG, USAV, DRAGON) via different OAuth refresh tokens.
     
-    Note: This is a skeleton implementation. Full implementation requires:
-    - eBay Developer credentials (app_id, cert_id, dev_id)
-    - User OAuth token
-    
-    Consider using the eBay Fulfillment API for orders and Inventory API for stock.
+    Uses eBay OAuth 2.0 with refresh tokens to obtain access tokens.
+    - Fulfillment API for orders
+    - Inventory API for stock updates
     """
     
     def __init__(
@@ -36,43 +35,137 @@ class EbayClient(BasePlatformClient):
         store_name: str = "USAV",
         app_id: str = None,
         cert_id: str = None,
-        dev_id: str = None,
-        user_token: str = None,
+        refresh_token: str = None,
         sandbox: bool = False,
         **kwargs
     ):
         self.store_name = store_name
         self.app_id = app_id
         self.cert_id = cert_id
-        self.dev_id = dev_id
-        self.user_token = user_token
+        self.refresh_token = refresh_token
         self.sandbox = sandbox
         
-        # API base URL
+        # OAuth access token (will be refreshed as needed)
+        self._access_token: Optional[str] = None
+        self._token_expires_at: Optional[datetime] = None
+        
+        # API base URLs
         self.base_url = (
             "https://api.sandbox.ebay.com" if sandbox
             else "https://api.ebay.com"
+        )
+        self.oauth_url = (
+            "https://api.sandbox.ebay.com/identity/v1/oauth2/token" if sandbox
+            else "https://api.ebay.com/identity/v1/oauth2/token"
         )
     
     @property
     def platform_name(self) -> str:
         return f"EBAY_{self.store_name.upper()}"
     
+    @property
+    def is_configured(self) -> bool:
+        """Check if credentials are configured."""
+        return all([self.app_id, self.cert_id, self.refresh_token])
+    
+    async def _refresh_access_token(self) -> bool:
+        """
+        Refresh the OAuth access token using the refresh token.
+        
+        Returns:
+            True if token was refreshed successfully
+        """
+        if not self.is_configured:
+            logger.error(f"eBay {self.store_name} credentials not configured")
+            return False
+        
+        try:
+            import base64
+            
+            # Create Basic Auth credentials
+            credentials = f"{self.app_id}:{self.cert_id}"
+            encoded_credentials = base64.b64encode(credentials.encode()).decode()
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                headers = {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Authorization": f"Basic {encoded_credentials}",
+                }
+                
+                data = {
+                    "grant_type": "refresh_token",
+                    "refresh_token": self.refresh_token,
+                    "scope": "https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/sell.fulfillment https://api.ebay.com/oauth/api_scope/sell.inventory"
+                }
+                
+                response = await client.post(self.oauth_url, headers=headers, data=data)
+                response.raise_for_status()
+                
+                token_data = response.json()
+                self._access_token = token_data.get("access_token")
+                expires_in = token_data.get("expires_in", 7200)  # Default 2 hours
+                
+                # Set expiration time (refresh 5 minutes before actual expiry)
+                self._token_expires_at = datetime.now() + timedelta(seconds=expires_in - 300)
+                
+                logger.info(f"eBay {self.store_name} access token refreshed successfully")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error refreshing eBay {self.store_name} token: {e}", exc_info=True)
+            return False
+    
+    async def _get_access_token(self) -> Optional[str]:
+        """
+        Get a valid access token, refreshing if necessary.
+        
+        Returns:
+            Valid access token or None if unable to obtain
+        """
+        # Check if token needs refresh
+        if not self._access_token or not self._token_expires_at or datetime.now() >= self._token_expires_at:
+            if not await self._refresh_access_token():
+                return None
+        
+        return self._access_token
+    
     async def authenticate(self) -> bool:
         """
-        Authenticate with eBay API.
+        Authenticate with eBay API by obtaining an access token.
         
-        Full implementation would:
-        1. Validate credentials
-        2. Get/refresh OAuth token if needed
+        Returns:
+            True if authentication successful
         """
-        if not all([self.app_id, self.cert_id, self.user_token]):
+        if not self.is_configured:
             logger.warning(f"eBay {self.store_name} credentials not configured")
             return False
         
-        # TODO: Implement actual OAuth flow
-        logger.info(f"eBay {self.store_name} authentication placeholder")
-        return True
+        token = await self._get_access_token()
+        return token is not None
+    
+    async def fetch_daily_orders(self, order_date: date) -> List[ExternalOrder]:
+        """
+        Fetch all orders from a specific date.
+        
+        Args:
+            order_date: The date to fetch orders from
+            
+        Returns:
+            List of ExternalOrder objects for the specified date
+        """
+        if not self.is_configured:
+            logger.error(f"eBay {self.store_name} not configured, skipping fetch")
+            return []
+        
+        # Set time range for the entire day
+        start_time = datetime.combine(order_date, datetime.min.time())
+        end_time = start_time + timedelta(days=1)
+        
+        logger.info(
+            f"Fetching eBay {self.store_name} orders from {start_time} to {end_time}"
+        )
+        
+        return await self.fetch_orders(since=start_time, until=end_time)
     
     async def fetch_orders(
         self,
@@ -84,13 +177,106 @@ class EbayClient(BasePlatformClient):
         Fetch orders from eBay using Fulfillment API.
         
         Endpoint: GET /sell/fulfillment/v1/order
+        
+        Args:
+            since: Start datetime for order filter
+            until: End datetime for order filter
+            status: Order status filter (NOT_STARTED, IN_PROGRESS, FULFILLED, etc.)
+        
+        Returns:
+            List of ExternalOrder objects
         """
-        logger.info(f"Fetching eBay {self.store_name} orders since={since}")
+        logger.info(f"Fetching eBay {self.store_name} orders since={since}, until={until}")
         
-        # TODO: Implement actual API call
-        # filters example: "creationdate:[{since}..{until}]"
+        if not self.is_configured:
+            logger.error(f"eBay {self.store_name} credentials not configured")
+            return []
         
-        return []
+        # Get valid access token
+        access_token = await self._get_access_token()
+        if not access_token:
+            logger.error(f"eBay {self.store_name} unable to obtain access token")
+            return []
+        
+        try:
+            # Build filter string for eBay API
+            filters = []
+            if since:
+                since_str = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                if until:
+                    until_str = until.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                    filters.append(f"creationdate:[{since_str}..{until_str}]")
+                else:
+                    filters.append(f"creationdate:[{since_str}..]")
+            
+            if status:
+                filters.append(f"orderfulfillmentstatus:{{{status}}}")
+            
+            filter_param = ",".join(filters) if filters else None
+            
+            # Make API request
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                headers = {
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                }
+                
+                params = {}
+                if filter_param:
+                    params["filter"] = filter_param
+                params["limit"] = 200  # eBay max is 200 per page
+                
+                orders = []
+                offset = 0
+                
+                while True:
+                    params["offset"] = offset
+                    
+                    url = f"{self.base_url}/sell/fulfillment/v1/order"
+                    logger.debug(f"Fetching orders from {url} with params: {params}")
+                    
+                    response = await client.get(url, headers=headers, params=params)
+                    response.raise_for_status()
+                    
+                    data = response.json()
+                    page_orders = data.get("orders", [])
+                    
+                    if not page_orders:
+                        break
+                    
+                    # Convert each order
+                    for order_data in page_orders:
+                        try:
+                            order = self._convert_order(order_data)
+                            orders.append(order)
+                        except Exception as e:
+                            logger.error(
+                                f"Error converting eBay order {order_data.get('orderId')}: {e}",
+                                exc_info=True
+                            )
+                    
+                    # Check if there are more pages
+                    total = data.get("total", 0)
+                    offset += len(page_orders)
+                    
+                    if offset >= total:
+                        break
+                
+                logger.info(f"Fetched {len(orders)} orders from eBay {self.store_name}")
+                return orders
+                
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"HTTP error fetching eBay {self.store_name} orders: {e.response.status_code} - {e.response.text}"
+            )
+            return []
+        except Exception as e:
+            logger.error(
+                f"Error fetching eBay {self.store_name} orders: {e}",
+                exc_info=True
+            )
+            return []
     
     async def get_order(self, order_id: str) -> Optional[ExternalOrder]:
         """

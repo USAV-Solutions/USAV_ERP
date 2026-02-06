@@ -61,18 +61,26 @@ class Settings(BaseSettings):
     amazon_client_secret: str = ""
     amazon_marketplace_id: str = "ATVPDKIKX0DER"  # US marketplace
     
-    # eBay Integration (multiple stores)
-    ebay_mekong_app_id: str = ""
-    ebay_mekong_cert_id: str = ""
-    ebay_mekong_user_token: str = ""
+    # eBay Integration (shared credentials for all stores)
+    ebay_app_id: str = ""
+    ebay_cert_id: str = ""
+    ebay_ru_name: str = ""
+    ebay_sandbox: bool = False
     
-    ebay_usav_app_id: str = ""
-    ebay_usav_cert_id: str = ""
-    ebay_usav_user_token: str = ""
+    # eBay OAuth Refresh Tokens (per store)
+    ebay_refresh_token_mekong: str = ""
+    ebay_refresh_token_usav: str = ""
+    ebay_refresh_token_dragon: str = ""
     
-    ebay_dragon_app_id: str = ""
-    ebay_dragon_cert_id: str = ""
-    ebay_dragon_user_token: str = ""
+    # Ecwid Integration
+    ecwid_store_id: str = ""
+    ecwid_secret: str = ""
+    ecwid_api_base_url: str = "https://app.ecwid.com/api/v3"
+    
+    # Walmart Integration
+    walmart_client_id: str = ""
+    walmart_client_secret: str = ""
+    walmart_api_base_url: str = "https://marketplace.walmartapis.com"
     
     @computed_field
     @property
