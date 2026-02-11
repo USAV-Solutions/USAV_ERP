@@ -20,7 +20,6 @@ import {
 import {
   Menu as MenuIcon,
   Dashboard,
-  QrCodeScanner,
   Search,
   Inventory,
   Logout,
@@ -42,8 +41,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { title: 'Dashboard', path: '/', icon: <Dashboard />, roles: ['ADMIN', 'WAREHOUSE_OP', 'SALES_REP'] },
-  { title: 'Scan Tool', path: '/warehouse/ops', icon: <QrCodeScanner />, roles: ['ADMIN', 'WAREHOUSE_OP'] },
-  { title: 'Stock Lookup', path: '/warehouse/lookup', icon: <Search />, roles: ['ADMIN', 'WAREHOUSE_OP'] },
+  { title: 'Warehouse Operations', path: '/warehouse/ops', icon: <Search />, roles: ['ADMIN', 'WAREHOUSE_OP'] },
   { title: 'Inventory Management', path: '/catalog/inventory', icon: <Inventory />, roles: ['ADMIN', 'SALES_REP'] },
   { title: 'Product Listings', path: '/catalog/listings', icon: <Storefront />, roles: ['ADMIN', 'SALES_REP'] },
   { title: 'Orders', path: '/orders', icon: <ShoppingCart />, roles: ['ADMIN', 'SALES_REP', 'WAREHOUSE_OP'] },

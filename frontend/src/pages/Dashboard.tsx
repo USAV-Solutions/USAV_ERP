@@ -1,6 +1,5 @@
 import { Box, Grid, Card, CardContent, Typography, Paper, Chip, Divider } from '@mui/material'
 import {
-  QrCodeScanner,
   Search,
   Inventory,
   Storefront,
@@ -21,19 +20,11 @@ interface QuickAction {
 
 const quickActions: QuickAction[] = [
   {
-    title: 'Scan Tool',
-    description: 'Receive, move, or audit inventory items',
+    title: 'Warehouse Operations',
+    description: 'Search stock, create new stock items',
     path: '/warehouse/ops',
-    icon: <QrCodeScanner sx={{ fontSize: 40 }} />,
-    color: '#1976d2',
-    roles: ['ADMIN', 'WAREHOUSE_OP'],
-  },
-  {
-    title: 'Stock Lookup',
-    description: 'Search inventory by SKU or serial number',
-    path: '/warehouse/lookup',
     icon: <Search sx={{ fontSize: 40 }} />,
-    color: '#2e7d32',
+    color: '#1976d2',
     roles: ['ADMIN', 'WAREHOUSE_OP'],
   },
   {
