@@ -7,6 +7,11 @@ from app.repositories.inventory import (
     InventoryItemRepository,
     PlatformListingRepository,
 )
+from app.repositories.orders import (
+    OrderItemRepository,
+    OrderRepository,
+    SyncRepository,
+)
 from app.repositories.product import (
     ProductFamilyRepository,
     ProductIdentityRepository,
@@ -19,6 +24,9 @@ __all__ = [
     "BundleComponentRepository",
     "InventoryItemRepository",
     "PlatformListingRepository",
+    "OrderRepository",
+    "OrderItemRepository",
+    "SyncRepository",
     "ProductFamilyRepository",
     "ProductIdentityRepository",
     "ProductVariantRepository",

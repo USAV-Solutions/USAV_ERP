@@ -37,7 +37,7 @@ import CreateProductDialog from '../components/inventory/CreateProductDialog'
 type ViewMode = 'list' | 'grouped'
 
 interface ExpandedRowProps {
-  parentUpisH: string
+  familyName: string
   variants: EnhancedVariant[]
 }
 
@@ -46,11 +46,10 @@ interface EnhancedVariant extends Variant {
 }
 
 interface GroupedItem {
-  parent_upis_h: string
+  product_id: number
   name: string
-  type: ProductType
   brand?: string
-  alias_count: number
+  variant_count: number
   variants: EnhancedVariant[]
 }
 
@@ -86,18 +85,20 @@ const getSyncStatusChip = (status: string) => {
   return <Chip size="small" color={config.color} label={config.label} />
 }
 
-function ExpandedRow({ parentUpisH, variants }: ExpandedRowProps) {
+function ExpandedRow({ familyName, variants }: ExpandedRowProps) {
   return (
     <TableRow>
       <TableCell colSpan={7} sx={{ py: 0, bgcolor: 'grey.50' }}>
         <Box sx={{ py: 2, px: 4 }}>
           <Typography variant="subtitle2" sx={{ mb: 1 }}>
-            Variants for {parentUpisH}
+            Variants for {familyName}
           </Typography>
           <Table size="small">
             <TableHead>
               <TableRow>
                 <TableCell>Full SKU</TableCell>
+                <TableCell>Type</TableCell>
+                <TableCell>UPIS-H</TableCell>
                 <TableCell>Color</TableCell>
                 <TableCell>Condition</TableCell>
                 <TableCell>Zoho Status</TableCell>
@@ -108,6 +109,18 @@ function ExpandedRow({ parentUpisH, variants }: ExpandedRowProps) {
               {variants.map((variant) => (
                 <TableRow key={variant.id}>
                   <TableCell>{variant.full_sku}</TableCell>
+                  <TableCell>
+                    <Chip
+                      size="small"
+                      label={getTypeLabel(variant.identity?.type || 'Product')}
+                      color={getTypeColor(variant.identity?.type || 'Product')}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Typography variant="body2" fontFamily="monospace">
+                      {variant.identity?.generated_upis_h || '-'}
+                    </Typography>
+                  </TableCell>
                   <TableCell>{variant.color_code || '-'}</TableCell>
                   <TableCell>{variant.condition_code || 'Used'}</TableCell>
                   <TableCell>{getSyncStatusChip(variant.zoho_sync_status)}</TableCell>
@@ -132,7 +145,7 @@ export default function InventoryManagement() {
   const [viewMode, setViewMode] = useState<ViewMode>('list')
   const [searchQuery, setSearchQuery] = useState('')
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
+  const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(25)
   const { hasRole } = useAuth()
@@ -212,39 +225,40 @@ export default function InventoryManagement() {
     })
   }, [enhancedVariants, searchQuery])
 
-  // Group variants by parent UPIS-H
+  // Group variants by Product Family
   const groupedData: GroupedItem[] = useMemo(() => {
-    const groups = new Map<string, GroupedItem>()
+    const groups = new Map<number, GroupedItem>()
     
     filteredVariants.forEach((variant) => {
-      const upisH = variant.identity?.generated_upis_h || 'Unknown'
+      const productId = variant.identity?.family?.product_id ?? -1
       
-      if (!groups.has(upisH)) {
-        groups.set(upisH, {
-          parent_upis_h: upisH,
+      if (!groups.has(productId)) {
+        groups.set(productId, {
+          product_id: productId,
           name: variant.identity?.family?.base_name || 'Unknown',
-          type: variant.identity?.type || 'Product',
           brand: variant.identity?.family?.brand?.name,
-          alias_count: 0,
+          variant_count: 0,
           variants: [],
         })
       }
       
-      const group = groups.get(upisH)!
+      const group = groups.get(productId)!
       group.variants.push(variant)
-      group.alias_count = group.variants.length
+      group.variant_count = group.variants.length
     })
     
-    return Array.from(groups.values())
+    return Array.from(groups.values()).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    )
   }, [filteredVariants])
 
-  const handleToggleExpand = (upisH: string) => {
+  const handleToggleExpand = (productId: number) => {
     setExpandedRows((prev) => {
       const next = new Set(prev)
-      if (next.has(upisH)) {
-        next.delete(upisH)
+      if (next.has(productId)) {
+        next.delete(productId)
       } else {
-        next.add(upisH)
+        next.add(productId)
       }
       return next
     })
@@ -316,7 +330,7 @@ export default function InventoryManagement() {
               </Tooltip>
             </ToggleButton>
             <ToggleButton value="grouped">
-              <Tooltip title="Group by Parent Product">
+              <Tooltip title="Group by Product Family">
                 <ViewModule />
               </Tooltip>
             </ToggleButton>
@@ -384,14 +398,12 @@ export default function InventoryManagement() {
               </TableBody>
             </Table>
           ) : (
-            // Grouped View - Shows grouped by parent UPIS-H
+            // Grouped View - Shows grouped by Product Family
             <Table>
               <TableHead>
                 <TableRow>
                   <TableCell width={50} />
-                  <TableCell>Parent UPIS-H</TableCell>
-                  <TableCell>Name</TableCell>
-                  <TableCell>Type</TableCell>
+                  <TableCell>Product Family</TableCell>
                   <TableCell>Brand</TableCell>
                   <TableCell>Variants</TableCell>
                 </TableRow>
@@ -399,13 +411,13 @@ export default function InventoryManagement() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={6} align="center">
+                    <TableCell colSpan={4} align="center">
                       Loading...
                     </TableCell>
                   </TableRow>
                 ) : paginatedGroupedData.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} align="center">
+                    <TableCell colSpan={4} align="center">
                       No items found
                     </TableCell>
                   </TableRow>
@@ -413,14 +425,14 @@ export default function InventoryManagement() {
                   paginatedGroupedData.map((group) => (
                     <>
                       <TableRow
-                        key={group.parent_upis_h}
+                        key={group.product_id}
                         hover
                         sx={{ cursor: 'pointer' }}
-                        onClick={() => handleToggleExpand(group.parent_upis_h)}
+                        onClick={() => handleToggleExpand(group.product_id)}
                       >
                         <TableCell>
                           <IconButton size="small">
-                            {expandedRows.has(group.parent_upis_h) ? (
+                            {expandedRows.has(group.product_id) ? (
                               <ExpandLess />
                             ) : (
                               <ExpandMore />
@@ -428,26 +440,18 @@ export default function InventoryManagement() {
                           </IconButton>
                         </TableCell>
                         <TableCell>
-                          <Typography variant="body2" fontFamily="monospace">
-                            {group.parent_upis_h}
+                          <Typography variant="body2" fontWeight={500}>
+                            {group.name}
                           </Typography>
-                        </TableCell>
-                        <TableCell>{group.name}</TableCell>
-                        <TableCell>
-                          <Chip
-                            size="small"
-                            label={getTypeLabel(group.type)}
-                            color={getTypeColor(group.type)}
-                          />
                         </TableCell>
                         <TableCell>{group.brand || '-'}</TableCell>
                         <TableCell>
-                          <Chip size="small" label={`${group.alias_count} variant(s)`} />
+                          <Chip size="small" label={`${group.variant_count} variant(s)`} />
                         </TableCell>
                       </TableRow>
-                      {expandedRows.has(group.parent_upis_h) && (
+                      {expandedRows.has(group.product_id) && (
                         <ExpandedRow
-                          parentUpisH={group.parent_upis_h}
+                          familyName={group.name}
                           variants={group.variants}
                         />
                       )}

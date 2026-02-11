@@ -1,13 +1,9 @@
 """
 Orders Module.
 
-This module handles all order-related operations:
-- Order ingestion from external platforms (Amazon, eBay)
-- Order-to-SKU matching
-- Order status tracking
-- Inventory allocation
+This module handles order synchronization and SKU resolution:
+- Order ingestion from external platforms (Amazon, eBay, Ecwid)
+- Integration state tracking (sync heartbeat)
+- Auto-matching external items to internal product variants
+- Manual SKU resolution ("Match & Learn")
 """
-from app.modules.orders import models, schemas, routes, services
-
-__all__ = ["models", "schemas", "routes", "services"]
-

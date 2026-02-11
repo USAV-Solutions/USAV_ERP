@@ -8,6 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models import ZohoSyncStatus
+from sqlalchemy import select
+
+from app.models.entities import ProductFamily, ProductIdentity, ProductVariant
 from app.repositories import ProductIdentityRepository, ProductVariantRepository
 from app.modules.inventory.schemas import (
     PaginatedResponse,
@@ -18,6 +21,50 @@ from app.modules.inventory.schemas import (
 )
 
 router = APIRouter(prefix="/variants", tags=["Product Variants"])
+
+
+@router.get("/search", summary="Search variants by product name or SKU")
+async def search_variants(
+    q: Annotated[str, Query(min_length=1, description="Search term for product name or SKU")],
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Search product variants by product family name or full SKU.
+
+    Returns compact results suitable for autocomplete / typeahead UIs.
+    """
+    pattern = f"%{q}%"
+    stmt = (
+        select(
+            ProductVariant.id,
+            ProductVariant.full_sku,
+            ProductVariant.color_code,
+            ProductVariant.condition_code,
+            ProductFamily.base_name.label("product_name"),
+        )
+        .join(ProductIdentity, ProductVariant.identity_id == ProductIdentity.id)
+        .join(ProductFamily, ProductIdentity.product_id == ProductFamily.product_id)
+        .where(
+            (ProductFamily.base_name.ilike(pattern))
+            | (ProductVariant.full_sku.ilike(pattern))
+        )
+        .where(ProductVariant.is_active == True)
+        .order_by(ProductVariant.full_sku)
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).all()
+
+    return [
+        {
+            "id": row.id,
+            "full_sku": row.full_sku,
+            "product_name": row.product_name or "",
+            "color_code": row.color_code,
+            "condition_code": row.condition_code.value if row.condition_code else None,
+        }
+        for row in rows
+    ]
 
 
 @router.get("", response_model=PaginatedResponse)

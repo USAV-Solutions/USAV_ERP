@@ -1,4 +1,13 @@
-export type OrderPlatform = 
+/* ------------------------------------------------------------------ *
+ *  TypeScript interfaces for the Orders module.                       *
+ *  Mirrors Backend Pydantic schemas:                                  *
+ *    - modules/orders/schemas/orders.py                               *
+ *    - modules/orders/schemas/sync.py                                 *
+ * ------------------------------------------------------------------ */
+
+// ── Enums ────────────────────────────────────────────────────────────
+
+export type OrderPlatform =
   | 'AMAZON'
   | 'EBAY_MEKONG'
   | 'EBAY_USAV'
@@ -12,7 +21,10 @@ export type OrderStatus =
   | 'PROCESSING'
   | 'READY_TO_SHIP'
   | 'SHIPPED'
+  | 'DELIVERED'
   | 'CANCELLED'
+  | 'REFUNDED'
+  | 'ON_HOLD'
   | 'ERROR'
 
 export type OrderItemStatus =
@@ -22,73 +34,150 @@ export type OrderItemStatus =
   | 'SHIPPED'
   | 'CANCELLED'
 
-export interface OrderItem {
+export type IntegrationSyncStatus = 'IDLE' | 'SYNCING' | 'ERROR'
+
+// ── Order Item Schemas ───────────────────────────────────────────────
+
+export interface OrderItemBrief {
   id: number
-  order_id: number
+  external_item_id: string | null
+  external_sku: string | null
+  external_asin: string | null
   item_name: string
   quantity: number
   unit_price: string
   total_price: string
-  external_item_id?: string
-  external_sku?: string
-  external_asin?: string
-  variant_id?: number
-  allocated_inventory_id?: number
   status: OrderItemStatus
-  matching_notes?: string
-  item_metadata?: Record<string, any>
+  variant_id: number | null
+  variant_sku: string | null
+  matching_notes: string | null
+}
+
+export interface OrderItemDetail extends OrderItemBrief {
+  allocated_inventory_id: number | null
+  item_metadata: Record<string, unknown> | null
   created_at: string
   updated_at: string
 }
 
-export interface Order {
+export interface VariantSearchResult {
+  id: number
+  full_sku: string
+  product_name: string
+  color_code: string | null
+  condition_code: string | null
+}
+
+export interface OrderItemMatchRequest {
+  variant_id: number
+  learn?: boolean
+  notes?: string
+}
+
+export interface OrderItemConfirmRequest {
+  notes?: string
+}
+
+// ── Order Header Schemas ─────────────────────────────────────────────
+
+export interface OrderBrief {
   id: number
   platform: OrderPlatform
   external_order_id: string
-  external_order_number?: string
-  customer_name?: string
-  customer_email?: string
-  ship_address_line1?: string
-  ship_address_line2?: string
-  ship_city?: string
-  ship_state?: string
-  ship_postal_code?: string
-  ship_country?: string
+  external_order_number: string | null
+  status: OrderStatus
+  customer_name: string | null
+  total_amount: string
+  currency: string
+  ordered_at: string | null
+  created_at: string
+  item_count: number
+  unmatched_count: number
+}
+
+export interface OrderDetail {
+  id: number
+  platform: OrderPlatform
+  external_order_id: string
+  external_order_number: string | null
+  status: OrderStatus
+
+  customer_name: string | null
+  customer_email: string | null
+
+  shipping_address_line1: string | null
+  shipping_address_line2: string | null
+  shipping_city: string | null
+  shipping_state: string | null
+  shipping_postal_code: string | null
+  shipping_country: string | null
+
   subtotal_amount: string
   tax_amount: string
   shipping_amount: string
   total_amount: string
   currency: string
-  status: OrderStatus
-  ordered_at?: string
-  shipped_at?: string
-  tracking_number?: string
-  carrier?: string
-  processing_notes?: string
-  order_metadata?: Record<string, any>
+
+  ordered_at: string | null
+  shipped_at: string | null
+  tracking_number: string | null
+  carrier: string | null
+
+  processing_notes: string | null
+  error_message: string | null
+
+  items: OrderItemDetail[]
+
   created_at: string
   updated_at: string
-  items?: OrderItem[]
 }
 
-export interface OrderSummary {
-  total_orders: number
-  pending_orders: number
-  processing_orders: number
-  ready_to_ship_orders: number
-  shipped_orders: number
-  orders_with_errors: number
-  total_revenue: string
-  unmatched_items: number
+export interface OrderListResponse {
+  total: number
+  skip: number
+  limit: number
+  items: OrderBrief[]
 }
 
-export interface SyncResult {
-  success: boolean
+export interface OrderStatusUpdate {
+  status: OrderStatus
+  notes?: string
+}
+
+// ── Sync Schemas ─────────────────────────────────────────────────────
+
+export interface IntegrationStateResponse {
+  id: number
+  platform_name: string
+  last_successful_sync: string | null
+  current_status: IntegrationSyncStatus
+  last_error_message: string | null
+  updated_at: string
+}
+
+export interface SyncRequest {
+  platform?: string
+}
+
+export interface SyncRangeRequest {
+  platform?: string
+  since: string
+  until: string
+}
+
+export interface SyncResponse {
   platform: string
-  date: string
-  total_fetched: number
   new_orders: number
-  existing_orders: number
-  errors: number
-  error_message?: string
+  new_items: number
+  auto_matched: number
+  skipped_duplicates: number
+  errors: string[]
+  success: boolean
+}
+
+export interface SyncStatusResponse {
+  platforms: IntegrationStateResponse[]
+  total_orders: number
+  total_unmatched_items: number
+  total_matched_items: number
 }

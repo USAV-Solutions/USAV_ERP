@@ -33,6 +33,8 @@ except ImportError as e:
 
 try:
     from app.modules.orders.models import (
+        IntegrationState,
+        IntegrationSyncStatus,
         Order,
         OrderItem,
         OrderPlatform,
@@ -70,6 +72,8 @@ __all__ = [
     "InventoryItem",
     "User",
     # Order Models
+    "IntegrationState",
+    "IntegrationSyncStatus",
     "Order",
     "OrderItem",
     "OrderPlatform",

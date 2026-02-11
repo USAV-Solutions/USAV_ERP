@@ -1,6 +1,8 @@
 import axios from 'axios'
 
+// Point to backend on port 8080 (not frontend on 3636)
 const API_BASE_URL = '/api/v1'
+
 
 const axiosClient = axios.create({
   baseURL: API_BASE_URL,

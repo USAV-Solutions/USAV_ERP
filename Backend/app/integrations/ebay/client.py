@@ -186,13 +186,14 @@ class EbayClient(BasePlatformClient):
         Returns:
             List of ExternalOrder objects
         """
-        logger.info(f"Fetching eBay {self.store_name} orders since={since}, until={until}")
+        logger.info(f"eBay {self.store_name} fetch_orders called: since={since}, until={until}, status={status}")
         
         if not self.is_configured:
             logger.error(f"eBay {self.store_name} credentials not configured")
             return []
         
         # Get valid access token
+        logger.debug(f"eBay {self.store_name}: Obtaining access token")
         access_token = await self._get_access_token()
         if not access_token:
             logger.error(f"eBay {self.store_name} unable to obtain access token")
@@ -201,16 +202,20 @@ class EbayClient(BasePlatformClient):
         try:
             # Build filter string for eBay API
             filters = []
+            logger.debug(f"eBay {self.store_name}: Building filter params")
             if since:
                 since_str = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
                 if until:
                     until_str = until.strftime("%Y-%m-%dT%H:%M:%S.000Z")
                     filters.append(f"creationdate:[{since_str}..{until_str}]")
+                    logger.debug(f"eBay {self.store_name}: Date range filter: {since_str} to {until_str}")
                 else:
                     filters.append(f"creationdate:[{since_str}..]")
+                    logger.debug(f"eBay {self.store_name}: Open-ended date filter from: {since_str}")
             
             if status:
                 filters.append(f"orderfulfillmentstatus:{{{status}}}")
+                logger.debug(f"eBay {self.store_name}: Status filter: {status}")
             
             filter_param = ",".join(filters) if filters else None
             
@@ -227,6 +232,7 @@ class EbayClient(BasePlatformClient):
                     params["filter"] = filter_param
                 params["limit"] = 200  # eBay max is 200 per page
                 
+                logger.info(f"eBay {self.store_name}: Starting order fetch with filter={filter_param}")
                 orders = []
                 offset = 0
                 
@@ -234,15 +240,17 @@ class EbayClient(BasePlatformClient):
                     params["offset"] = offset
                     
                     url = f"{self.base_url}/sell/fulfillment/v1/order"
-                    logger.debug(f"Fetching orders from {url} with params: {params}")
+                    logger.debug(f"eBay {self.store_name}: API request offset={offset}, url={url}")
                     
                     response = await client.get(url, headers=headers, params=params)
                     response.raise_for_status()
                     
                     data = response.json()
                     page_orders = data.get("orders", [])
+                    logger.debug(f"eBay {self.store_name}: Retrieved {len(page_orders)} orders in this batch")
                     
                     if not page_orders:
+                        logger.debug(f"eBay {self.store_name}: No more orders, stopping pagination")
                         break
                     
                     # Convert each order
@@ -252,28 +260,31 @@ class EbayClient(BasePlatformClient):
                             orders.append(order)
                         except Exception as e:
                             logger.error(
-                                f"Error converting eBay order {order_data.get('orderId')}: {e}",
+                                f"eBay {self.store_name}: Error converting order {order_data.get('orderId')}: {e}",
                                 exc_info=True
                             )
                     
                     # Check if there are more pages
                     total = data.get("total", 0)
                     offset += len(page_orders)
+                    logger.debug(f"eBay {self.store_name}: Progress {offset}/{total}")
                     
                     if offset >= total:
+                        logger.debug(f"eBay {self.store_name}: Reached end of results")
                         break
                 
-                logger.info(f"Fetched {len(orders)} orders from eBay {self.store_name}")
+                logger.info(f"eBay {self.store_name}: Successfully fetched {len(orders)} orders")
                 return orders
                 
         except httpx.HTTPStatusError as e:
             logger.error(
-                f"HTTP error fetching eBay {self.store_name} orders: {e.response.status_code} - {e.response.text}"
+                f"eBay {self.store_name}: HTTP error {e.response.status_code} - {e.response.text}",
+                exc_info=True
             )
             return []
         except Exception as e:
             logger.error(
-                f"Error fetching eBay {self.store_name} orders: {e}",
+                f"eBay {self.store_name}: Error fetching orders: {e}",
                 exc_info=True
             )
             return []
@@ -327,9 +338,12 @@ class EbayClient(BasePlatformClient):
     def _convert_order(self, ebay_order: dict) -> ExternalOrder:
         """Convert eBay order JSON to ExternalOrder."""
         # Extract shipping address
-        shipping = ebay_order.get("fulfillmentStartInstructions", [{}])[0].get(
-            "shippingStep", {}
-        ).get("shipTo", {})
+        instructions = ebay_order.get("fulfillmentStartInstructions") or []
+        shipping = (
+            instructions[0].get("shippingStep", {}).get("shipTo", {})
+            if instructions
+            else {}
+        )
         
         # Convert line items
         items = []

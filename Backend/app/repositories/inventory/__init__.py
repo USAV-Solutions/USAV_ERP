@@ -155,6 +155,27 @@ class PlatformListingRepository(BaseRepository[PlatformListing]):
         result = await self.session.execute(stmt)
         return result.scalars().all()
 
+    async def search_by_listed_name(
+        self,
+        platform: Platform,
+        name: str,
+    ) -> Optional[PlatformListing]:
+        """Fuzzy-match a listing by its listed_name on a given platform.
+
+        Used as a fallback in the auto-match algorithm when external_ref_id
+        and platform_sku lookups fail.  Performs a case-insensitive ILIKE
+        search and returns the first match (or None).
+        """
+        pattern = f"%{name}%"
+        stmt = (
+            select(PlatformListing)
+            .where(PlatformListing.platform == platform)
+            .where(PlatformListing.listed_name.ilike(pattern))
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
 
 class InventoryItemRepository(BaseRepository[InventoryItem]):
     """Repository for InventoryItem operations."""

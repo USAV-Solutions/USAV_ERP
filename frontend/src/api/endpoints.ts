@@ -20,6 +20,7 @@ export const CATALOG = {
   IDENTITY: (id: number) => `/identities/${id}`,
   VARIANTS: '/variants',
   VARIANT: (id: number) => `/variants/${id}`,
+  VARIANT_SEARCH: '/variants/search',
   BUNDLES: '/bundles',
   BUNDLE: (id: number) => `/bundles/${id}`,
 }
@@ -47,17 +48,21 @@ export const LISTINGS = {
   MARK_ERROR: (id: number) => `/listings/${id}/mark-error`,
 }
 
-// Order endpoints
+// Order endpoints – matches Backend routes.py prefix /orders
 export const ORDERS = {
+  // CRUD
   LIST: '/orders',
   ORDER: (id: number) => `/orders/${id}`,
-  SUMMARY: '/orders/summary',
-  SYNC: (platform: string) => `/orders/sync/${platform}`,
-  UNMATCHED_ITEMS: '/orders/items/unmatched',
+  UPDATE_STATUS: (id: number) => `/orders/${id}`,
+
+  // Sync
+  SYNC: '/orders/sync',
+  SYNC_RANGE: '/orders/sync/range',
+  SYNC_STATUS: '/orders/sync/status',
+  SYNC_RESET: (platform: string) => `/orders/sync/${platform}/reset`,
+
+  // SKU Resolution
   MATCH_ITEM: (itemId: number) => `/orders/items/${itemId}/match`,
-  ALLOCATE_ITEM: (itemId: number) => `/orders/items/${itemId}/allocate`,
-  PROCESS: (orderId: number) => `/orders/${orderId}/process`,
-  READY_TO_SHIP: (orderId: number) => `/orders/${orderId}/ready-to-ship`,
-  SHIP: (orderId: number) => `/orders/${orderId}/ship`,
-  CANCEL: (orderId: number) => `/orders/${orderId}/cancel`,
+  CONFIRM_ITEM: (itemId: number) => `/orders/items/${itemId}/confirm`,
+  REJECT_ITEM: (itemId: number) => `/orders/items/${itemId}/reject`,
 }
