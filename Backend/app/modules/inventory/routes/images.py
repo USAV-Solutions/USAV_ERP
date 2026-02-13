@@ -45,8 +45,12 @@ class SkuImagesResponse(BaseModel):
 def _find_sku_dir(sku: str) -> Optional[Path]:
     """
     Find the directory for a given SKU.
-    Structure: /mnt/product_images/{sku}/listing-{n}/img-{n}.{ext}
-    The top-level directories are the SKU names themselves.
+    Structure: /mnt/product_images/{product_id}/{sku}/listing-{n}/img-{n}.{ext}
+    
+    The product_id is extracted from the SKU (the first part before the dash),
+    and formatted as 5-digit zero-padded (e.g., 00002).
+    
+    Example: SKU "00002-BK" → path is /mnt/product_images/00002/00002-BK/
     """
     print(f"\n[IMAGE_SEARCH] ========== SEARCHING FOR SKU: {sku} ==========")
     print(f"[IMAGE_SEARCH] Image root: {IMAGES_ROOT}")
@@ -63,8 +67,23 @@ def _find_sku_dir(sku: str) -> Optional[Path]:
     
     print(f"[IMAGE_SEARCH] ✓ Root exists and is a directory")
     
-    # Check direct path for this SKU
-    sku_path = IMAGES_ROOT / sku
+    # Extract product_id from SKU (first part before dash)
+    # Examples: "00002-BK" -> "00002", "00001-B" -> "00001", "00845-P-1-WY-N" -> "00845"
+    parts = sku.split("-")
+    product_id = parts[0]
+    print(f"[IMAGE_SEARCH] Extracted product_id from SKU: {product_id}")
+    
+    # Format product_id as 5-digit zero-padded
+    try:
+        product_id_int = int(product_id)
+        product_id_formatted = f"{product_id_int:05d}"
+        print(f"[IMAGE_SEARCH] Formatted product_id: {product_id_formatted} (from int: {product_id_int})")
+    except ValueError:
+        print(f"[IMAGE_SEARCH] ⚠️  Could not parse product_id as int: {product_id}")
+        product_id_formatted = product_id
+    
+    # Construct the expected path: /mnt/product_images/{product_id}/{sku}/
+    sku_path = IMAGES_ROOT / product_id_formatted / sku
     print(f"[IMAGE_SEARCH] Checking path: {sku_path}")
     
     try:
@@ -80,17 +99,19 @@ def _find_sku_dir(sku: str) -> Optional[Path]:
                 return None
         else:
             print(f"[IMAGE_SEARCH] ❌ Path does NOT exist: {sku_path}")
-            # Check if parent exists
-            parent = IMAGES_ROOT
-            print(f"[IMAGE_SEARCH] Parent directory: {parent}")
-            if parent.exists() and parent.is_dir():
-                print(f"[IMAGE_SEARCH] Parent exists, listing first 30 entries:")
+            # Check if product_id directory exists
+            product_dir = IMAGES_ROOT / product_id_formatted
+            print(f"[IMAGE_SEARCH] Checking product_id directory: {product_dir}")
+            print(f"[IMAGE_SEARCH]   - Exists: {product_dir.exists()}")
+            
+            if product_dir.exists() and product_dir.is_dir():
+                print(f"[IMAGE_SEARCH] Product directory exists, listing its contents:")
                 try:
-                    entries = sorted([d.name for d in parent.iterdir()])[:30]
+                    entries = sorted([d.name for d in product_dir.iterdir()])
                     for entry in entries:
                         print(f"[IMAGE_SEARCH]   - {entry}")
                 except Exception as e:
-                    print(f"[IMAGE_SEARCH] Error listing parent: {e}")
+                    print(f"[IMAGE_SEARCH] Error listing product directory: {e}")
             return None
     except PermissionError as e:
         print(f"[IMAGE_SEARCH] ❌ PERMISSION DENIED accessing {sku_path}: {e}")
