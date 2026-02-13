@@ -48,18 +48,24 @@ def _find_sku_dir(sku: str) -> Optional[Path]:
     Structure: /mnt/product_images/{base_id}/{sku}/
     where base_id is the numeric prefix of the SKU (e.g., 00010 from 00010-GY).
     """
-    logger.info(f"[IMAGE_SEARCH] Searching for SKU: {sku}")
-    logger.info(f"[IMAGE_SEARCH] Image root: {IMAGES_ROOT}")
+    # Use print for debugging since logger might be filtered
+    print(f"[IMAGE_SEARCH] Searching for SKU: {sku}")
+    print(f"[IMAGE_SEARCH] Image root: {IMAGES_ROOT}")
+    print(f"[IMAGE_SEARCH] Image root exists: {IMAGES_ROOT.exists()}")
+    print(f"[IMAGE_SEARCH] Image root is_dir: {IMAGES_ROOT.is_dir()}")
     
     if not IMAGES_ROOT.is_dir():
+        print(f"[IMAGE_SEARCH] ⚠️  Image root directory does not exist or is not accessible: {IMAGES_ROOT}")
         logger.warning(f"[IMAGE_SEARCH] Image root directory does not exist: {IMAGES_ROOT}")
         return None
 
     # List all top-level directories for debugging
     try:
         top_dirs = [d.name for d in IMAGES_ROOT.iterdir() if d.is_dir()]
-        logger.info(f"[IMAGE_SEARCH] Available top-level directories: {top_dirs[:20]}...")  # First 20
+        print(f"[IMAGE_SEARCH] Found {len(top_dirs)} top-level directories")
+        print(f"[IMAGE_SEARCH] First 20 directories: {top_dirs[:20]}")
     except Exception as e:
+        print(f"[IMAGE_SEARCH] ❌ Error listing directories: {e}")
         logger.error(f"[IMAGE_SEARCH] Error listing directories: {e}")
 
     for top_dir in IMAGES_ROOT.iterdir():
@@ -67,9 +73,11 @@ def _find_sku_dir(sku: str) -> Optional[Path]:
             continue
         sku_path = top_dir / sku
         if sku_path.is_dir():
+            print(f"[IMAGE_SEARCH] ✓ Found SKU directory: {sku_path}")
             logger.info(f"[IMAGE_SEARCH] ✓ Found SKU directory: {sku_path}")
             return sku_path
 
+    print(f"[IMAGE_SEARCH] ✗ SKU directory not found for: {sku}")
     logger.warning(f"[IMAGE_SEARCH] ✗ SKU directory not found for: {sku}")
     return None
 
