@@ -9,6 +9,7 @@ from app.modules.inventory.routes import (
     bundles_router,
     families_router,
     identities_router,
+    images_router,
     inventory_router,
     listings_router,
     variants_router,
@@ -31,6 +32,7 @@ api_router.include_router(variants_router)
 api_router.include_router(bundles_router)
 api_router.include_router(listings_router)
 api_router.include_router(inventory_router)
+api_router.include_router(images_router)
 # Lookup routes
 api_router.include_router(brand_router)
 api_router.include_router(color_router)

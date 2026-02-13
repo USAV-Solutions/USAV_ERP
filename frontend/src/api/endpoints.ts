@@ -48,6 +48,14 @@ export const LISTINGS = {
   MARK_ERROR: (id: number) => `/listings/${id}/mark-error`,
 }
 
+// Product Image endpoints
+export const IMAGES = {
+  SKU_IMAGES: (sku: string) => `/images/${sku}`,
+  THUMBNAIL: (sku: string) => `/images/${sku}/thumbnail`,
+  FILE: (sku: string, filename: string) => `/images/${sku}/file/${filename}`,
+  BATCH_THUMBNAILS: '/images/batch/thumbnails',
+}
+
 // Order endpoints – matches Backend routes.py prefix /orders
 export const ORDERS = {
   // CRUD

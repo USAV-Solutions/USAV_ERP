@@ -82,6 +82,9 @@ class Settings(BaseSettings):
     walmart_client_secret: str = ""
     walmart_api_base_url: str = "https://marketplace.walmartapis.com"
     
+    # Product Images
+    product_images_path: str = "/mnt/product_images"
+    
     @computed_field
     @property
     def database_url(self) -> str:

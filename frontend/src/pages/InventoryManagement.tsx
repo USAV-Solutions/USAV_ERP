@@ -26,6 +26,7 @@ import {
   ViewModule,
   ExpandMore,
   ExpandLess,
+  Collections,
 } from '@mui/icons-material'
 import { useQuery } from '@tanstack/react-query'
 import axiosClient from '../api/axiosClient'
@@ -33,6 +34,8 @@ import { CATALOG } from '../api/endpoints'
 import { Variant, ProductIdentity, ProductFamily, ProductType } from '../types/inventory'
 import { useAuth } from '../hooks/useAuth'
 import CreateProductDialog from '../components/inventory/CreateProductDialog'
+import ProductThumbnail from '../components/inventory/ProductThumbnail'
+import ImageGalleryModal from '../components/inventory/ImageGalleryModal'
 
 type ViewMode = 'list' | 'grouped'
 
@@ -86,9 +89,11 @@ const getSyncStatusChip = (status: string) => {
 }
 
 function ExpandedRow({ familyName, variants }: ExpandedRowProps) {
+  const [gallerySku, setGallerySku] = useState<string | null>(null)
+
   return (
     <TableRow>
-      <TableCell colSpan={7} sx={{ py: 0, bgcolor: 'grey.50' }}>
+      <TableCell colSpan={8} sx={{ py: 0, bgcolor: 'grey.50' }}>
         <Box sx={{ py: 2, px: 4 }}>
           <Typography variant="subtitle2" sx={{ mb: 1 }}>
             Variants for {familyName}
@@ -96,6 +101,7 @@ function ExpandedRow({ familyName, variants }: ExpandedRowProps) {
           <Table size="small">
             <TableHead>
               <TableRow>
+                <TableCell width={60}>Image</TableCell>
                 <TableCell>Full SKU</TableCell>
                 <TableCell>Type</TableCell>
                 <TableCell>UPIS-H</TableCell>
@@ -108,6 +114,13 @@ function ExpandedRow({ familyName, variants }: ExpandedRowProps) {
             <TableBody>
               {variants.map((variant) => (
                 <TableRow key={variant.id}>
+                  <TableCell>
+                    <ProductThumbnail
+                      sku={variant.full_sku}
+                      size={36}
+                      onClick={() => setGallerySku(variant.full_sku)}
+                    />
+                  </TableCell>
                   <TableCell>{variant.full_sku}</TableCell>
                   <TableCell>
                     <Chip
@@ -136,6 +149,13 @@ function ExpandedRow({ familyName, variants }: ExpandedRowProps) {
             </TableBody>
           </Table>
         </Box>
+        {gallerySku && (
+          <ImageGalleryModal
+            open={!!gallerySku}
+            onClose={() => setGallerySku(null)}
+            sku={gallerySku}
+          />
+        )}
       </TableCell>
     </TableRow>
   )
@@ -148,6 +168,7 @@ export default function InventoryManagement() {
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(25)
+  const [gallerySku, setGallerySku] = useState<string | null>(null)
   const { hasRole } = useAuth()
 
   // Fetch variants with identity data
@@ -346,6 +367,7 @@ export default function InventoryManagement() {
             <Table>
               <TableHead>
                 <TableRow>
+                  <TableCell width={60}>Image</TableCell>
                   <TableCell>Full SKU</TableCell>
                   <TableCell>Name</TableCell>
                   <TableCell>Type</TableCell>
@@ -358,19 +380,26 @@ export default function InventoryManagement() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={7} align="center">
+                    <TableCell colSpan={8} align="center">
                       Loading...
                     </TableCell>
                   </TableRow>
                 ) : paginatedListData.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} align="center">
+                    <TableCell colSpan={8} align="center">
                       No items found
                     </TableCell>
                   </TableRow>
                 ) : (
                   paginatedListData.map((variant) => (
                     <TableRow key={variant.id} hover>
+                      <TableCell>
+                        <ProductThumbnail
+                          sku={variant.full_sku}
+                          size={40}
+                          onClick={() => setGallerySku(variant.full_sku)}
+                        />
+                      </TableCell>
                       <TableCell>
                         <Typography variant="body2" fontFamily="monospace">
                           {variant.full_sku}
@@ -478,6 +507,15 @@ export default function InventoryManagement() {
         open={createDialogOpen}
         onClose={() => setCreateDialogOpen(false)}
       />
+
+      {/* Image Gallery Modal */}
+      {gallerySku && (
+        <ImageGalleryModal
+          open={!!gallerySku}
+          onClose={() => setGallerySku(null)}
+          sku={gallerySku}
+        />
+      )}
     </Box>
   )
 }
