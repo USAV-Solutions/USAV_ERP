@@ -224,7 +224,7 @@ async def get_sku_images(sku: str):
     images = [
         ImageInfo(
             filename=fname,
-            url=f"/api/v1/images/{sku}/file/{fname}",
+            url=f"/images/{sku}/file/{fname}",
         )
         for fname in image_files
     ]
@@ -234,7 +234,7 @@ async def get_sku_images(sku: str):
         sku=sku,
         listing=listing_name,
         total_images=len(image_files),
-        thumbnail_url=f"/api/v1/images/{sku}/file/{image_files[0]}",
+        thumbnail_url=f"/images/{sku}/file/{image_files[0]}",
         images=images,
     )
 
@@ -356,7 +356,7 @@ async def get_batch_thumbnails(skus: str):
         image_files = _sorted_images(listing_path)
 
         if image_files:
-            result[sku] = f"/api/v1/images/{sku}/thumbnail"
+            result[sku] = f"/images/{sku}/thumbnail"
         else:
             result[sku] = None
 
