@@ -45,8 +45,8 @@ class SkuImagesResponse(BaseModel):
 def _find_sku_dir(sku: str) -> Optional[Path]:
     """
     Find the directory for a given SKU.
-    Structure: /mnt/product_images/{base_id}/{sku}/
-    where base_id is the numeric prefix of the SKU (e.g., 00010 from 00010-GY).
+    Structure: /mnt/product_images/{sku}/listing-{n}/img-{n}.{ext}
+    The top-level directories are the SKU names themselves.
     """
     # Use print for debugging since logger might be filtered
     print(f"[IMAGE_SEARCH] Searching for SKU: {sku}")
@@ -68,14 +68,12 @@ def _find_sku_dir(sku: str) -> Optional[Path]:
         print(f"[IMAGE_SEARCH] ❌ Error listing directories: {e}")
         logger.error(f"[IMAGE_SEARCH] Error listing directories: {e}")
 
-    for top_dir in IMAGES_ROOT.iterdir():
-        if not top_dir.is_dir():
-            continue
-        sku_path = top_dir / sku
-        if sku_path.is_dir():
-            print(f"[IMAGE_SEARCH] ✓ Found SKU directory: {sku_path}")
-            logger.info(f"[IMAGE_SEARCH] ✓ Found SKU directory: {sku_path}")
-            return sku_path
+    # The SKU directory is directly under the root
+    sku_path = IMAGES_ROOT / sku
+    if sku_path.is_dir():
+        print(f"[IMAGE_SEARCH] ✓ Found SKU directory: {sku_path}")
+        logger.info(f"[IMAGE_SEARCH] ✓ Found SKU directory: {sku_path}")
+        return sku_path
 
     print(f"[IMAGE_SEARCH] ✗ SKU directory not found for: {sku}")
     logger.warning(f"[IMAGE_SEARCH] ✗ SKU directory not found for: {sku}")
