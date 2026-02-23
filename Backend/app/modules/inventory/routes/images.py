@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -53,6 +53,8 @@ async def _find_variant_dir(db: AsyncSession, sku: str) -> Optional[Path]:
         logger.warning("[IMAGE_SEARCH] Image root directory does not exist: %s", IMAGES_ROOT)
         return None
 
+    logger.info("[IMAGE_DEBUG] Lookup SKU in DB: sku=%s root=%s", sku, IMAGES_ROOT)
+
     stmt = (
         select(ProductVariant.full_sku, ProductIdentity.generated_upis_h)
         .join(ProductIdentity, ProductVariant.identity_id == ProductIdentity.id)
@@ -73,6 +75,13 @@ async def _find_variant_dir(db: AsyncSession, sku: str) -> Optional[Path]:
         return None
 
     variant_dir = IMAGES_ROOT / row.generated_upis_h / row.full_sku
+    logger.info(
+        "[IMAGE_DEBUG] Resolved variant path for sku=%s -> upis_h=%s full_sku=%s path=%s",
+        sku,
+        row.generated_upis_h,
+        row.full_sku,
+        variant_dir,
+    )
     if variant_dir.is_dir():
         logger.info("[IMAGE_SEARCH] Found variant directory: %s", variant_dir)
         return variant_dir
@@ -93,7 +102,13 @@ def _iter_listing_dirs(variant_dir: Path) -> list[Path]:
         match = re.match(r"listing-(\d+)$", path.name)
         return int(match.group(1)) if match else 999999
 
-    return sorted(listing_dirs, key=listing_sort_key)
+    sorted_dirs = sorted(listing_dirs, key=listing_sort_key)
+    logger.info(
+        "[IMAGE_DEBUG] Listing directories under %s -> %s",
+        variant_dir,
+        [str(path) for path in sorted_dirs],
+    )
+    return sorted_dirs
 
 
 def _get_best_listing(variant_dir: Path) -> Optional[tuple[str, Path]]:
@@ -135,7 +150,13 @@ def _sorted_images(listing_path: Path) -> list[str]:
         f.name for f in listing_path.iterdir()
         if f.is_file() and f.suffix.lower() == IMAGE_EXTENSION
     ]
-    return sorted(files)
+    sorted_files = sorted(files)
+    logger.info(
+        "[IMAGE_DEBUG] JPG files in listing %s -> %s",
+        listing_path,
+        sorted_files,
+    )
+    return sorted_files
 
 
 @router.get(
@@ -165,6 +186,12 @@ async def get_sku_images(
         raise HTTPException(status_code=404, detail=f"No listing folders found for SKU: {sku}")
 
     listing_name, listing_path = result
+    logger.info(
+        "[IMAGE_DEBUG] Selected listing for sku=%s -> listing=%s path=%s",
+        sku,
+        listing_name,
+        listing_path,
+    )
     image_files = _sorted_images(listing_path)
 
     if not image_files:
@@ -178,6 +205,13 @@ async def get_sku_images(
         )
         for fname in image_files
     ]
+
+    logger.info(
+        "[IMAGE_DEBUG] Response URLs for sku=%s -> thumbnail=%s images=%s",
+        sku,
+        f"/api/v1/images/{sku}/file/{image_files[0]}",
+        [img.url for img in images],
+    )
 
     logger.info(f"[IMAGE_API] GET /{sku} - Returning 200: {len(images)} images from {listing_name}")
     return SkuImagesResponse(
@@ -234,10 +268,17 @@ async def get_sku_thumbnail(
 async def get_sku_image_file(
     sku: str,
     filename: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """Serve a specific image file from the best listing of a SKU."""
     logger.info(f"[IMAGE_API] GET /{sku}/file/{filename} - Fetching image file")
+    logger.info("[IMAGE_DEBUG] Incoming request path: %s", request.url.path)
+    if "/api/v1/api/v1/" in request.url.path:
+        logger.warning(
+            "[IMAGE_DEBUG] Detected duplicated API prefix in request path: %s",
+            request.url.path,
+        )
 
     # Security: prevent path traversal
     if ".." in filename or "/" in filename or "\\" in filename:
@@ -257,9 +298,23 @@ async def get_sku_image_file(
 
     listing_name, listing_path = result
     file_path = listing_path / filename
+    logger.info(
+        "[IMAGE_DEBUG] Checking requested JPG path for sku=%s listing=%s filename=%s -> %s",
+        sku,
+        listing_name,
+        filename,
+        file_path,
+    )
 
     if not file_path.is_file():
-        logger.warning(f"[IMAGE_API] GET /{sku}/file/{filename} - Returning 404: Image not found")
+        available = _sorted_images(listing_path)
+        logger.warning(
+            "[IMAGE_API] GET /%s/file/%s - Returning 404: Image not found at %s; available_jpg=%s",
+            sku,
+            filename,
+            file_path,
+            available,
+        )
         raise HTTPException(status_code=404, detail=f"Image not found: {filename}")
 
     logger.info(f"[IMAGE_API] GET /{sku}/file/{filename} - Returning 200: {file_path}")
