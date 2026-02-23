@@ -122,7 +122,7 @@ export default function ImageGalleryModal({ open, onClose, sku }: ImageGalleryMo
 
               <Box
                 component="img"
-                src={`/api/v1${selectedImage.url}`}
+                src={selectedImage.url}
                 alt={`${sku} - ${selectedImage.filename}`}
                 sx={{
                   maxWidth: '100%',
@@ -173,7 +173,7 @@ export default function ImageGalleryModal({ open, onClose, sku }: ImageGalleryMo
                   >
                     <Box
                       component="img"
-                      src={`/api/v1${img.url}`}
+                      src={img.url}
                       alt={img.filename}
                       loading="lazy"
                       sx={{
