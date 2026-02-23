@@ -253,7 +253,7 @@ class Order(Base, TimestampMixin):
     )
 
     # ---- Relationships ----
-    items: Mapped["List[OrderItem]"] = relationship(
+    items: Mapped[list["OrderItem"]] = relationship(
         "OrderItem",
         back_populates="order",
         cascade="all, delete-orphan",

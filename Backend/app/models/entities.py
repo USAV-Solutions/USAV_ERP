@@ -563,7 +563,11 @@ class BundleComponent(Base, TimestampMixin):
         comment="How many of this component are needed.",
     )
     role: Mapped[BundleRole] = mapped_column(
-        Enum(BundleRole, name="bundle_role_enum"),
+        Enum(
+            BundleRole,
+            name="bundle_role_enum",
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
         nullable=False,
         default=BundleRole.PRIMARY,
         comment="Context: Primary, Accessory, Satellite.",
