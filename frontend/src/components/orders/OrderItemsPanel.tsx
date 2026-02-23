@@ -173,7 +173,10 @@ function ItemRow({ item, onAction }: { item: OrderItemDetail; onAction: () => vo
     <>
       <TableRow>
         <TableCell>
-          <Typography variant="body2" noWrap sx={{ maxWidth: 280 }}>
+          <Typography
+            variant="body2"
+            sx={{ maxWidth: 280, whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+          >
             {item.item_name}
           </Typography>
           {item.external_asin && (
