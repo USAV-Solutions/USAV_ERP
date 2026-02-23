@@ -5,6 +5,7 @@ Main FastAPI Application
 This is the central authority for all USAV product data,
 implementing the Hub & Spoke middleware architecture.
 """
+import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -16,6 +17,12 @@ from app.api import api_router
 from app.core.config import settings
 from app.core.database import close_db, engine
 from app.modules.orders.routes import router as orders_router
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
 
 
 @asynccontextmanager
