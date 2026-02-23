@@ -49,13 +49,29 @@ def _find_sku_dir(sku: str) -> Optional[Path]:
     The top-level directories are the SKU names themselves.
     """
     # Use print for debugging since logger might be filtered
+
+    print("\n" + "="*50)
+    print(f"[DEBUG SCOPE] Current Working Directory: {os.getcwd()}")
+    print(f"[DEBUG SCOPE] Target IMAGES_ROOT: {IMAGES_ROOT}")
+    
+    # Check what is actually inside /mnt in this environment
+    mnt_path = Path('/mnt')
+    print(f"[DEBUG SCOPE] Does /mnt exist here?: {mnt_path.exists()}")
+    if mnt_path.exists():
+        mnt_contents = [d.name for d in mnt_path.iterdir()]
+        print(f"[DEBUG SCOPE] Folders inside /mnt/: {mnt_contents}")
+        
+    # Check the specific parent folder of our target
+    parent_path = IMAGES_ROOT.parent
+    if parent_path.exists() and parent_path != mnt_path:
+        parent_contents = [d.name for d in parent_path.iterdir()]
+        print(f"[DEBUG SCOPE] Folders inside {parent_path}/: {parent_contents}")
+    print("="*50 + "\n")
+    # --- END DEBUG SCOPE CHECK ---
+
     print(f"[IMAGE_SEARCH] Searching for SKU: {sku}")
-    print(f"[IMAGE_SEARCH] Image root: {IMAGES_ROOT}")
-    print(f"[IMAGE_SEARCH] Image root exists: {IMAGES_ROOT.exists()}")
-    print(f"[IMAGE_SEARCH] Image root is_dir: {IMAGES_ROOT.is_dir()}")
     
     if not IMAGES_ROOT.is_dir():
-        print(f"[IMAGE_SEARCH] ⚠️  Image root directory does not exist or is not accessible: {IMAGES_ROOT}")
         logger.warning(f"[IMAGE_SEARCH] Image root directory does not exist: {IMAGES_ROOT}")
         return None
 
