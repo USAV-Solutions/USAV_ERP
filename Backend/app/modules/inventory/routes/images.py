@@ -2,22 +2,25 @@
 Product Image API endpoints.
 
 Serves product variant images from /mnt/product_images/.
-Directory structure: /mnt/product_images/{base_id}/{sku}/listing-{n}/img-{n}.{ext}
+Directory structure: /mnt/product_images/{generated_upis_h}/{full_sku}/listing-{n}/*.jpg
 
 For each SKU, the listing folder with the most images is selected as the
-"best" listing. img-0 is used as the thumbnail.
+"best" listing. The first sorted .jpg is used as the thumbnail.
 """
 import logging
-import os
 import re
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.database import get_db
+from app.models.entities import ProductIdentity, ProductVariant
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +28,7 @@ router = APIRouter(prefix="/images", tags=["Product Images"])
 
 IMAGES_ROOT = Path(getattr(settings, "product_images_path", "/mnt/product_images"))
 
-# Allowed image extensions
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+IMAGE_EXTENSION = ".jpg"
 
 
 class ImageInfo(BaseModel):
@@ -42,78 +44,73 @@ class SkuImagesResponse(BaseModel):
     images: list[ImageInfo]
 
 
-def _find_sku_dir(sku: str) -> Optional[Path]:
+async def _find_variant_dir(db: AsyncSession, sku: str) -> Optional[Path]:
     """
-    Find the directory for a given SKU.
-    Structure: /mnt/product_images/{sku}/listing-{n}/img-{n}.{ext}
-    The top-level directories are the SKU names themselves.
+    Resolve SKU to generated_upis_h via DB and return expected variant image dir:
+    /mnt/product_images/{generated_upis_h}/{full_sku}
     """
-    # Use print for debugging since logger might be filtered
-
-    print("\n" + "="*50)
-    print(f"[DEBUG SCOPE] Current Working Directory: {os.getcwd()}")
-    print(f"[DEBUG SCOPE] Target IMAGES_ROOT: {IMAGES_ROOT}")
-    
-    # Check what is actually inside /mnt in this environment
-    mnt_path = Path('/mnt')
-    print(f"[DEBUG SCOPE] Does /mnt exist here?: {mnt_path.exists()}")
-    if mnt_path.exists():
-        mnt_contents = [d.name for d in mnt_path.iterdir()]
-        print(f"[DEBUG SCOPE] Folders inside /mnt/: {mnt_contents}")
-        
-    # Check the specific parent folder of our target
-    parent_path = IMAGES_ROOT.parent
-    if parent_path.exists() and parent_path != mnt_path:
-        parent_contents = [d.name for d in parent_path.iterdir()]
-        print(f"[DEBUG SCOPE] Folders inside {parent_path}/: {parent_contents}")
-    print("="*50 + "\n")
-    # --- END DEBUG SCOPE CHECK ---
-
-    print(f"[IMAGE_SEARCH] Searching for SKU: {sku}")
-    
     if not IMAGES_ROOT.is_dir():
-        logger.warning(f"[IMAGE_SEARCH] Image root directory does not exist: {IMAGES_ROOT}")
+        logger.warning("[IMAGE_SEARCH] Image root directory does not exist: %s", IMAGES_ROOT)
         return None
 
-    # List all top-level directories for debugging
-    try:
-        top_dirs = [d.name for d in IMAGES_ROOT.iterdir() if d.is_dir()]
-        print(f"[IMAGE_SEARCH] Found {len(top_dirs)} top-level directories")
-        print(f"[IMAGE_SEARCH] First 20 directories: {top_dirs[:20]}")
-    except Exception as e:
-        print(f"[IMAGE_SEARCH] ❌ Error listing directories: {e}")
-        logger.error(f"[IMAGE_SEARCH] Error listing directories: {e}")
+    stmt = (
+        select(ProductVariant.full_sku, ProductIdentity.generated_upis_h)
+        .join(ProductIdentity, ProductVariant.identity_id == ProductIdentity.id)
+        .where(ProductVariant.full_sku == sku)
+    )
+    row = (await db.execute(stmt)).first()
 
-    # The SKU directory is directly under the root
-    sku_path = IMAGES_ROOT / sku
-    if sku_path.is_dir():
-        print(f"[IMAGE_SEARCH] ✓ Found SKU directory: {sku_path}")
-        logger.info(f"[IMAGE_SEARCH] ✓ Found SKU directory: {sku_path}")
-        return sku_path
+    if row is None and sku != sku.upper():
+        stmt_upper = (
+            select(ProductVariant.full_sku, ProductIdentity.generated_upis_h)
+            .join(ProductIdentity, ProductVariant.identity_id == ProductIdentity.id)
+            .where(ProductVariant.full_sku == sku.upper())
+        )
+        row = (await db.execute(stmt_upper)).first()
 
-    print(f"[IMAGE_SEARCH] ✗ SKU directory not found for: {sku}")
-    logger.warning(f"[IMAGE_SEARCH] ✗ SKU directory not found for: {sku}")
+    if row is None:
+        logger.warning("[IMAGE_SEARCH] SKU not found in database: %s", sku)
+        return None
+
+    variant_dir = IMAGES_ROOT / row.generated_upis_h / row.full_sku
+    if variant_dir.is_dir():
+        logger.info("[IMAGE_SEARCH] Found variant directory: %s", variant_dir)
+        return variant_dir
+
+    logger.warning("[IMAGE_SEARCH] Variant directory not found: %s", variant_dir)
     return None
 
 
-def _get_best_listing(sku_dir: Path) -> Optional[tuple[str, Path]]:
+def _iter_listing_dirs(variant_dir: Path) -> list[Path]:
+    """Return listing directories sorted by listing index (listing-0, listing-1, ...)."""
+    listing_dirs = [
+        entry
+        for entry in variant_dir.iterdir()
+        if entry.is_dir() and entry.name.startswith("listing-")
+    ]
+
+    def listing_sort_key(path: Path) -> int:
+        match = re.match(r"listing-(\d+)$", path.name)
+        return int(match.group(1)) if match else 999999
+
+    return sorted(listing_dirs, key=listing_sort_key)
+
+
+def _get_best_listing(variant_dir: Path) -> Optional[tuple[str, Path]]:
     """
-    Find the listing folder with the most images for a given SKU directory.
+    Find the listing folder with the most .jpg images for a variant directory.
     Returns (listing_name, listing_path) or None.
     """
-    logger.info(f"[IMAGE_SEARCH] Scanning listings in: {sku_dir}")
+    logger.info(f"[IMAGE_SEARCH] Scanning listings in: {variant_dir}")
     best_listing: Optional[str] = None
     best_path: Optional[Path] = None
     best_count = 0
     listing_counts = {}
 
-    for entry in sku_dir.iterdir():
-        if not entry.is_dir() or not entry.name.startswith("listing-"):
-            continue
-
+    for entry in _iter_listing_dirs(variant_dir):
         img_count = sum(
             1 for f in entry.iterdir()
-            if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS
+            if f.is_file() and f.suffix.lower() == IMAGE_EXTENSION
         )
         listing_counts[entry.name] = img_count
 
@@ -128,22 +125,17 @@ def _get_best_listing(sku_dir: Path) -> Optional[tuple[str, Path]]:
         logger.info(f"[IMAGE_SEARCH] ✓ Best listing: {best_listing} with {best_count} images")
         return best_listing, best_path
     
-    logger.warning(f"[IMAGE_SEARCH] ✗ No valid listings found in {sku_dir}")
+    logger.warning(f"[IMAGE_SEARCH] ✗ No valid listings found in {variant_dir}")
     return None
 
 
 def _sorted_images(listing_path: Path) -> list[str]:
-    """Return image filenames sorted by their numeric index (img-0, img-1, ...)."""
+    """Return .jpg image filenames sorted lexicographically."""
     files = [
         f.name for f in listing_path.iterdir()
-        if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS
+        if f.is_file() and f.suffix.lower() == IMAGE_EXTENSION
     ]
-
-    def sort_key(name: str) -> int:
-        match = re.search(r"img-(\d+)", name)
-        return int(match.group(1)) if match else 999
-
-    return sorted(files, key=sort_key)
+    return sorted(files)
 
 
 @router.get(
@@ -151,19 +143,23 @@ def _sorted_images(listing_path: Path) -> list[str]:
     response_model=SkuImagesResponse,
     summary="Get image info for a product variant SKU",
 )
-async def get_sku_images(sku: str):
+async def get_sku_images(
+    sku: str,
+    db: AsyncSession = Depends(get_db),
+):
     """
     Returns image metadata for a product variant SKU.
     Automatically selects the listing folder with the most images.
     """
     logger.info(f"[IMAGE_API] GET /{sku} - Fetching image metadata")
-    
-    sku_dir = _find_sku_dir(sku)
-    if not sku_dir:
+
+    variant_dir = await _find_variant_dir(db, sku)
+
+    if not variant_dir:
         logger.warning(f"[IMAGE_API] GET /{sku} - Returning 404: No images found")
         raise HTTPException(status_code=404, detail=f"No images found for SKU: {sku}")
 
-    result = _get_best_listing(sku_dir)
+    result = _get_best_listing(variant_dir)
     if not result:
         logger.warning(f"[IMAGE_API] GET /{sku} - Returning 404: No listing folders found")
         raise HTTPException(status_code=404, detail=f"No listing folders found for SKU: {sku}")
@@ -195,18 +191,22 @@ async def get_sku_images(sku: str):
 
 @router.get(
     "/{sku}/thumbnail",
-    summary="Get the thumbnail (img-0) for a product variant SKU",
+    summary="Get the thumbnail for a product variant SKU",
 )
-async def get_sku_thumbnail(sku: str):
-    """Serve img-0 from the best listing as the thumbnail."""
+async def get_sku_thumbnail(
+    sku: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Serve the first sorted .jpg from the best listing as the thumbnail."""
     logger.info(f"[IMAGE_API] GET /{sku}/thumbnail - Fetching thumbnail")
-    
-    sku_dir = _find_sku_dir(sku)
-    if not sku_dir:
+
+    variant_dir = await _find_variant_dir(db, sku)
+
+    if not variant_dir:
         logger.warning(f"[IMAGE_API] GET /{sku}/thumbnail - Returning 404: No images found")
         raise HTTPException(status_code=404, detail=f"No images found for SKU: {sku}")
 
-    result = _get_best_listing(sku_dir)
+    result = _get_best_listing(variant_dir)
     if not result:
         logger.warning(f"[IMAGE_API] GET /{sku}/thumbnail - Returning 404: No listing folders found")
         raise HTTPException(status_code=404, detail=f"No listing folders found for SKU: {sku}")
@@ -231,21 +231,26 @@ async def get_sku_thumbnail(sku: str):
     "/{sku}/file/{filename}",
     summary="Serve a specific image file for a product variant SKU",
 )
-async def get_sku_image_file(sku: str, filename: str):
+async def get_sku_image_file(
+    sku: str,
+    filename: str,
+    db: AsyncSession = Depends(get_db),
+):
     """Serve a specific image file from the best listing of a SKU."""
     logger.info(f"[IMAGE_API] GET /{sku}/file/{filename} - Fetching image file")
-    
+
     # Security: prevent path traversal
     if ".." in filename or "/" in filename or "\\" in filename:
         logger.warning(f"[IMAGE_API] GET /{sku}/file/{filename} - Returning 400: Invalid filename")
         raise HTTPException(status_code=400, detail="Invalid filename")
 
-    sku_dir = _find_sku_dir(sku)
-    if not sku_dir:
+    variant_dir = await _find_variant_dir(db, sku)
+
+    if not variant_dir:
         logger.warning(f"[IMAGE_API] GET /{sku}/file/{filename} - Returning 404: No images found")
         raise HTTPException(status_code=404, detail=f"No images found for SKU: {sku}")
 
-    result = _get_best_listing(sku_dir)
+    result = _get_best_listing(variant_dir)
     if not result:
         logger.warning(f"[IMAGE_API] GET /{sku}/file/{filename} - Returning 404: No listing folders found")
         raise HTTPException(status_code=404, detail=f"No listing folders found for SKU: {sku}")
@@ -269,7 +274,10 @@ async def get_sku_image_file(sku: str, filename: str):
     "/batch/thumbnails",
     summary="Get thumbnail URLs for multiple SKUs",
 )
-async def get_batch_thumbnails(skus: str):
+async def get_batch_thumbnails(
+    skus: str,
+    db: AsyncSession = Depends(get_db),
+):
     """
     Get thumbnail URLs for a comma-separated list of SKUs.
     Returns a mapping of SKU -> thumbnail_url (or null if not found).
@@ -279,17 +287,17 @@ async def get_batch_thumbnails(skus: str):
     result: dict[str, Optional[str]] = {}
 
     for sku in sku_list:
-        sku_dir = _find_sku_dir(sku)
-        if not sku_dir:
+        variant_dir = await _find_variant_dir(db, sku)
+        if not variant_dir:
             result[sku] = None
             continue
 
-        listing_result = _get_best_listing(sku_dir)
+        listing_result = _get_best_listing(variant_dir)
         if not listing_result:
             result[sku] = None
             continue
 
-        listing_name, listing_path = listing_result
+        _listing_name, listing_path = listing_result
         image_files = _sorted_images(listing_path)
 
         if image_files:
