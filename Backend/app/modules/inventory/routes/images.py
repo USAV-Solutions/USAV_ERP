@@ -229,10 +229,17 @@ async def get_sku_images(
 )
 async def get_sku_thumbnail(
     sku: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """Serve the first sorted .jpg from the best listing as the thumbnail."""
     logger.info(f"[IMAGE_API] GET /{sku}/thumbnail - Fetching thumbnail")
+    logger.info("[THUMB_DEBUG] Incoming request path: %s", request.url.path)
+    if "/api/v1/api/v1/" in request.url.path:
+        logger.warning(
+            "[THUMB_DEBUG] Detected duplicated API prefix in request path: %s",
+            request.url.path,
+        )
 
     variant_dir = await _find_variant_dir(db, sku)
 
@@ -246,6 +253,12 @@ async def get_sku_thumbnail(
         raise HTTPException(status_code=404, detail=f"No listing folders found for SKU: {sku}")
 
     listing_name, listing_path = result
+    logger.info(
+        "[THUMB_DEBUG] Selected listing for sku=%s -> listing=%s path=%s",
+        sku,
+        listing_name,
+        listing_path,
+    )
     image_files = _sorted_images(listing_path)
 
     if not image_files:
@@ -253,6 +266,23 @@ async def get_sku_thumbnail(
         raise HTTPException(status_code=404, detail=f"No images in best listing for SKU: {sku}")
 
     file_path = listing_path / image_files[0]
+    logger.info(
+        "[THUMB_DEBUG] Thumbnail candidate for sku=%s -> filename=%s file_path=%s exists=%s",
+        sku,
+        image_files[0],
+        file_path,
+        file_path.is_file(),
+    )
+
+    if not file_path.is_file():
+        logger.warning(
+            "[IMAGE_API] GET /%s/thumbnail - Returning 404: Resolved thumbnail path missing: %s; available_jpg=%s",
+            sku,
+            file_path,
+            image_files,
+        )
+        raise HTTPException(status_code=404, detail=f"Thumbnail file not found for SKU: {sku}")
+
     logger.info(f"[IMAGE_API] GET /{sku}/thumbnail - Returning 200: {file_path}")
     return FileResponse(
         path=str(file_path),
