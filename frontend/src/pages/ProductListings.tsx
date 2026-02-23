@@ -1,4 +1,4 @@
-import React, { useState, useMemo, Fragment } from 'react'
+import React, { useState, useMemo } from 'react'
 import {
   Box,
   Typography,
@@ -29,7 +29,6 @@ import {
   CircularProgress,
   SelectChangeEvent,
   AutocompleteRenderInputParams,
-  Collapse,
 } from '@mui/material'
 import {
   Add,
@@ -39,8 +38,6 @@ import {
   CheckCircle,
   Schedule,
   Delete,
-  ExpandMore,
-  ExpandLess,
 } from '@mui/icons-material'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axiosClient from '../api/axiosClient'
@@ -266,7 +263,6 @@ export default function ProductListings() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(25)
-  const [expandedFamilies, setExpandedFamilies] = useState<Set<number>>(new Set())
   const { hasRole } = useAuth()
   const queryClient = useQueryClient()
 
@@ -371,52 +367,6 @@ export default function ProductListings() {
     page * rowsPerPage + rowsPerPage
   )
 
-  // Group listings by product family
-  interface FamilyGroup {
-    productId: number
-    familyName: string
-    brandName?: string
-    listings: EnhancedListing[]
-  }
-
-  const groupedByFamily: FamilyGroup[] = useMemo(() => {
-    const groups = new Map<number, FamilyGroup>()
-
-    filteredListings.forEach((listing) => {
-      const productId = listing.variant?.identity?.family?.product_id ?? -1
-      const familyName = listing.variant?.identity?.family?.base_name || 'Unknown'
-      const brandName = listing.variant?.identity?.family?.brand?.name
-
-      if (!groups.has(productId)) {
-        groups.set(productId, {
-          productId,
-          familyName,
-          brandName,
-          listings: [],
-        })
-      }
-      groups.get(productId)!.listings.push(listing)
-    })
-
-    return Array.from(groups.values()).sort((a, b) =>
-      a.familyName.localeCompare(b.familyName),
-    )
-  }, [filteredListings])
-
-  const paginatedFamilies = groupedByFamily.slice(
-    page * rowsPerPage,
-    page * rowsPerPage + rowsPerPage,
-  )
-
-  const toggleFamily = (productId: number) => {
-    setExpandedFamilies((prev) => {
-      const next = new Set(prev)
-      if (next.has(productId)) next.delete(productId)
-      else next.add(productId)
-      return next
-    })
-  }
-
   const handleDelete = (id: number) => {
     if (confirm('Are you sure you want to delete this listing?')) {
       deleteMutation.mutate(id)
@@ -500,139 +450,101 @@ export default function ProductListings() {
         </Box>
       </Paper>
 
-      {/* Listings Table – grouped by Product Family */}
+      {/* Listings Table */}
       <Paper>
         <TableContainer>
           <Table>
             <TableHead>
               <TableRow>
-                <TableCell sx={{ width: 40 }} />
-                <TableCell>Product Family</TableCell>
-                <TableCell>Brand</TableCell>
-                <TableCell align="center">Listings</TableCell>
+                <TableCell>SKU</TableCell>
+                <TableCell>Product Name</TableCell>
+                <TableCell>Platform</TableCell>
+                <TableCell>Listed Name</TableCell>
+                <TableCell>Listed Description</TableCell>
+                <TableCell>External Ref ID</TableCell>
+                <TableCell>Price</TableCell>
+                <TableCell>Sync Status</TableCell>
+                <TableCell>Last Synced</TableCell>
+                <TableCell>Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {listingsLoading ? (
                 <TableRow>
-                  <TableCell colSpan={4} align="center">
+                  <TableCell colSpan={10} align="center">
                     <CircularProgress size={24} />
                   </TableCell>
                 </TableRow>
-              ) : paginatedFamilies.length === 0 ? (
+              ) : paginatedData.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} align="center">
+                  <TableCell colSpan={10} align="center">
                     No listings found
                   </TableCell>
                 </TableRow>
               ) : (
-                paginatedFamilies.map((group) => {
-                  const isExpanded = expandedFamilies.has(group.productId)
-                  return (
-                    <Fragment key={group.productId}>
-                      <TableRow
-                        hover
-                        sx={{ cursor: 'pointer', '& > *': { borderBottom: isExpanded ? 'unset' : undefined } }}
-                        onClick={() => toggleFamily(group.productId)}
-                      >
-                        <TableCell sx={{ width: 40, px: 1 }}>
-                          <IconButton size="small">
-                            {isExpanded ? <ExpandLess /> : <ExpandMore />}
+                paginatedData.map((listing: EnhancedListing) => (
+                  <TableRow key={listing.id} hover>
+                    <TableCell>
+                      <Typography variant="body2" fontFamily="monospace">
+                        {listing.variant?.full_sku || '-'}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      {listing.variant?.identity?.family?.base_name || '-'}
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        size="small"
+                        label={getPlatformLabel(listing.platform)}
+                        variant="outlined"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Tooltip title={listing.listed_name || ''}>
+                        <Typography variant="body2" noWrap sx={{ maxWidth: 200 }}>
+                          {listing.listed_name || '-'}
+                        </Typography>
+                      </Tooltip>
+                    </TableCell>
+                    <TableCell>
+                      <Tooltip title={listing.listed_description || ''}>
+                        <Typography variant="body2" noWrap sx={{ maxWidth: 200 }}>
+                          {listing.listed_description || '-'}
+                        </Typography>
+                      </Tooltip>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" fontFamily="monospace">
+                        {listing.external_ref_id || '-'}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      {listing.listing_price != null ? `$${listing.listing_price.toFixed(2)}` : '-'}
+                    </TableCell>
+                    <TableCell>
+                      {getSyncStatusChip(listing.sync_status, listing.sync_error_message)}
+                    </TableCell>
+                    <TableCell>
+                      {listing.last_synced_at
+                        ? new Date(listing.last_synced_at).toLocaleDateString()
+                        : '-'}
+                    </TableCell>
+                    <TableCell>
+                      {hasRole(['ADMIN']) && (
+                        <Tooltip title="Delete Listing">
+                          <IconButton
+                            size="small"
+                            color="error"
+                            onClick={() => handleDelete(listing.id)}
+                            disabled={deleteMutation.isPending}
+                          >
+                            <Delete fontSize="small" />
                           </IconButton>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2" fontWeight={500}>
-                            {group.familyName}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>{group.brandName || '-'}</TableCell>
-                        <TableCell align="center">
-                          <Chip size="small" label={`${group.listings.length} listing(s)`} />
-                        </TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell sx={{ py: 0 }} colSpan={4}>
-                          <Collapse in={isExpanded} timeout="auto" unmountOnExit>
-                            <Box sx={{ py: 1, px: 2, bgcolor: 'grey.50' }}>
-                              <Table size="small">
-                                <TableHead>
-                                  <TableRow>
-                                    <TableCell>SKU</TableCell>
-                                    <TableCell>Platform</TableCell>
-                                    <TableCell>Listed Name</TableCell>
-                                    <TableCell>External Ref ID</TableCell>
-                                    <TableCell>Price</TableCell>
-                                    <TableCell>Sync Status</TableCell>
-                                    <TableCell>Last Synced</TableCell>
-                                    <TableCell>Actions</TableCell>
-                                  </TableRow>
-                                </TableHead>
-                                <TableBody>
-                                  {group.listings.map((listing) => (
-                                    <TableRow key={listing.id}>
-                                      <TableCell>
-                                        <Typography variant="body2" fontFamily="monospace">
-                                          {listing.variant?.full_sku || '-'}
-                                        </Typography>
-                                      </TableCell>
-                                      <TableCell>
-                                        <Chip
-                                          size="small"
-                                          label={getPlatformLabel(listing.platform)}
-                                          variant="outlined"
-                                        />
-                                      </TableCell>
-                                      <TableCell>
-                                        <Tooltip title={listing.listed_name || ''}>
-                                          <Typography variant="body2" noWrap sx={{ maxWidth: 200 }}>
-                                            {listing.listed_name || '-'}
-                                          </Typography>
-                                        </Tooltip>
-                                      </TableCell>
-                                      <TableCell>
-                                        <Typography variant="body2" fontFamily="monospace">
-                                          {listing.external_ref_id || '-'}
-                                        </Typography>
-                                      </TableCell>
-                                      <TableCell>
-                                        {listing.listing_price != null ? `$${listing.listing_price.toFixed(2)}` : '-'}
-                                      </TableCell>
-                                      <TableCell>
-                                        {getSyncStatusChip(listing.sync_status, listing.sync_error_message)}
-                                      </TableCell>
-                                      <TableCell>
-                                        {listing.last_synced_at
-                                          ? new Date(listing.last_synced_at).toLocaleDateString()
-                                          : '-'}
-                                      </TableCell>
-                                      <TableCell>
-                                        {hasRole(['ADMIN']) && (
-                                          <Tooltip title="Delete Listing">
-                                            <IconButton
-                                              size="small"
-                                              color="error"
-                                              onClick={(e) => {
-                                                e.stopPropagation()
-                                                handleDelete(listing.id)
-                                              }}
-                                              disabled={deleteMutation.isPending}
-                                            >
-                                              <Delete fontSize="small" />
-                                            </IconButton>
-                                          </Tooltip>
-                                        )}
-                                      </TableCell>
-                                    </TableRow>
-                                  ))}
-                                </TableBody>
-                              </Table>
-                            </Box>
-                          </Collapse>
-                        </TableCell>
-                      </TableRow>
-                    </Fragment>
-                  )
-                })
+                        </Tooltip>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))
               )}
             </TableBody>
           </Table>
@@ -640,7 +552,7 @@ export default function ProductListings() {
         <TablePagination
           rowsPerPageOptions={[10, 25, 50, 100]}
           component="div"
-          count={groupedByFamily.length}
+          count={filteredListings.length}
           rowsPerPage={rowsPerPage}
           page={page}
           onPageChange={(_: unknown, newPage: number) => setPage(newPage)}
