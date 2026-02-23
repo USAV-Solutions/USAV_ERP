@@ -18,12 +18,12 @@ jobs:
           # 2. Pull the latest code
           git pull origin main
           
-          # 3. Rebuild and Restart (Production Profile)
+          # 3. Run Migrations
+          docker compose --profile migrate up --build --remove-orphans migrations
+          
+          # 4. Rebuild and Restart (Production Profile)
           # Note: We use full path to docker just in case, but usually 'docker' works
           docker compose --profile prod up -d --build
-          
-          # 4. Run Migrations
-          docker compose --profile migrate run migrations
           
           # 5. Cleanup space
           docker image prune -f
