@@ -63,9 +63,17 @@ def _build_item_payload(variant: ProductVariant) -> dict:
         "status": "active" if variant.is_active else "inactive",
     }
 
+    raw_listings = variant.listings
+    if raw_listings is None:
+        listings = []
+    elif isinstance(raw_listings, (list, tuple)):
+        listings = raw_listings
+    else:
+        listings = [raw_listings]
+
     listing_prices = [
         listing.listing_price
-        for listing in (variant.listings or [])
+        for listing in listings
         if listing.listing_price is not None
     ]
     if listing_prices:
