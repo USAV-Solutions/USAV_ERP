@@ -60,6 +60,14 @@ from app.modules.inventory.schemas.variants import (
     ProductVariantUpdate,
     ProductVariantWithListings,
 )
+from app.modules.inventory.schemas.zoho import (
+    ZohoBulkSyncItemResult,
+    ZohoBulkSyncRequest,
+    ZohoBulkSyncResponse,
+    ZohoReadinessItem,
+    ZohoReadinessRequest,
+    ZohoReadinessResponse,
+)
 
 __all__ = [
     # Bundles
@@ -113,5 +121,12 @@ __all__ = [
     "ProductVariantResponse",
     "ProductVariantUpdate",
     "ProductVariantWithListings",
+    # Zoho sync
+    "ZohoBulkSyncItemResult",
+    "ZohoBulkSyncRequest",
+    "ZohoBulkSyncResponse",
+    "ZohoReadinessItem",
+    "ZohoReadinessRequest",
+    "ZohoReadinessResponse",
 ]
 

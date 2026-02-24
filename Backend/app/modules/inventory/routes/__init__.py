@@ -20,6 +20,7 @@ from app.modules.inventory.routes.lookups import (
 )
 from app.modules.inventory.routes.variants import router as variants_router
 from app.modules.inventory.routes.images import router as images_router
+from app.modules.inventory.routes.zoho import router as zoho_router
 
 # Create a combined router for the inventory module
 inventory_module_router = APIRouter()
@@ -36,6 +37,7 @@ inventory_module_router.include_router(color_router)
 inventory_module_router.include_router(condition_router)
 inventory_module_router.include_router(lci_router)
 inventory_module_router.include_router(images_router)
+inventory_module_router.include_router(zoho_router)
 
 __all__ = [
     "inventory_module_router",
@@ -51,5 +53,6 @@ __all__ = [
     "color_router",
     "condition_router",
     "lci_router",
+    "zoho_router",
 ]
 

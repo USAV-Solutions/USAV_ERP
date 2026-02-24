@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     zoho_client_secret: str = ""
     zoho_refresh_token: str = ""
     zoho_organization_id: str = ""
+    zoho_accounts_url: str = "https://accounts.zoho.com"
+    zoho_inventory_api_base: str = "https://www.zohoapis.com/inventory/v1"
+    zoho_books_api_base: str = "https://www.zohoapis.com/books/v3"
     
     # Amazon SP-API Integration
     amazon_refresh_token: str = ""

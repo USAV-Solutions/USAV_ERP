@@ -4,8 +4,10 @@ Zoho Inventory API Client.
 Handles sync between USAV Inventory and Zoho Inventory/Books.
 """
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional, Any
 import logging
+import mimetypes
 
 import httpx
 
@@ -42,6 +44,10 @@ class ZohoClient:
         self.client_secret = client_secret or settings.zoho_client_secret
         self.refresh_token = refresh_token or settings.zoho_refresh_token
         self.organization_id = organization_id or settings.zoho_organization_id
+
+        self.accounts_url = getattr(settings, "zoho_accounts_url", self.ZOHO_ACCOUNTS_URL)
+        self.inventory_api_url = getattr(settings, "zoho_inventory_api_base", self.ZOHO_INVENTORY_API)
+        self.books_api_url = getattr(settings, "zoho_books_api_base", self.ZOHO_BOOKS_API)
         
         self._access_token = None
         self._token_expires_at = None
@@ -61,7 +67,7 @@ class ZohoClient:
         
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                f"{self.ZOHO_ACCOUNTS_URL}/oauth/v2/token",
+                f"{self.accounts_url}/oauth/v2/token",
                 params={
                     "refresh_token": self.refresh_token,
                     "client_id": self.client_id,
@@ -92,13 +98,18 @@ class ZohoClient:
         """Make authenticated request to Zoho API."""
         await self._ensure_access_token()
         
-        base_url = self.ZOHO_INVENTORY_API if api == "inventory" else self.ZOHO_BOOKS_API
+        base_url = self.inventory_api_url if api == "inventory" else self.books_api_url
         url = f"{base_url}{endpoint}"
         
-        headers = {
+        headers = kwargs.pop("headers", {})
+        auth_headers = {
             "Authorization": f"Zoho-oauthtoken {self._access_token}",
-            "Content-Type": "application/json",
         }
+        for key, value in auth_headers.items():
+            headers.setdefault(key, value)
+
+        if "json" in kwargs and "files" not in kwargs:
+            headers.setdefault("Content-Type", "application/json")
         
         params = kwargs.pop("params", {})
         params["organization_id"] = self.organization_id
@@ -200,6 +211,63 @@ class ZohoClient:
             return await self.update_item(existing["item_id"], item_data)
         else:
             return await self.create_item(item_data)
+
+    async def upload_item_image(self, zoho_item_id: str, image_path: Path) -> dict:
+        """Upload an image for an existing Zoho inventory item."""
+        mime_type, _ = mimetypes.guess_type(str(image_path))
+        content_type = mime_type or "application/octet-stream"
+
+        with image_path.open("rb") as image_file:
+            result = await self._request(
+                "POST",
+                f"/items/{zoho_item_id}/image",
+                files={"image": (image_path.name, image_file, content_type)},
+            )
+        return result
+
+    async def create_composite_item(self, composite_data: dict) -> dict:
+        """Create a composite item in Zoho Inventory."""
+        result = await self._request("POST", "/compositeitems", json={"composite_item": composite_data})
+        return result.get("composite_item", {})
+
+    async def update_composite_item(self, composite_item_id: str, composite_data: dict) -> dict:
+        """Update a Zoho composite item."""
+        result = await self._request(
+            "PUT",
+            f"/compositeitems/{composite_item_id}",
+            json={"composite_item": composite_data},
+        )
+        return result.get("composite_item", {})
+
+    async def get_composite_item_by_sku(self, sku: str) -> Optional[dict]:
+        """Find a Zoho composite item by SKU."""
+        result = await self._request("GET", "/compositeitems", params={"sku": sku})
+        items = result.get("composite_items", [])
+        return items[0] if items else None
+
+    async def sync_composite_item(
+        self,
+        sku: str,
+        name: str,
+        rate: float,
+        component_items: list[dict[str, Any]],
+        description: str = None,
+        **extra_fields,
+    ) -> dict:
+        """Create or update a composite item in Zoho by SKU."""
+        composite_data = {
+            "name": name,
+            "sku": sku,
+            "rate": rate,
+            "description": description or "",
+            "component_items": component_items,
+            **extra_fields,
+        }
+
+        existing = await self.get_composite_item_by_sku(sku)
+        if existing:
+            return await self.update_composite_item(existing["composite_item_id"], composite_data)
+        return await self.create_composite_item(composite_data)
     
     # =========================================================================
     # STOCK SYNC

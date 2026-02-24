@@ -20,6 +20,11 @@ import {
   TableHead,
   TableRow,
   TablePagination,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  CircularProgress,
 } from '@mui/material'
 import {
   Add,
@@ -28,12 +33,11 @@ import {
   ViewModule,
   ExpandMore,
   ExpandLess,
-  Collections,
 } from '@mui/icons-material'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AxiosError } from 'axios'
 import axiosClient from '../api/axiosClient'
-import { CATALOG, IMAGES } from '../api/endpoints'
+import { CATALOG, IMAGES, ZOHO } from '../api/endpoints'
 import { Variant, ProductIdentity, ProductFamily, ProductType } from '../types/inventory'
 import { useAuth } from '../hooks/useAuth'
 import CreateProductDialog from '../components/inventory/CreateProductDialog'
@@ -64,6 +68,30 @@ interface ThumbnailBackfillResponse {
   updated: number
   failed: number
   remaining_null_thumbnail_url: number
+}
+
+interface ZohoBulkSyncResponse {
+  total_processed: number
+  total_success: number
+  total_failed: number
+}
+
+interface ZohoReadinessItem {
+  variant_id: number
+  sku: string
+  identity_type: string
+  ready: boolean
+  severity: 'ok' | 'warning' | 'error'
+  missing_fields: string[]
+  warnings: string[]
+}
+
+interface ZohoReadinessResponse {
+  total_checked: number
+  ready_count: number
+  blocked_count: number
+  warning_only_count: number
+  items: ZohoReadinessItem[]
 }
 
 const getTypeLabel = (type: ProductType): string => {
@@ -183,6 +211,8 @@ export default function InventoryManagement() {
   const [snackbarOpen, setSnackbarOpen] = useState(false)
   const [snackbarMessage, setSnackbarMessage] = useState('')
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success')
+  const [readinessDialogOpen, setReadinessDialogOpen] = useState(false)
+  const [readinessData, setReadinessData] = useState<ZohoReadinessResponse | null>(null)
   const { hasRole } = useAuth()
   const queryClient = useQueryClient()
 
@@ -201,6 +231,54 @@ export default function InventoryManagement() {
     },
     onError: (error: AxiosError<{ detail?: string }>) => {
       const detail = error.response?.data?.detail || 'Failed to run thumbnail backfill.'
+      setSnackbarSeverity('error')
+      setSnackbarMessage(detail)
+      setSnackbarOpen(true)
+    },
+  })
+
+  const zohoBulkSyncMutation = useMutation({
+    mutationFn: async () => {
+      const response = await axiosClient.post<ZohoBulkSyncResponse>(ZOHO.SYNC_ITEMS, {
+        include_images: true,
+        include_composites: true,
+        force_resync: true,
+        limit: 5000,
+      })
+      return response.data
+    },
+    onSuccess: async (data: ZohoBulkSyncResponse) => {
+      setSnackbarSeverity('success')
+      setSnackbarMessage(
+        `Zoho sync complete: ${data.total_success}/${data.total_processed} succeeded, ${data.total_failed} failed.`
+      )
+      setSnackbarOpen(true)
+      await queryClient.invalidateQueries({ queryKey: ['variants'] })
+    },
+    onError: (error: AxiosError<{ detail?: string }>) => {
+      const detail = error.response?.data?.detail || 'Zoho sync failed.'
+      setSnackbarSeverity('error')
+      setSnackbarMessage(detail)
+      setSnackbarOpen(true)
+    },
+  })
+
+  const zohoReadinessMutation = useMutation({
+    mutationFn: async () => {
+      const response = await axiosClient.post<ZohoReadinessResponse>(ZOHO.SYNC_READINESS, {
+        include_images: true,
+        include_composites: true,
+        only_unsynced: false,
+        limit: 5000,
+      })
+      return response.data
+    },
+    onSuccess: (data: ZohoReadinessResponse) => {
+      setReadinessData(data)
+      setReadinessDialogOpen(true)
+    },
+    onError: (error: AxiosError<{ detail?: string }>) => {
+      const detail = error.response?.data?.detail || 'Zoho readiness check failed.'
       setSnackbarSeverity('error')
       setSnackbarMessage(detail)
       setSnackbarOpen(true)
@@ -349,6 +427,17 @@ export default function InventoryManagement() {
         <Typography variant="h4">Inventory Management</Typography>
         {hasRole(['ADMIN']) && (
           <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button
+              variant="outlined"
+              onClick={() => zohoReadinessMutation.mutate()}
+              disabled={zohoReadinessMutation.isPending || zohoBulkSyncMutation.isPending}
+            >
+              {zohoReadinessMutation.isPending
+                ? 'Checking Readiness...'
+                : zohoBulkSyncMutation.isPending
+                  ? 'Syncing Zoho...'
+                  : 'Sync All to Zoho'}
+            </Button>
             <Button
               variant="outlined"
               onClick={() => backfillThumbnailsMutation.mutate()}
@@ -578,6 +667,81 @@ export default function InventoryManagement() {
           {snackbarMessage}
         </Alert>
       </Snackbar>
+
+      <Dialog
+        open={readinessDialogOpen}
+        onClose={() => setReadinessDialogOpen(false)}
+        fullWidth
+        maxWidth="md"
+      >
+        <DialogTitle>Zoho Sync Readiness</DialogTitle>
+        <DialogContent>
+          {zohoReadinessMutation.isPending ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+              <CircularProgress size={28} />
+            </Box>
+          ) : readinessData ? (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                <Chip label={`Checked: ${readinessData.total_checked}`} size="small" />
+                <Chip label={`Ready: ${readinessData.ready_count}`} size="small" color="success" />
+                <Chip label={`Blocked: ${readinessData.blocked_count}`} size="small" color="error" />
+                <Chip
+                  label={`Warnings: ${readinessData.warning_only_count}`}
+                  size="small"
+                  color="warning"
+                />
+              </Box>
+
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>SKU</TableCell>
+                    <TableCell>Type</TableCell>
+                    <TableCell>Status</TableCell>
+                    <TableCell>Missing Fields</TableCell>
+                    <TableCell>Warnings</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {readinessData.items.slice(0, 25).map((item: ZohoReadinessItem) => (
+                    <TableRow key={item.variant_id}>
+                      <TableCell>
+                        <Typography variant="body2" fontFamily="monospace">
+                          {item.sku}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>{item.identity_type}</TableCell>
+                      <TableCell>
+                        <Chip
+                          size="small"
+                          label={item.severity.toUpperCase()}
+                          color={item.severity === 'error' ? 'error' : item.severity === 'warning' ? 'warning' : 'success'}
+                        />
+                      </TableCell>
+                      <TableCell>{item.missing_fields.join(', ') || '-'}</TableCell>
+                      <TableCell>{item.warnings.join(', ') || '-'}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Box>
+          ) : null}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setReadinessDialogOpen(false)}>Close</Button>
+          <Button
+            variant="contained"
+            disabled={zohoBulkSyncMutation.isPending}
+            onClick={() => {
+              setReadinessDialogOpen(false)
+              zohoBulkSyncMutation.mutate()
+            }}
+          >
+            {zohoBulkSyncMutation.isPending ? 'Syncing...' : 'Sync Anyway'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }

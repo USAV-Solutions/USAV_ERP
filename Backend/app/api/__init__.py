@@ -13,6 +13,7 @@ from app.modules.inventory.routes import (
     inventory_router,
     listings_router,
     variants_router,
+    zoho_router,
     brand_router,
     color_router,
     condition_router,
@@ -33,6 +34,7 @@ api_router.include_router(bundles_router)
 api_router.include_router(listings_router)
 api_router.include_router(inventory_router)
 api_router.include_router(images_router)
+api_router.include_router(zoho_router)
 # Lookup routes
 api_router.include_router(brand_router)
 api_router.include_router(color_router)

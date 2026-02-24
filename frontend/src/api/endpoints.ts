@@ -58,6 +58,11 @@ export const IMAGES = {
   DEBUG_COUNTERS: '/images/debug/counters',
 }
 
+export const ZOHO = {
+  SYNC_ITEMS: '/zoho/sync/items',
+  SYNC_READINESS: '/zoho/sync/readiness',
+}
+
 // Order endpoints – matches Backend routes.py prefix /orders
 export const ORDERS = {
   // CRUD
