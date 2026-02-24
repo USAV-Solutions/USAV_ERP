@@ -117,6 +117,7 @@ function ExpandedRow({ familyName, variants }: ExpandedRowProps) {
                   <TableCell>
                     <ProductThumbnail
                       sku={variant.full_sku}
+                      thumbnailUrl={variant.thumbnail_url}
                       size={36}
                       onClick={() => setGallerySku(variant.full_sku)}
                     />
@@ -396,6 +397,7 @@ export default function InventoryManagement() {
                       <TableCell>
                         <ProductThumbnail
                           sku={variant.full_sku}
+                          thumbnailUrl={variant.thumbnail_url}
                           size={40}
                           onClick={() => setGallerySku(variant.full_sku)}
                         />

@@ -9,13 +9,14 @@ For each SKU, the listing folder with the most images is selected as the
 """
 import logging
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -28,7 +29,15 @@ router = APIRouter(prefix="/images", tags=["Product Images"])
 
 IMAGES_ROOT = Path(getattr(settings, "product_images_path", "/mnt/product_images"))
 
-IMAGE_EXTENSION = ".jpg"
+IMAGE_EXTENSION = [".jpg", ".jpeg", ".png", ".webp"]  # Only consider these as valid image files
+
+
+@dataclass
+class VariantImageContext:
+    variant_id: int
+    full_sku: str
+    generated_upis_h: str
+    thumbnail_url: Optional[str]
 
 
 class ImageInfo(BaseModel):
@@ -44,19 +53,15 @@ class SkuImagesResponse(BaseModel):
     images: list[ImageInfo]
 
 
-async def _find_variant_dir(db: AsyncSession, sku: str) -> Optional[Path]:
-    """
-    Resolve SKU to generated_upis_h via DB and return expected variant image dir:
-    /mnt/product_images/{generated_upis_h}/{full_sku}
-    """
-    if not IMAGES_ROOT.is_dir():
-        logger.warning("[IMAGE_SEARCH] Image root directory does not exist: %s", IMAGES_ROOT)
-        return None
-
-    logger.info("[IMAGE_DEBUG] Lookup SKU in DB: sku=%s root=%s", sku, IMAGES_ROOT)
-
+async def _get_variant_context(db: AsyncSession, sku: str) -> Optional[VariantImageContext]:
+    """Resolve SKU and return variant metadata needed for image lookup and thumbnail caching."""
     stmt = (
-        select(ProductVariant.full_sku, ProductIdentity.generated_upis_h)
+        select(
+            ProductVariant.id,
+            ProductVariant.full_sku,
+            ProductVariant.thumbnail_url,
+            ProductIdentity.generated_upis_h,
+        )
         .join(ProductIdentity, ProductVariant.identity_id == ProductIdentity.id)
         .where(ProductVariant.full_sku == sku)
     )
@@ -64,7 +69,12 @@ async def _find_variant_dir(db: AsyncSession, sku: str) -> Optional[Path]:
 
     if row is None and sku != sku.upper():
         stmt_upper = (
-            select(ProductVariant.full_sku, ProductIdentity.generated_upis_h)
+            select(
+                ProductVariant.id,
+                ProductVariant.full_sku,
+                ProductVariant.thumbnail_url,
+                ProductIdentity.generated_upis_h,
+            )
             .join(ProductIdentity, ProductVariant.identity_id == ProductIdentity.id)
             .where(ProductVariant.full_sku == sku.upper())
         )
@@ -74,12 +84,29 @@ async def _find_variant_dir(db: AsyncSession, sku: str) -> Optional[Path]:
         logger.warning("[IMAGE_SEARCH] SKU not found in database: %s", sku)
         return None
 
-    variant_dir = IMAGES_ROOT / row.generated_upis_h / row.full_sku
+    return VariantImageContext(
+        variant_id=row.id,
+        full_sku=row.full_sku,
+        generated_upis_h=row.generated_upis_h,
+        thumbnail_url=row.thumbnail_url,
+    )
+
+
+def _find_variant_dir(context: VariantImageContext) -> Optional[Path]:
+    """
+    Resolve SKU to generated_upis_h via DB and return expected variant image dir:
+    /mnt/product_images/{generated_upis_h}/{full_sku}
+    """
+    if not IMAGES_ROOT.is_dir():
+        logger.warning("[IMAGE_SEARCH] Image root directory does not exist: %s", IMAGES_ROOT)
+        return None
+
+    variant_dir = IMAGES_ROOT / context.generated_upis_h / context.full_sku
     logger.info(
         "[IMAGE_DEBUG] Resolved variant path for sku=%s -> upis_h=%s full_sku=%s path=%s",
-        sku,
-        row.generated_upis_h,
-        row.full_sku,
+        context.full_sku,
+        context.generated_upis_h,
+        context.full_sku,
         variant_dir,
     )
     if variant_dir.is_dir():
@@ -125,7 +152,7 @@ def _get_best_listing(variant_dir: Path) -> Optional[tuple[str, Path]]:
     for entry in _iter_listing_dirs(variant_dir):
         img_count = sum(
             1 for f in entry.iterdir()
-            if f.is_file() and f.suffix.lower() == IMAGE_EXTENSION
+            if f.is_file() and f.suffix.lower() in IMAGE_EXTENSION
         )
         listing_counts[entry.name] = img_count
 
@@ -148,7 +175,7 @@ def _sorted_images(listing_path: Path) -> list[str]:
     """Return .jpg image filenames sorted lexicographically."""
     files = [
         f.name for f in listing_path.iterdir()
-        if f.is_file() and f.suffix.lower() == IMAGE_EXTENSION
+        if f.is_file() and f.suffix.lower() in IMAGE_EXTENSION
     ]
     sorted_files = sorted(files)
     logger.info(
@@ -157,6 +184,62 @@ def _sorted_images(listing_path: Path) -> list[str]:
         sorted_files,
     )
     return sorted_files
+
+
+def _build_public_thumbnail_url(
+    context: VariantImageContext,
+    listing_name: str,
+    image_filename: str,
+) -> str:
+    """Build direct Nginx-served URL for a thumbnail image."""
+    return f"/product-images/{context.generated_upis_h}/{context.full_sku}/{listing_name}/{image_filename}"
+
+
+async def _resolve_or_backfill_thumbnail_url(
+    db: AsyncSession,
+    sku: str,
+) -> tuple[Optional[VariantImageContext], Optional[str]]:
+    """
+    Read thumbnail_url from DB when available.
+    For legacy rows without thumbnail_url, compute best image URL and persist it.
+    """
+    context = await _get_variant_context(db, sku)
+    if context is None:
+        return None, None
+
+    if context.thumbnail_url:
+        return context, context.thumbnail_url
+
+    variant_dir = _find_variant_dir(context)
+    if not variant_dir:
+        return context, None
+
+    listing_result = _get_best_listing(variant_dir)
+    if not listing_result:
+        return context, None
+
+    listing_name, listing_path = listing_result
+    image_files = _sorted_images(listing_path)
+    if not image_files:
+        return context, None
+
+    thumbnail_url = _build_public_thumbnail_url(context, listing_name, image_files[0])
+
+    await db.execute(
+        update(ProductVariant)
+        .where(ProductVariant.id == context.variant_id)
+        .values(thumbnail_url=thumbnail_url)
+    )
+    await db.commit()
+    context.thumbnail_url = thumbnail_url
+
+    logger.info(
+        "[THUMB_DEBUG] Backfilled thumbnail_url for sku=%s variant_id=%s -> %s",
+        context.full_sku,
+        context.variant_id,
+        thumbnail_url,
+    )
+    return context, thumbnail_url
 
 
 @router.get(
@@ -174,7 +257,13 @@ async def get_sku_images(
     """
     logger.info(f"[IMAGE_API] GET /{sku} - Fetching image metadata")
 
-    variant_dir = await _find_variant_dir(db, sku)
+    context, resolved_thumbnail_url = await _resolve_or_backfill_thumbnail_url(db, sku)
+
+    if context is None:
+        logger.warning(f"[IMAGE_API] GET /{sku} - Returning 404: No images found")
+        raise HTTPException(status_code=404, detail=f"No images found for SKU: {sku}")
+
+    variant_dir = _find_variant_dir(context)
 
     if not variant_dir:
         logger.warning(f"[IMAGE_API] GET /{sku} - Returning 404: No images found")
@@ -208,17 +297,17 @@ async def get_sku_images(
 
     logger.info(
         "[IMAGE_DEBUG] Response URLs for sku=%s -> thumbnail=%s images=%s",
-        sku,
-        f"/api/v1/images/{sku}/file/{image_files[0]}",
+        context.full_sku,
+        resolved_thumbnail_url or f"/api/v1/images/{context.full_sku}/file/{image_files[0]}",
         [img.url for img in images],
     )
 
     logger.info(f"[IMAGE_API] GET /{sku} - Returning 200: {len(images)} images from {listing_name}")
     return SkuImagesResponse(
-        sku=sku,
+        sku=context.full_sku,
         listing=listing_name,
         total_images=len(image_files),
-        thumbnail_url=f"/api/v1/images/{sku}/file/{image_files[0]}",
+        thumbnail_url=resolved_thumbnail_url or f"/api/v1/images/{context.full_sku}/file/{image_files[0]}",
         images=images,
     )
 
@@ -241,52 +330,24 @@ async def get_sku_thumbnail(
             request.url.path,
         )
 
-    variant_dir = await _find_variant_dir(db, sku)
+    context, thumbnail_url = await _resolve_or_backfill_thumbnail_url(db, sku)
 
-    if not variant_dir:
+    if context is None:
         logger.warning(f"[IMAGE_API] GET /{sku}/thumbnail - Returning 404: No images found")
         raise HTTPException(status_code=404, detail=f"No images found for SKU: {sku}")
 
-    result = _get_best_listing(variant_dir)
-    if not result:
-        logger.warning(f"[IMAGE_API] GET /{sku}/thumbnail - Returning 404: No listing folders found")
-        raise HTTPException(status_code=404, detail=f"No listing folders found for SKU: {sku}")
+    if not thumbnail_url:
+        logger.warning(f"[IMAGE_API] GET /{sku}/thumbnail - Returning 404: No thumbnail found")
+        raise HTTPException(status_code=404, detail=f"No thumbnail found for SKU: {sku}")
 
-    listing_name, listing_path = result
     logger.info(
-        "[THUMB_DEBUG] Selected listing for sku=%s -> listing=%s path=%s",
-        sku,
-        listing_name,
-        listing_path,
+        "[IMAGE_API] GET /%s/thumbnail - Returning redirect to %s",
+        context.full_sku,
+        thumbnail_url,
     )
-    image_files = _sorted_images(listing_path)
-
-    if not image_files:
-        logger.warning(f"[IMAGE_API] GET /{sku}/thumbnail - Returning 404: No images in best listing")
-        raise HTTPException(status_code=404, detail=f"No images in best listing for SKU: {sku}")
-
-    file_path = listing_path / image_files[0]
-    logger.info(
-        "[THUMB_DEBUG] Thumbnail candidate for sku=%s -> filename=%s file_path=%s exists=%s",
-        sku,
-        image_files[0],
-        file_path,
-        file_path.is_file(),
-    )
-
-    if not file_path.is_file():
-        logger.warning(
-            "[IMAGE_API] GET /%s/thumbnail - Returning 404: Resolved thumbnail path missing: %s; available_jpg=%s",
-            sku,
-            file_path,
-            image_files,
-        )
-        raise HTTPException(status_code=404, detail=f"Thumbnail file not found for SKU: {sku}")
-
-    logger.info(f"[IMAGE_API] GET /{sku}/thumbnail - Returning 200: {file_path}")
-    return FileResponse(
-        path=str(file_path),
-        media_type=_guess_media_type(file_path),
+    return RedirectResponse(
+        url=thumbnail_url,
+        status_code=307,
         headers={"Cache-Control": "public, max-age=86400"},
     )
 
@@ -315,7 +376,8 @@ async def get_sku_image_file(
         logger.warning(f"[IMAGE_API] GET /{sku}/file/{filename} - Returning 400: Invalid filename")
         raise HTTPException(status_code=400, detail="Invalid filename")
 
-    variant_dir = await _find_variant_dir(db, sku)
+    context = await _get_variant_context(db, sku)
+    variant_dir = _find_variant_dir(context) if context else None
 
     if not variant_dir:
         logger.warning(f"[IMAGE_API] GET /{sku}/file/{filename} - Returning 404: No images found")
@@ -372,23 +434,12 @@ async def get_batch_thumbnails(
     result: dict[str, Optional[str]] = {}
 
     for sku in sku_list:
-        variant_dir = await _find_variant_dir(db, sku)
-        if not variant_dir:
+        context, thumbnail_url = await _resolve_or_backfill_thumbnail_url(db, sku)
+        if context is None:
             result[sku] = None
             continue
 
-        listing_result = _get_best_listing(variant_dir)
-        if not listing_result:
-            result[sku] = None
-            continue
-
-        _listing_name, listing_path = listing_result
-        image_files = _sorted_images(listing_path)
-
-        if image_files:
-            result[sku] = f"/api/v1/images/{sku}/thumbnail"
-        else:
-            result[sku] = None
+        result[context.full_sku] = thumbnail_url
 
     found_count = sum(1 for v in result.values() if v is not None)
     logger.info(f"[IMAGE_API] GET /batch/thumbnails - Returning 200: {found_count}/{len(sku_list)} thumbnails found")

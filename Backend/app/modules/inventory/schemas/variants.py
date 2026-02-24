@@ -34,6 +34,7 @@ class ProductVariantResponse(ProductVariantBase):
     identity_id: int
     full_sku: str = Field(..., description="Complete sellable SKU")
     zoho_item_id: Optional[str] = Field(None, description="Zoho item ID")
+    thumbnail_url: Optional[str] = Field(None, description="Precomputed thumbnail URL served directly by Nginx")
     zoho_sync_status: ZohoSyncStatus = Field(default=ZohoSyncStatus.PENDING)
     zoho_last_synced_at: Optional[datetime] = None
     created_at: datetime

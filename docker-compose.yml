@@ -177,6 +177,8 @@ services:
     profiles:
       - prod
     restart: unless-stopped
+    volumes:
+      - /mnt/product_images:/mnt/product_images:ro
     ports:
       - "3636:3636"
     depends_on:
@@ -208,6 +210,7 @@ services:
       - ./frontend/vite.config.ts:/app/vite.config.ts
       - ./frontend/tsconfig.json:/app/tsconfig.json
       - ./frontend/tsconfig.node.json:/app/tsconfig.node.json
+      - /mnt/product_images:/app/public/product-images:ro
     environment:
       - VITE_SEATALK_APP_ID=${SEATALK_APP_ID:-}
       - VITE_SEATALK_REDIRECT_URI=${SEATALK_REDIRECT_URI:-}

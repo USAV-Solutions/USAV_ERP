@@ -476,6 +476,11 @@ class ProductVariant(Base, TimestampMixin):
         nullable=True,
         comment="Item ID on Zoho Inventory System.",
     )
+    thumbnail_url: Mapped[Optional[str]] = mapped_column(
+        String(1024),
+        nullable=True,
+        comment="Precomputed public URL for this variant thumbnail (served directly by Nginx).",
+    )
     zoho_sync_status: Mapped[ZohoSyncStatus] = mapped_column(
         Enum(ZohoSyncStatus, name="zoho_sync_status_enum"),
         nullable=False,

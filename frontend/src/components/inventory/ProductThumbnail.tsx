@@ -4,17 +4,16 @@ import { ImageNotSupported } from '@mui/icons-material'
 
 interface ProductThumbnailProps {
   sku: string
+  thumbnailUrl?: string | null
   size?: number
   onClick?: () => void
 }
 
-export default function ProductThumbnail({ sku, size = 40, onClick }: ProductThumbnailProps) {
+export default function ProductThumbnail({ sku, thumbnailUrl, size = 40, onClick }: ProductThumbnailProps) {
   const [hasError, setHasError] = useState(false)
   const [isLoaded, setIsLoaded] = useState(false)
 
-  const thumbnailUrl = `/api/v1/images/${sku}/thumbnail`
-
-  if (hasError) {
+  if (hasError || !thumbnailUrl) {
     return (
       <Box
         sx={{
