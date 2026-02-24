@@ -3,6 +3,8 @@ import {
   Box,
   Typography,
   Button,
+  Alert,
+  Snackbar,
   Paper,
   TextField,
   InputAdornment,
@@ -28,9 +30,10 @@ import {
   ExpandLess,
   Collections,
 } from '@mui/icons-material'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { AxiosError } from 'axios'
 import axiosClient from '../api/axiosClient'
-import { CATALOG } from '../api/endpoints'
+import { CATALOG, IMAGES } from '../api/endpoints'
 import { Variant, ProductIdentity, ProductFamily, ProductType } from '../types/inventory'
 import { useAuth } from '../hooks/useAuth'
 import CreateProductDialog from '../components/inventory/CreateProductDialog'
@@ -54,6 +57,13 @@ interface GroupedItem {
   brand?: string
   variant_count: number
   variants: EnhancedVariant[]
+}
+
+interface ThumbnailBackfillResponse {
+  processed: number
+  updated: number
+  failed: number
+  remaining_null_thumbnail_url: number
 }
 
 const getTypeLabel = (type: ProductType): string => {
@@ -170,7 +180,32 @@ export default function InventoryManagement() {
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(25)
   const [gallerySku, setGallerySku] = useState<string | null>(null)
+  const [snackbarOpen, setSnackbarOpen] = useState(false)
+  const [snackbarMessage, setSnackbarMessage] = useState('')
+  const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success')
   const { hasRole } = useAuth()
+  const queryClient = useQueryClient()
+
+  const backfillThumbnailsMutation = useMutation({
+    mutationFn: async () => {
+      const response = await axiosClient.post(IMAGES.DEBUG_BACKFILL)
+      return response.data
+    },
+    onSuccess: async (data: ThumbnailBackfillResponse) => {
+      setSnackbarSeverity('success')
+      setSnackbarMessage(
+        `Thumbnail backfill completed: ${data.updated} updated, ${data.failed} failed, ${data.remaining_null_thumbnail_url} remaining.`
+      )
+      setSnackbarOpen(true)
+      await queryClient.invalidateQueries({ queryKey: ['variants'] })
+    },
+    onError: (error: AxiosError<{ detail?: string }>) => {
+      const detail = error.response?.data?.detail || 'Failed to run thumbnail backfill.'
+      setSnackbarSeverity('error')
+      setSnackbarMessage(detail)
+      setSnackbarOpen(true)
+    },
+  })
 
   // Fetch variants with identity data
   const { data: variantsData, isLoading: variantsLoading } = useQuery({
@@ -313,13 +348,22 @@ export default function InventoryManagement() {
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4">Inventory Management</Typography>
         {hasRole(['ADMIN']) && (
-          <Button
-            variant="contained"
-            startIcon={<Add />}
-            onClick={() => setCreateDialogOpen(true)}
-          >
-            Add New Item
-          </Button>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button
+              variant="outlined"
+              onClick={() => backfillThumbnailsMutation.mutate()}
+              disabled={backfillThumbnailsMutation.isPending}
+            >
+              {backfillThumbnailsMutation.isPending ? 'Backfilling...' : 'Backfill Thumbnails'}
+            </Button>
+            <Button
+              variant="contained"
+              startIcon={<Add />}
+              onClick={() => setCreateDialogOpen(true)}
+            >
+              Add New Item
+            </Button>
+          </Box>
         )}
       </Box>
 
@@ -518,6 +562,22 @@ export default function InventoryManagement() {
           sku={gallerySku}
         />
       )}
+
+      <Snackbar
+        open={snackbarOpen}
+        autoHideDuration={5000}
+        onClose={() => setSnackbarOpen(false)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert
+          onClose={() => setSnackbarOpen(false)}
+          severity={snackbarSeverity}
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {snackbarMessage}
+        </Alert>
+      </Snackbar>
     </Box>
   )
 }

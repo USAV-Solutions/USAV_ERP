@@ -54,6 +54,8 @@ export const IMAGES = {
   THUMBNAIL: (sku: string) => `/images/${sku}/thumbnail`,
   FILE: (sku: string, filename: string) => `/images/${sku}/file/${filename}`,
   BATCH_THUMBNAILS: '/images/batch/thumbnails',
+  DEBUG_BACKFILL: '/images/debug/backfill-thumbnails',
+  DEBUG_COUNTERS: '/images/debug/counters',
 }
 
 // Order endpoints – matches Backend routes.py prefix /orders

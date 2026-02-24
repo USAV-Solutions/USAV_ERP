@@ -13,7 +13,9 @@ export default function ProductThumbnail({ sku, thumbnailUrl, size = 40, onClick
   const [hasError, setHasError] = useState(false)
   const [isLoaded, setIsLoaded] = useState(false)
 
-  if (hasError || !thumbnailUrl) {
+  const resolvedThumbnailUrl = thumbnailUrl || `/api/v1/images/${sku}/thumbnail`
+
+  if (hasError) {
     return (
       <Box
         sx={{
@@ -57,7 +59,7 @@ export default function ProductThumbnail({ sku, thumbnailUrl, size = 40, onClick
       )}
       <Box
         component="img"
-        src={thumbnailUrl}
+        src={resolvedThumbnailUrl}
         alt={sku}
         loading="lazy"
         onLoad={() => setIsLoaded(true)}

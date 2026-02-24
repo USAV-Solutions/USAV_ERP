@@ -13,12 +13,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import AdminUser
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.entities import ProductIdentity, ProductVariant
@@ -496,11 +497,76 @@ async def get_batch_thumbnails(
     "/debug/counters",
     summary="Debug counters for image routes",
 )
-async def get_image_debug_counters():
+async def get_image_debug_counters(
+    _admin: AdminUser,
+):
     """Return in-memory counters showing which image routes are receiving traffic."""
     return {
         "counters": IMAGE_DEBUG_COUNTERS,
         "note": "In-memory counters reset when backend process restarts.",
+    }
+
+
+@router.post(
+    "/debug/backfill-thumbnails",
+    summary="Backfill missing thumbnail_url values",
+)
+async def backfill_missing_thumbnail_urls(
+    _admin: AdminUser,
+    limit: int = Query(500, ge=1, le=5000, description="Max number of variants to process in this run"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Compute and persist thumbnail_url for variants that are currently NULL.
+    Uses existing resolve/backfill logic to keep behavior consistent.
+    """
+    rows = (
+        await db.execute(
+            select(ProductVariant.full_sku)
+            .where(ProductVariant.thumbnail_url.is_(None))
+            .order_by(ProductVariant.id)
+            .limit(limit)
+        )
+    ).all()
+
+    sku_list = [row.full_sku for row in rows]
+    processed = 0
+    updated = 0
+    failed = 0
+    updated_skus: list[str] = []
+    failed_skus: list[str] = []
+
+    for sku in sku_list:
+        processed += 1
+        _context, url = await _resolve_or_backfill_thumbnail_url(db, sku)
+        if url:
+            updated += 1
+            updated_skus.append(sku)
+        else:
+            failed += 1
+            failed_skus.append(sku)
+
+    logger.warning(
+        "[THUMB_TRACE] BULK_BACKFILL completed processed=%s updated=%s failed=%s limit=%s",
+        processed,
+        updated,
+        failed,
+        limit,
+    )
+
+    remaining_null_thumbnail_url = (
+        await db.execute(
+            select(func.count(ProductVariant.id)).where(ProductVariant.thumbnail_url.is_(None))
+        )
+    ).scalar_one()
+
+    return {
+        "processed": processed,
+        "updated": updated,
+        "failed": failed,
+        "remaining_null_thumbnail_url": remaining_null_thumbnail_url,
+        "updated_skus": updated_skus,
+        "failed_skus": failed_skus,
     }
 
 
