@@ -31,6 +31,13 @@ IMAGES_ROOT = Path(getattr(settings, "product_images_path", "/mnt/product_images
 
 IMAGE_EXTENSION = [".jpg", ".jpeg", ".png", ".webp"]  # Only consider these as valid image files
 
+IMAGE_DEBUG_COUNTERS: dict[str, int] = {
+    "sku_images": 0,
+    "sku_thumbnail": 0,
+    "sku_file": 0,
+    "batch_thumbnails": 0,
+}
+
 
 @dataclass
 class VariantImageContext:
@@ -203,24 +210,41 @@ async def _resolve_or_backfill_thumbnail_url(
     Read thumbnail_url from DB when available.
     For legacy rows without thumbnail_url, compute best image URL and persist it.
     """
+    logger.info("[THUMB_TRACE] Resolve requested for sku=%s", sku)
     context = await _get_variant_context(db, sku)
     if context is None:
+        logger.warning("[THUMB_TRACE] Resolve result: SKU not found in DB for sku=%s", sku)
         return None, None
 
     if context.thumbnail_url:
+        logger.warning(
+            "[THUMB_TRACE] Cache hit for sku=%s variant_id=%s thumbnail_url=%s",
+            context.full_sku,
+            context.variant_id,
+            context.thumbnail_url,
+        )
         return context, context.thumbnail_url
+
+    logger.warning(
+        "[THUMB_TRACE] Cache miss for sku=%s variant_id=%s -> computing best listing",
+        context.full_sku,
+        context.variant_id,
+    )
 
     variant_dir = _find_variant_dir(context)
     if not variant_dir:
+        logger.warning("[THUMB_TRACE] Resolve failed: variant_dir not found for sku=%s", context.full_sku)
         return context, None
 
     listing_result = _get_best_listing(variant_dir)
     if not listing_result:
+        logger.warning("[THUMB_TRACE] Resolve failed: no listing folders for sku=%s", context.full_sku)
         return context, None
 
     listing_name, listing_path = listing_result
     image_files = _sorted_images(listing_path)
     if not image_files:
+        logger.warning("[THUMB_TRACE] Resolve failed: no images in best listing for sku=%s", context.full_sku)
         return context, None
 
     thumbnail_url = _build_public_thumbnail_url(context, listing_name, image_files[0])
@@ -255,6 +279,7 @@ async def get_sku_images(
     Returns image metadata for a product variant SKU.
     Automatically selects the listing folder with the most images.
     """
+    IMAGE_DEBUG_COUNTERS["sku_images"] += 1
     logger.info(f"[IMAGE_API] GET /{sku} - Fetching image metadata")
 
     context, resolved_thumbnail_url = await _resolve_or_backfill_thumbnail_url(db, sku)
@@ -322,6 +347,18 @@ async def get_sku_thumbnail(
     db: AsyncSession = Depends(get_db),
 ):
     """Serve the first sorted .jpg from the best listing as the thumbnail."""
+    IMAGE_DEBUG_COUNTERS["sku_thumbnail"] += 1
+    logger.warning(
+        "[THUMB_TRACE] ROUTE_HIT method=%s path=%s sku=%s host=%s forwarded_for=%s forwarded_proto=%s user_agent=%s referer=%s",
+        request.method,
+        request.url.path,
+        sku,
+        request.headers.get("host"),
+        request.headers.get("x-forwarded-for"),
+        request.headers.get("x-forwarded-proto"),
+        request.headers.get("user-agent"),
+        request.headers.get("referer"),
+    )
     logger.info(f"[IMAGE_API] GET /{sku}/thumbnail - Fetching thumbnail")
     logger.info("[THUMB_DEBUG] Incoming request path: %s", request.url.path)
     if "/api/v1/api/v1/" in request.url.path:
@@ -331,6 +368,13 @@ async def get_sku_thumbnail(
         )
 
     context, thumbnail_url = await _resolve_or_backfill_thumbnail_url(db, sku)
+
+    logger.warning(
+        "[THUMB_TRACE] ROUTE_RESOLVE sku=%s context_found=%s thumbnail_url=%s",
+        sku,
+        context is not None,
+        thumbnail_url,
+    )
 
     if context is None:
         logger.warning(f"[IMAGE_API] GET /{sku}/thumbnail - Returning 404: No images found")
@@ -363,6 +407,7 @@ async def get_sku_image_file(
     db: AsyncSession = Depends(get_db),
 ):
     """Serve a specific image file from the best listing of a SKU."""
+    IMAGE_DEBUG_COUNTERS["sku_file"] += 1
     logger.info(f"[IMAGE_API] GET /{sku}/file/{filename} - Fetching image file")
     logger.info("[IMAGE_DEBUG] Incoming request path: %s", request.url.path)
     if "/api/v1/api/v1/" in request.url.path:
@@ -429,6 +474,7 @@ async def get_batch_thumbnails(
     Get thumbnail URLs for a comma-separated list of SKUs.
     Returns a mapping of SKU -> thumbnail_url (or null if not found).
     """
+    IMAGE_DEBUG_COUNTERS["batch_thumbnails"] += 1
     sku_list = [s.strip() for s in skus.split(",") if s.strip()]
     logger.info(f"[IMAGE_API] GET /batch/thumbnails - Fetching thumbnails for {len(sku_list)} SKUs")
     result: dict[str, Optional[str]] = {}
@@ -444,6 +490,18 @@ async def get_batch_thumbnails(
     found_count = sum(1 for v in result.values() if v is not None)
     logger.info(f"[IMAGE_API] GET /batch/thumbnails - Returning 200: {found_count}/{len(sku_list)} thumbnails found")
     return result
+
+
+@router.get(
+    "/debug/counters",
+    summary="Debug counters for image routes",
+)
+async def get_image_debug_counters():
+    """Return in-memory counters showing which image routes are receiving traffic."""
+    return {
+        "counters": IMAGE_DEBUG_COUNTERS,
+        "note": "In-memory counters reset when backend process restarts.",
+    }
 
 
 def _guess_media_type(path: Path) -> str:
