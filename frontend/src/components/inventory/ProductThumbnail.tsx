@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Box, Skeleton } from '@mui/material'
 import { ImageNotSupported } from '@mui/icons-material'
 
@@ -12,8 +12,28 @@ interface ProductThumbnailProps {
 export default function ProductThumbnail({ sku, thumbnailUrl, size = 40, onClick }: ProductThumbnailProps) {
   const [hasError, setHasError] = useState(false)
   const [isLoaded, setIsLoaded] = useState(false)
+  const imgRef = useRef<HTMLImageElement | null>(null)
 
   const resolvedThumbnailUrl = thumbnailUrl || `/api/v1/images/${sku}/thumbnail`
+
+  useEffect(() => {
+    setHasError(false)
+    setIsLoaded(false)
+  }, [resolvedThumbnailUrl])
+
+  useEffect(() => {
+    const imageEl = imgRef.current
+    if (!imageEl) return
+
+    if (imageEl.complete) {
+      if (imageEl.naturalWidth > 0) {
+        setIsLoaded(true)
+        setHasError(false)
+      } else {
+        setHasError(true)
+      }
+    }
+  }, [resolvedThumbnailUrl])
 
   if (hasError) {
     return (
@@ -58,7 +78,9 @@ export default function ProductThumbnail({ sku, thumbnailUrl, size = 40, onClick
         />
       )}
       <Box
+        key={resolvedThumbnailUrl}
         component="img"
+        ref={imgRef}
         src={resolvedThumbnailUrl}
         alt={sku}
         loading="lazy"
