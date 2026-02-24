@@ -93,7 +93,6 @@ class BundleRole(str, enum.Enum):
 
 class Platform(str, enum.Enum):
     """Supported sales platforms."""
-    ZOHO = "ZOHO"
     AMAZON = "AMAZON"
     EBAY_MEKONG = "EBAY_MEKONG"
     EBAY_USAV = "EBAY_USAV"
