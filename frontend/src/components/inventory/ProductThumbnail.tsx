@@ -90,8 +90,10 @@ export default function ProductThumbnail({ sku, thumbnailUrl, size = 40, onClick
           width: size,
           height: size,
           objectFit: 'cover',
-          display: isLoaded ? 'block' : 'none',
+          display: 'block',
+          opacity: isLoaded ? 1 : 0,
           borderRadius: 0.5,
+          transition: 'opacity 0.15s ease',
         }}
       />
     </Box>
