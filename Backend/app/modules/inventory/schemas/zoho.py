@@ -102,7 +102,7 @@ class ZohoSyncProgressResponse(BaseModel):
 
     job_id: str
     status: str
-    started_at: datetime
+    started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     total_target: int
     total_processed: int

@@ -73,8 +73,8 @@ interface ThumbnailBackfillResponse {
 
 interface ZohoSyncProgressResponse {
   job_id: string
-  status: 'queued' | 'running' | 'stopping' | 'stopped' | 'completed' | 'failed'
-  started_at: string
+  status: 'idle' | 'queued' | 'running' | 'stopping' | 'stopped' | 'completed' | 'failed'
+  started_at?: string | null
   finished_at?: string | null
   total_target: number
   total_processed: number
@@ -292,20 +292,12 @@ export default function InventoryManagement() {
   const { data: zohoSyncProgress } = useQuery<ZohoSyncProgressResponse | null>({
     queryKey: ['zoho-sync-progress'],
     queryFn: async () => {
-      try {
-        const response = await axiosClient.get<ZohoSyncProgressResponse>(ZOHO.SYNC_ITEMS_PROGRESS)
-        return response.data
-      } catch (error) {
-        const axiosError = error as AxiosError<{ detail?: string }>
-        if (axiosError.response?.status === 404) {
-          return null
-        }
-        throw error
-      }
+      const response = await axiosClient.get<ZohoSyncProgressResponse>(ZOHO.SYNC_ITEMS_PROGRESS)
+      return response.data
     },
     refetchInterval: (query) => {
       const data = query.state.data as ZohoSyncProgressResponse | null | undefined
-      if (!data) return false
+      if (!data || data.status === 'idle') return false
       return ['queued', 'running', 'stopping'].includes(data.status) ? 1500 : false
     },
   })

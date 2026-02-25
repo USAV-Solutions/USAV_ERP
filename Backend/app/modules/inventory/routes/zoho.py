@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -115,11 +116,31 @@ def _resolve_thumbnail_path(thumbnail_url: str | None) -> Path | None:
     return None
 
 
+def _sanitize_zoho_item_name(raw_name: str, fallback_sku: str) -> str:
+    """Normalize item name to a conservative Zoho-safe format."""
+    candidate = (raw_name or "").strip()
+    if not candidate:
+        candidate = f"USAV Item {fallback_sku}"
+
+    candidate = candidate.replace("\n", " ").replace("\r", " ")
+    candidate = re.sub(r"[^A-Za-z0-9 .,_\-\/()&+]", "", candidate)
+    candidate = re.sub(r"\s+", " ", candidate).strip()
+
+    if not candidate:
+        candidate = f"USAV Item {fallback_sku}"
+
+    if not re.search(r"[A-Za-z]", candidate):
+        candidate = f"USAV Item {fallback_sku}"
+
+    return candidate[:100]
+
+
 def _build_item_payload(variant: ProductVariant) -> dict:
     identity = variant.identity
     family = identity.family if identity else None
     base_name = family.base_name if family else variant.full_sku
-    item_name = f"{base_name} [{variant.full_sku}]"
+    preferred = f"{base_name} {variant.full_sku}" if base_name else f"USAV Item {variant.full_sku}"
+    item_name = _sanitize_zoho_item_name(preferred, variant.full_sku)
     description = family.description if family and family.description else ""
 
     payload: dict = {
@@ -166,9 +187,10 @@ async def _sync_single_standard_variant(
     synced_item_ids_by_identity: dict[int, str],
 ) -> ZohoBulkSyncItemResult:
     payload = _build_item_payload(variant)
+    item_name = payload.get("name", variant.full_sku)
     zoho_item = await zoho_client.sync_item(
         sku=variant.full_sku,
-        name=payload.get("name", variant.full_sku),
+        name=item_name,
         rate=float(payload.get("rate", 0) or 0),
         description=payload.get("description", ""),
         **{k: v for k, v in payload.items() if k not in {"name", "sku", "rate", "description"}},
@@ -249,9 +271,10 @@ async def _sync_single_composite_variant(
     payload = _build_item_payload(variant)
     payload["component_items"] = component_items
 
+    item_name = payload.get("name", variant.full_sku)
     composite_item = await zoho_client.sync_composite_item(
         sku=variant.full_sku,
-        name=payload.get("name", variant.full_sku),
+        name=item_name,
         rate=float(payload.get("rate", 0) or 0),
         description=payload.get("description", ""),
         component_items=component_items,
@@ -374,7 +397,7 @@ async def _execute_bulk_sync(
                 sku=variant.full_sku,
                 action="item_sync",
                 success=False,
-                message=str(exc),
+                message=f"{str(exc)} | attempted_name={_build_item_payload(variant).get('name', '')}",
             )
             if job is not None:
                 job.last_error = str(exc)
@@ -406,7 +429,7 @@ async def _execute_bulk_sync(
                     action="composite_sync",
                     success=False,
                     composite_synced=False,
-                    message=str(exc),
+                    message=f"{str(exc)} | attempted_name={_build_item_payload(variant).get('name', '')}",
                 )
                 if job is not None:
                     job.last_error = str(exc)
@@ -573,7 +596,35 @@ async def sync_all_items_to_zoho(
     db: AsyncSession = Depends(get_db),
 ):
     """Synchronous bulk push endpoint (kept for compatibility)."""
-    return await _execute_bulk_sync(db=db, data=data, job=None)
+    global _CURRENT_JOB, _LAST_JOB
+
+    async with _JOB_LOCK:
+        if _CURRENT_JOB and _CURRENT_JOB.status in {"queued", "running", "stopping"}:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A Zoho sync job is already running.",
+            )
+
+        job = _ZohoSyncJobState(
+            job_id=str(uuid.uuid4()),
+            request=data,
+            status="queued",
+            started_at=datetime.now(),
+        )
+        _CURRENT_JOB = job
+        _LAST_JOB = job
+
+    try:
+        return await _execute_bulk_sync(db=db, data=data, job=job)
+    except Exception as exc:
+        job.status = "failed"
+        job.last_error = str(exc)
+        job.finished_at = datetime.now()
+        raise
+    finally:
+        async with _JOB_LOCK:
+            _LAST_JOB = job
+            _CURRENT_JOB = None
 
 
 @router.post("/sync/items/start", response_model=ZohoSyncProgressResponse)
@@ -617,9 +668,18 @@ async def get_zoho_bulk_sync_progress(
     async with _JOB_LOCK:
         job = _CURRENT_JOB or _LAST_JOB
         if job is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No Zoho sync job has been started yet.",
+            return ZohoSyncProgressResponse(
+                job_id="",
+                status="idle",
+                started_at=None,
+                finished_at=None,
+                total_target=0,
+                total_processed=0,
+                total_success=0,
+                total_failed=0,
+                current_sku=None,
+                cancel_requested=False,
+                last_error=None,
             )
         return _as_progress_response(job)
 
