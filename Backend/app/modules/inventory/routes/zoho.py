@@ -138,8 +138,11 @@ def _sanitize_zoho_item_name(raw_name: str, fallback_sku: str) -> str:
 def _build_item_payload(variant: ProductVariant) -> dict:
     identity = variant.identity
     family = identity.family if identity else None
-    base_name = family.base_name if family else variant.full_sku
-    preferred = f"{base_name} {variant.full_sku}" if base_name else f"USAV Item {variant.full_sku}"
+    if variant.variant_name:
+        preferred = variant.variant_name
+    else:
+        base_name = family.base_name if family else variant.full_sku
+        preferred = f"{base_name} {variant.full_sku}" if base_name else f"USAV Item {variant.full_sku}"
     item_name = _sanitize_zoho_item_name(preferred, variant.full_sku)
     description = family.description if family and family.description else ""
 
