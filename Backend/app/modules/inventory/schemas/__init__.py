@@ -67,6 +67,7 @@ from app.modules.inventory.schemas.zoho import (
     ZohoReadinessItem,
     ZohoReadinessRequest,
     ZohoReadinessResponse,
+    ZohoSyncProgressResponse,
 )
 
 __all__ = [
@@ -128,5 +129,6 @@ __all__ = [
     "ZohoReadinessItem",
     "ZohoReadinessRequest",
     "ZohoReadinessResponse",
+    "ZohoSyncProgressResponse",
 ]
 

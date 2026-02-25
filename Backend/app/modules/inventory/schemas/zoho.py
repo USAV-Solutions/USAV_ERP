@@ -95,3 +95,19 @@ class ZohoReadinessResponse(BaseModel):
     blocked_count: int
     warning_only_count: int
     items: list[ZohoReadinessItem]
+
+
+class ZohoSyncProgressResponse(BaseModel):
+    """Current state of a background Zoho bulk sync job."""
+
+    job_id: str
+    status: str
+    started_at: datetime
+    finished_at: Optional[datetime] = None
+    total_target: int
+    total_processed: int
+    total_success: int
+    total_failed: int
+    current_sku: Optional[str] = None
+    cancel_requested: bool = False
+    last_error: Optional[str] = None

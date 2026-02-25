@@ -61,6 +61,9 @@ export const IMAGES = {
 export const ZOHO = {
   SYNC_ITEMS: '/zoho/sync/items',
   SYNC_READINESS: '/zoho/sync/readiness',
+  SYNC_ITEMS_START: '/zoho/sync/items/start',
+  SYNC_ITEMS_PROGRESS: '/zoho/sync/items/progress',
+  SYNC_ITEMS_STOP: '/zoho/sync/items/stop',
 }
 
 // Order endpoints – matches Backend routes.py prefix /orders
