@@ -11,6 +11,7 @@ from app.models import ConditionCode, ZohoSyncStatus
 
 class ProductVariantBase(BaseModel):
     """Base product variant schema."""
+    variant_name: Optional[str] = Field(None, max_length=255, description="Canonical display name for variant")
     color_code: Optional[str] = Field(None, max_length=2, description="Color code (e.g., BK, WY, SV)")
     condition_code: Optional[ConditionCode] = Field(None, description="Condition: N (New), R (Repair)")
     is_active: bool = Field(default=True, description="Whether variant is active")
@@ -23,6 +24,7 @@ class ProductVariantCreate(ProductVariantBase):
 
 class ProductVariantUpdate(BaseModel):
     """Schema for updating a product variant."""
+    variant_name: Optional[str] = Field(None, max_length=255)
     color_code: Optional[str] = Field(None, max_length=2)
     condition_code: Optional[ConditionCode] = Field(None)
     is_active: Optional[bool] = Field(None)

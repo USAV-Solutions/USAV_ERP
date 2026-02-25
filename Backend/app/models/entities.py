@@ -471,6 +471,11 @@ class ProductVariant(Base, TimestampMixin):
         unique=True,
         comment="Complete sellable string (e.g., '00845-P-1-WY-N').",
     )
+    variant_name: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Canonical display name for this variant (derived from platform listings).",
+    )
     zoho_item_id: Mapped[Optional[str]] = mapped_column(
         String(50),
         nullable=True,
