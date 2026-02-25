@@ -69,6 +69,7 @@ export interface Variant {
   id: number
   identity_id: number
   full_sku: string
+  variant_name?: string
   thumbnail_url?: string | null
   color_code?: string
   condition_code?: string

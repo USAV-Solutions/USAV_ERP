@@ -150,6 +150,7 @@ function ExpandedRow({ familyName, variants }: ExpandedRowProps) {
               <TableRow>
                 <TableCell width={60}>Image</TableCell>
                 <TableCell>Full SKU</TableCell>
+                <TableCell>Variant Name</TableCell>
                 <TableCell>Type</TableCell>
                 <TableCell>UPIS-H</TableCell>
                 <TableCell>Color</TableCell>
@@ -170,6 +171,7 @@ function ExpandedRow({ familyName, variants }: ExpandedRowProps) {
                     />
                   </TableCell>
                   <TableCell>{variant.full_sku}</TableCell>
+                  <TableCell>{variant.variant_name || variant.identity?.family?.base_name || '-'}</TableCell>
                   <TableCell>
                     <Chip
                       size="small"
@@ -405,11 +407,13 @@ export default function InventoryManagement() {
     const query = searchQuery.toLowerCase()
     return enhancedVariants.filter((variant) => {
       const name = variant.identity?.family?.base_name?.toLowerCase() || ''
+          const variantName = variant.variant_name?.toLowerCase() || ''
       const sku = variant.full_sku?.toLowerCase() || ''
       const upisH = variant.identity?.generated_upis_h?.toLowerCase() || ''
       const brand = variant.identity?.family?.brand?.name?.toLowerCase() || ''
       
       return name.includes(query) || 
+            variantName.includes(query) ||
              sku.includes(query) || 
              upisH.includes(query) ||
              brand.includes(query)
@@ -641,7 +645,7 @@ export default function InventoryManagement() {
                           {variant.full_sku}
                         </Typography>
                       </TableCell>
-                      <TableCell>{variant.identity?.family?.base_name || '-'}</TableCell>
+                      <TableCell>{variant.variant_name || variant.identity?.family?.base_name || '-'}</TableCell>
                       <TableCell>
                         <Chip
                           size="small"
