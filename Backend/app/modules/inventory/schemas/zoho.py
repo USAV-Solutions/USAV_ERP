@@ -52,6 +52,7 @@ class ZohoBulkSyncItemResult(BaseModel):
     sku: str
     action: str
     success: bool
+    zoho_sync_status: Optional[str] = None
     zoho_item_id: Optional[str] = None
     image_uploaded: bool = False
     composite_synced: bool = False

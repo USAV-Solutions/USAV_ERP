@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import {
   Box,
   Typography,
@@ -25,7 +25,6 @@ import {
   DialogContent,
   DialogActions,
   CircularProgress,
-  LinearProgress,
 } from '@mui/material'
 import {
   Add,
@@ -86,6 +85,20 @@ interface ZohoSyncProgressResponse {
   current_sku?: string | null
   cancel_requested: boolean
   last_error?: string | null
+}
+
+interface ZohoBulkSyncItemResult {
+  variant_id: number
+  success: boolean
+  zoho_sync_status?: string | null
+  zoho_item_id?: string | null
+}
+
+interface ZohoBulkSyncResponse {
+  total_processed: number
+  total_success: number
+  total_failed: number
+  items: ZohoBulkSyncItemResult[]
 }
 
 interface ZohoReadinessItem {
@@ -265,7 +278,7 @@ export default function InventoryManagement() {
 
   const zohoBulkSyncMutation = useMutation({
     mutationFn: async () => {
-      const response = await axiosClient.post<ZohoSyncProgressResponse>(ZOHO.SYNC_ITEMS_START, {
+      const response = await axiosClient.post<ZohoBulkSyncResponse>(ZOHO.SYNC_ITEMS, {
         include_images: true,
         include_composites: true,
         force_resync: true,
@@ -273,33 +286,33 @@ export default function InventoryManagement() {
       })
       return response.data
     },
-    onSuccess: async () => {
-      setSnackbarSeverity('success')
-      setSnackbarMessage('Zoho sync started.')
-      setSnackbarOpen(true)
-      await queryClient.invalidateQueries({ queryKey: ['zoho-sync-progress'] })
-    },
-    onError: (error: AxiosError<{ detail?: string }>) => {
-      const detail = error.response?.data?.detail || 'Zoho sync start failed.'
-      setSnackbarSeverity('error')
-      setSnackbarMessage(detail)
-      setSnackbarOpen(true)
-    },
-  })
+    onSuccess: async (data: ZohoBulkSyncResponse) => {
+      const statusByVariant = new Map(
+        data.items.map((item) => [item.variant_id, item.zoho_sync_status || (item.success ? 'SYNCED' : 'ERROR')])
+      )
+      queryClient.setQueryData(['variants'], (current: Variant[] | undefined) => {
+        if (!current) return current
+        return current.map((variant) => {
+          const status = statusByVariant.get(variant.id)
+          if (!status) return variant
+          const item = data.items.find((result) => result.variant_id === variant.id)
+          return {
+            ...variant,
+            zoho_sync_status: status as Variant['zoho_sync_status'],
+            zoho_item_id: item?.zoho_item_id || variant.zoho_item_id,
+          }
+        })
+      })
 
-  const zohoStopSyncMutation = useMutation({
-    mutationFn: async () => {
-      const response = await axiosClient.post<ZohoSyncProgressResponse>(ZOHO.SYNC_ITEMS_STOP)
-      return response.data
-    },
-    onSuccess: async () => {
       setSnackbarSeverity('success')
-      setSnackbarMessage('Stop requested for Zoho sync job.')
+      setSnackbarMessage(
+        `Zoho sync completed: ${data.total_success}/${data.total_processed} succeeded, ${data.total_failed} failed.`
+      )
       setSnackbarOpen(true)
-      await queryClient.invalidateQueries({ queryKey: ['zoho-sync-progress'] })
+      await queryClient.invalidateQueries({ queryKey: ['variants'] })
     },
     onError: (error: AxiosError<{ detail?: string }>) => {
-      const detail = error.response?.data?.detail || 'Failed to stop Zoho sync.'
+      const detail = error.response?.data?.detail || 'Zoho sync failed.'
       setSnackbarSeverity('error')
       setSnackbarMessage(detail)
       setSnackbarOpen(true)
@@ -321,7 +334,6 @@ export default function InventoryManagement() {
       setSnackbarOpen(true)
       setSyncingVariantId(null)
       await queryClient.invalidateQueries({ queryKey: ['variants'] })
-      await queryClient.invalidateQueries({ queryKey: ['zoho-sync-progress'] })
     },
     onError: (error: AxiosError<{ detail?: string }>) => {
       const detail = error.response?.data?.detail || 'Single-item Zoho sync failed.'
@@ -329,19 +341,6 @@ export default function InventoryManagement() {
       setSnackbarMessage(detail)
       setSnackbarOpen(true)
       setSyncingVariantId(null)
-    },
-  })
-
-  const { data: zohoSyncProgress } = useQuery<ZohoSyncProgressResponse | null>({
-    queryKey: ['zoho-sync-progress'],
-    queryFn: async () => {
-      const response = await axiosClient.get<ZohoSyncProgressResponse>(ZOHO.SYNC_ITEMS_PROGRESS)
-      return response.data
-    },
-    refetchInterval: (query) => {
-      const data = query.state.data as ZohoSyncProgressResponse | null | undefined
-      if (!data || data.status === 'idle') return false
-      return ['queued', 'running', 'stopping'].includes(data.status) ? 1500 : false
     },
   })
 
@@ -354,18 +353,7 @@ export default function InventoryManagement() {
     await zohoSingleSyncMutation.mutateAsync(variant)
   }
 
-  const runningStatus = zohoSyncProgress?.status
-  const isZohoSyncRunning = !!runningStatus && ['queued', 'running', 'stopping'].includes(runningStatus)
-  const zohoProgressPct =
-    zohoSyncProgress && zohoSyncProgress.total_target > 0
-      ? Math.min(100, Math.round((zohoSyncProgress.total_processed / zohoSyncProgress.total_target) * 100))
-      : 0
-
-  useEffect(() => {
-    if (zohoSyncProgress?.status === 'completed' && zohoSyncProgress.total_target > 0) {
-      void queryClient.invalidateQueries({ queryKey: ['variants'] })
-    }
-  }, [zohoSyncProgress?.status, zohoSyncProgress?.total_target, queryClient])
+  const isZohoSyncRunning = zohoBulkSyncMutation.isPending
 
   const zohoReadinessMutation = useMutation({
     mutationFn: async () => {
@@ -539,28 +527,17 @@ export default function InventoryManagement() {
               disabled={
                 zohoReadinessMutation.isPending ||
                 zohoBulkSyncMutation.isPending ||
-                zohoStopSyncMutation.isPending ||
                 isZohoSyncRunning
               }
             >
               {zohoReadinessMutation.isPending
                 ? 'Checking Readiness...'
                 : zohoBulkSyncMutation.isPending
-                  ? 'Starting Zoho Sync...'
+                  ? 'Syncing to Zoho...'
                   : isZohoSyncRunning
                     ? 'Zoho Sync Running...'
                   : 'Sync All to Zoho'}
             </Button>
-            {isZohoSyncRunning && (
-              <Button
-                variant="outlined"
-                color="error"
-                onClick={() => zohoStopSyncMutation.mutate()}
-                disabled={zohoStopSyncMutation.isPending}
-              >
-                {zohoStopSyncMutation.isPending ? 'Stopping...' : 'Stop Zoho Sync'}
-              </Button>
-            )}
             <Button
               variant="outlined"
               onClick={() => backfillThumbnailsMutation.mutate()}
@@ -580,33 +557,6 @@ export default function InventoryManagement() {
       </Box>
 
       {/* Search and View Toggle */}
-      {zohoSyncProgress && (
-        <Paper sx={{ p: 2, mb: 2 }}>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-              <Typography variant="subtitle2">
-                Zoho Sync Job {zohoSyncProgress.job_id.slice(0, 8)} — {zohoSyncProgress.status.toUpperCase()}
-              </Typography>
-              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                <Chip size="small" label={`Processed ${zohoSyncProgress.total_processed}/${zohoSyncProgress.total_target}`} />
-                <Chip size="small" color="success" label={`Success ${zohoSyncProgress.total_success}`} />
-                <Chip size="small" color="error" label={`Failed ${zohoSyncProgress.total_failed}`} />
-              </Box>
-            </Box>
-            <LinearProgress variant={zohoSyncProgress.total_target > 0 ? 'determinate' : 'indeterminate'} value={zohoProgressPct} />
-            {zohoSyncProgress.current_sku && (
-              <Typography variant="body2" color="text.secondary">
-                Current SKU: {zohoSyncProgress.current_sku}
-              </Typography>
-            )}
-            {zohoSyncProgress.last_error && (
-              <Alert severity="error" variant="outlined">
-                Last error: {zohoSyncProgress.last_error}
-              </Alert>
-            )}
-          </Box>
-        </Paper>
-      )}
 
       <Paper sx={{ p: 2, mb: 3 }}>
         <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -901,13 +851,13 @@ export default function InventoryManagement() {
           <Button onClick={() => setReadinessDialogOpen(false)}>Close</Button>
           <Button
             variant="contained"
-            disabled={zohoBulkSyncMutation.isPending || isZohoSyncRunning}
+            disabled={zohoBulkSyncMutation.isPending}
             onClick={() => {
               setReadinessDialogOpen(false)
               void handleStartZohoSync()
             }}
           >
-            {zohoBulkSyncMutation.isPending ? 'Starting...' : 'Sync Anyway'}
+            {zohoBulkSyncMutation.isPending ? 'Syncing...' : 'Sync Anyway'}
           </Button>
         </DialogActions>
       </Dialog>

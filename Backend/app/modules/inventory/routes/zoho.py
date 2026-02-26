@@ -38,6 +38,7 @@ from app.modules.inventory.schemas import (
 
 router = APIRouter(prefix="/zoho", tags=["Zoho Sync"])
 logger = logging.getLogger(__name__)
+_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 
 @dataclass
@@ -117,6 +118,76 @@ def _resolve_thumbnail_path(thumbnail_url: str | None) -> Path | None:
     if full_path.is_file():
         return full_path
     return None
+
+
+def _resolve_best_listing_image_path(variant: ProductVariant) -> Path | None:
+    identity = variant.identity
+    if identity is None or not identity.generated_upis_h:
+        return None
+
+    variant_dir = Path(settings.product_images_path) / identity.generated_upis_h / variant.full_sku
+    if not variant_dir.is_dir():
+        return None
+
+    listing_dirs = [
+        entry
+        for entry in variant_dir.iterdir()
+        if entry.is_dir() and entry.name.startswith("listing-")
+    ]
+
+    def _listing_sort_key(path: Path) -> int:
+        match = re.match(r"listing-(\d+)$", path.name)
+        return int(match.group(1)) if match else 999999
+
+    best_listing_path: Path | None = None
+    best_count = 0
+    for listing_dir in sorted(listing_dirs, key=_listing_sort_key):
+        image_count = sum(
+            1
+            for file in listing_dir.iterdir()
+            if file.is_file() and file.suffix.lower() in _IMAGE_EXTENSIONS
+        )
+        if image_count > best_count:
+            best_count = image_count
+            best_listing_path = listing_dir
+
+    if best_listing_path is None:
+        return None
+
+    images = sorted(
+        file
+        for file in best_listing_path.iterdir()
+        if file.is_file() and file.suffix.lower() in _IMAGE_EXTENSIONS
+    )
+    if not images:
+        return None
+
+    chosen = images[0]
+    logger.info(
+        "Zoho image source selected from best listing | variant_id=%s sku=%s listing=%s image=%s total_images_in_listing=%s",
+        variant.id,
+        variant.full_sku,
+        best_listing_path.name,
+        chosen.name,
+        len(images),
+    )
+    return chosen
+
+
+def _resolve_sync_image_path(variant: ProductVariant) -> Path | None:
+    best_listing_image = _resolve_best_listing_image_path(variant)
+    if best_listing_image:
+        return best_listing_image
+
+    thumbnail_image = _resolve_thumbnail_path(variant.thumbnail_url)
+    if thumbnail_image:
+        logger.info(
+            "Zoho image source fallback to thumbnail | variant_id=%s sku=%s thumbnail_path=%s",
+            variant.id,
+            variant.full_sku,
+            thumbnail_image,
+        )
+    return thumbnail_image
 
 
 def _sanitize_zoho_item_name(raw_name: str, fallback_sku: str) -> str:
@@ -251,7 +322,7 @@ async def _sync_single_standard_variant(
 
     image_uploaded = False
     if data.include_images:
-        image_path = _resolve_thumbnail_path(variant.thumbnail_url)
+        image_path = _resolve_sync_image_path(variant)
         if image_path:
             await zoho_client.upload_item_image(zoho_item_id, image_path)
             image_uploaded = True
@@ -270,6 +341,7 @@ async def _sync_single_standard_variant(
         sku=variant.full_sku,
         action="item_sync",
         success=True,
+        zoho_sync_status=ZohoSyncStatus.SYNCED.value,
         zoho_item_id=zoho_item_id,
         image_uploaded=image_uploaded,
         message="Synced as standard inventory item",
@@ -355,7 +427,7 @@ async def _sync_single_composite_variant(
 
     image_uploaded = False
     if data.include_images:
-        image_path = _resolve_thumbnail_path(variant.thumbnail_url)
+        image_path = _resolve_sync_image_path(variant)
         if image_path:
             await zoho_client.upload_item_image(composite_item_id, image_path)
             image_uploaded = True
@@ -371,6 +443,7 @@ async def _sync_single_composite_variant(
         sku=variant.full_sku,
         action="composite_sync",
         success=True,
+        zoho_sync_status=ZohoSyncStatus.SYNCED.value,
         zoho_item_id=composite_item_id,
         image_uploaded=image_uploaded,
         composite_synced=True,
@@ -575,6 +648,7 @@ async def _execute_bulk_sync(
                 sku=variant.full_sku,
                 action="item_sync",
                 success=False,
+                zoho_sync_status=ZohoSyncStatus.ERROR.value,
                 message=f"{str(exc)} | attempted_name={_build_item_payload(variant).get('name', '')}",
             )
             if job is not None:
@@ -606,6 +680,7 @@ async def _execute_bulk_sync(
                     sku=variant.full_sku,
                     action="composite_sync",
                     success=False,
+                    zoho_sync_status=ZohoSyncStatus.ERROR.value,
                     composite_synced=False,
                     message=f"{str(exc)} | attempted_name={_build_item_payload(variant).get('name', '')}",
                 )
@@ -709,8 +784,8 @@ async def zoho_sync_readiness_report(
         elif payload.get("rate", 0) == 0:
             warnings.append("listing_price_is_zero")
 
-        if data.include_images and _resolve_thumbnail_path(variant.thumbnail_url) is None:
-            warnings.append("thumbnail_missing_for_image_upload")
+        if data.include_images and _resolve_sync_image_path(variant) is None:
+            warnings.append("best_listing_and_thumbnail_missing_for_image_upload")
 
         identity_type = identity.type.value if identity else "UNKNOWN"
         if data.include_composites and identity and identity.type in {IdentityType.B, IdentityType.K}:
