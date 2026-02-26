@@ -109,24 +109,40 @@ async def _load_target_variants(db: AsyncSession, data: ZohoBulkSyncRequest) -> 
 
 def _resolve_thumbnail_path(thumbnail_url: str | None) -> Path | None:
     if not thumbnail_url:
+        logger.info("Zoho image resolve thumbnail: no thumbnail_url provided")
         return None
     prefix = "/product-images/"
     if not thumbnail_url.startswith(prefix):
+        logger.info("Zoho image resolve thumbnail: unexpected URL format | thumbnail_url=%s", thumbnail_url)
         return None
     relative = thumbnail_url[len(prefix):].lstrip("/")
     full_path = Path(settings.product_images_path) / relative
     if full_path.is_file():
+        logger.info("Zoho image resolve thumbnail: found file | path=%s", full_path)
         return full_path
+    logger.info("Zoho image resolve thumbnail: file missing | path=%s", full_path)
     return None
 
 
 def _resolve_best_listing_image_path(variant: ProductVariant) -> Path | None:
     identity = variant.identity
     if identity is None or not identity.generated_upis_h:
+        logger.info(
+            "Zoho image resolve best-listing: missing identity context | variant_id=%s sku=%s identity_present=%s",
+            variant.id,
+            variant.full_sku,
+            identity is not None,
+        )
         return None
 
     variant_dir = Path(settings.product_images_path) / identity.generated_upis_h / variant.full_sku
     if not variant_dir.is_dir():
+        logger.info(
+            "Zoho image resolve best-listing: variant dir not found | variant_id=%s sku=%s path=%s",
+            variant.id,
+            variant.full_sku,
+            variant_dir,
+        )
         return None
 
     listing_dirs = [
@@ -134,6 +150,13 @@ def _resolve_best_listing_image_path(variant: ProductVariant) -> Path | None:
         for entry in variant_dir.iterdir()
         if entry.is_dir() and entry.name.startswith("listing-")
     ]
+    logger.info(
+        "Zoho image resolve best-listing: listing dirs discovered | variant_id=%s sku=%s count=%s dirs=%s",
+        variant.id,
+        variant.full_sku,
+        len(listing_dirs),
+        [entry.name for entry in listing_dirs],
+    )
 
     def _listing_sort_key(path: Path) -> int:
         match = re.match(r"listing-(\d+)$", path.name)
@@ -147,11 +170,23 @@ def _resolve_best_listing_image_path(variant: ProductVariant) -> Path | None:
             for file in listing_dir.iterdir()
             if file.is_file() and file.suffix.lower() in _IMAGE_EXTENSIONS
         )
+        logger.info(
+            "Zoho image resolve best-listing: listing image count | variant_id=%s sku=%s listing=%s image_count=%s",
+            variant.id,
+            variant.full_sku,
+            listing_dir.name,
+            image_count,
+        )
         if image_count > best_count:
             best_count = image_count
             best_listing_path = listing_dir
 
     if best_listing_path is None:
+        logger.info(
+            "Zoho image resolve best-listing: no eligible listing with images | variant_id=%s sku=%s",
+            variant.id,
+            variant.full_sku,
+        )
         return None
 
     images = sorted(
@@ -160,6 +195,12 @@ def _resolve_best_listing_image_path(variant: ProductVariant) -> Path | None:
         if file.is_file() and file.suffix.lower() in _IMAGE_EXTENSIONS
     )
     if not images:
+        logger.info(
+            "Zoho image resolve best-listing: best listing has no supported images | variant_id=%s sku=%s listing=%s",
+            variant.id,
+            variant.full_sku,
+            best_listing_path.name,
+        )
         return None
 
     chosen = images[0]
@@ -177,6 +218,12 @@ def _resolve_best_listing_image_path(variant: ProductVariant) -> Path | None:
 def _resolve_sync_image_path(variant: ProductVariant) -> Path | None:
     best_listing_image = _resolve_best_listing_image_path(variant)
     if best_listing_image:
+        logger.info(
+            "Zoho image resolve final: using best-listing image | variant_id=%s sku=%s path=%s",
+            variant.id,
+            variant.full_sku,
+            best_listing_image,
+        )
         return best_listing_image
 
     thumbnail_image = _resolve_thumbnail_path(variant.thumbnail_url)
@@ -187,6 +234,14 @@ def _resolve_sync_image_path(variant: ProductVariant) -> Path | None:
             variant.full_sku,
             thumbnail_image,
         )
+        return thumbnail_image
+
+    logger.warning(
+        "Zoho image resolve final: no uploadable image found | variant_id=%s sku=%s thumbnail_url=%s",
+        variant.id,
+        variant.full_sku,
+        variant.thumbnail_url,
+    )
     return thumbnail_image
 
 
@@ -324,8 +379,27 @@ async def _sync_single_standard_variant(
     if data.include_images:
         image_path = _resolve_sync_image_path(variant)
         if image_path:
+            logger.info(
+                "Zoho image upload attempt (standard) | variant_id=%s sku=%s zoho_item_id=%s image_path=%s",
+                variant.id,
+                variant.full_sku,
+                zoho_item_id,
+                image_path,
+            )
             await zoho_client.upload_item_image(zoho_item_id, image_path)
             image_uploaded = True
+            logger.info(
+                "Zoho image upload success (standard) | variant_id=%s sku=%s zoho_item_id=%s",
+                variant.id,
+                variant.full_sku,
+                zoho_item_id,
+            )
+        else:
+            logger.warning(
+                "Zoho image upload skipped (standard): no resolved image | variant_id=%s sku=%s",
+                variant.id,
+                variant.full_sku,
+            )
 
     variant.zoho_item_id = zoho_item_id
     variant.zoho_sync_status = ZohoSyncStatus.SYNCED
@@ -429,8 +503,27 @@ async def _sync_single_composite_variant(
     if data.include_images:
         image_path = _resolve_sync_image_path(variant)
         if image_path:
+            logger.info(
+                "Zoho image upload attempt (composite) | variant_id=%s sku=%s zoho_item_id=%s image_path=%s",
+                variant.id,
+                variant.full_sku,
+                composite_item_id,
+                image_path,
+            )
             await zoho_client.upload_item_image(composite_item_id, image_path)
             image_uploaded = True
+            logger.info(
+                "Zoho image upload success (composite) | variant_id=%s sku=%s zoho_item_id=%s",
+                variant.id,
+                variant.full_sku,
+                composite_item_id,
+            )
+        else:
+            logger.warning(
+                "Zoho image upload skipped (composite): no resolved image | variant_id=%s sku=%s",
+                variant.id,
+                variant.full_sku,
+            )
 
     variant.zoho_item_id = composite_item_id
     variant.zoho_sync_status = ZohoSyncStatus.SYNCED

@@ -248,8 +248,24 @@ class ZohoClient:
 
     async def upload_item_image(self, zoho_item_id: str, image_path: Path) -> dict:
         """Upload an image for an existing Zoho inventory item."""
+        logger.info(
+            "Zoho client upload_item_image called | zoho_item_id=%s image_path=%s exists=%s size_bytes=%s",
+            zoho_item_id,
+            image_path,
+            image_path.exists(),
+            image_path.stat().st_size if image_path.exists() else None,
+        )
+        if not image_path.exists():
+            raise FileNotFoundError(f"Image file not found for Zoho upload: {image_path}")
+
         mime_type, _ = mimetypes.guess_type(str(image_path))
         content_type = mime_type or "application/octet-stream"
+        logger.info(
+            "Zoho client upload_item_image mime | zoho_item_id=%s filename=%s content_type=%s",
+            zoho_item_id,
+            image_path.name,
+            content_type,
+        )
 
         with image_path.open("rb") as image_file:
             result = await self._request(
@@ -257,6 +273,11 @@ class ZohoClient:
                 f"/items/{zoho_item_id}/image",
                 files={"image": (image_path.name, image_file, content_type)},
             )
+        logger.info(
+            "Zoho client upload_item_image response | zoho_item_id=%s response_keys=%s",
+            zoho_item_id,
+            list(result.keys()) if isinstance(result, dict) else None,
+        )
         return result
 
     async def create_composite_item(self, composite_data: dict) -> dict:
