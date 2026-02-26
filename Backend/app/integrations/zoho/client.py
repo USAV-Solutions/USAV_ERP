@@ -247,7 +247,7 @@ class ZohoClient:
         return zoho_item
 
     async def upload_item_image(self, zoho_item_id: str, image_path: Path) -> dict:
-        """Upload an image for an existing Zoho inventory item."""
+        """Upload an image to an existing Zoho inventory item's image gallery."""
         logger.info(
             "Zoho client upload_item_image called | zoho_item_id=%s image_path=%s exists=%s size_bytes=%s",
             zoho_item_id,
@@ -270,7 +270,7 @@ class ZohoClient:
         with image_path.open("rb") as image_file:
             result = await self._request(
                 "POST",
-                f"/items/{zoho_item_id}/image",
+                f"/items/{zoho_item_id}/images",
                 files={"image": (image_path.name, image_file, content_type)},
             )
         logger.info(
