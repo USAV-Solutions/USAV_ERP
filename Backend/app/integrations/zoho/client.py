@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import List, Optional, Any
 import logging
 import mimetypes
+import json
 
 import httpx
 
@@ -35,10 +36,10 @@ class ZohoClient:
     
     def __init__(
         self,
-        client_id: str = None,
-        client_secret: str = None,
-        refresh_token: str = None,
-        organization_id: str = None,
+        client_id: Optional[str] = None,
+        client_secret: Optional[str] = None,
+        refresh_token: Optional[str] = None,
+        organization_id: Optional[str] = None,
     ):
         self.client_id = client_id or settings.zoho_client_id
         self.client_secret = client_secret or settings.zoho_client_secret
@@ -113,6 +114,34 @@ class ZohoClient:
         
         params = kwargs.pop("params", {})
         params["organization_id"] = self.organization_id
+
+        payload_mode = "none"
+        payload_keys: list[str] = []
+        if "files" in kwargs:
+            payload_mode = "files"
+            files_payload = kwargs.get("files")
+            if isinstance(files_payload, dict):
+                payload_keys = list(files_payload.keys())
+        elif "json" in kwargs:
+            payload_mode = "json"
+            json_payload = kwargs.get("json")
+            if isinstance(json_payload, dict):
+                payload_keys = list(json_payload.keys())
+        elif "data" in kwargs:
+            payload_mode = "data"
+            data_payload = kwargs.get("data")
+            if isinstance(data_payload, dict):
+                payload_keys = list(data_payload.keys())
+
+        logger.info(
+            "Zoho request | method=%s endpoint=%s api=%s params=%s payload_mode=%s payload_keys=%s",
+            method,
+            endpoint,
+            api,
+            params,
+            payload_mode,
+            payload_keys,
+        )
         
         async with httpx.AsyncClient() as client:
             response = await client.request(
@@ -134,16 +163,13 @@ class ZohoClient:
     # =========================================================================
     
     async def create_item(self, item_data: dict) -> dict:
-        """
-        Create an item in Zoho Inventory.
-        
-        Args:
-            item_data: Item data including name, sku, rate, etc.
-            
-        Returns:
-            Created item data from Zoho
-        """
-        result = await self._request("POST", "/items", json={"item": item_data})
+        """Create an item in Zoho Inventory."""
+        logger.info("Zoho create_item payload | sku=%s payload=%s", item_data.get("sku"), item_data)
+        result = await self._request(
+            "POST", 
+            "/items", 
+            data={"JSONString": json.dumps(item_data)}
+        )
         return result.get("item", {})
     
     async def update_item(self, zoho_item_id: str, item_data: dict) -> dict:
@@ -160,7 +186,7 @@ class ZohoClient:
         result = await self._request(
             "PUT", 
             f"/items/{zoho_item_id}", 
-            json={"item": item_data}
+            data={"JSONString": json.dumps(item_data)}
         )
         return result.get("item", {})
     
@@ -187,7 +213,8 @@ class ZohoClient:
         sku: str,
         name: str,
         rate: float,
-        description: str = None,
+        description: Optional[str] = None,
+        image_path: Optional[Path] = None,
         **extra_fields
     ) -> dict:
         """
@@ -208,9 +235,16 @@ class ZohoClient:
         existing = await self.get_item_by_sku(sku)
         
         if existing:
-            return await self.update_item(existing["item_id"], item_data)
+            zoho_item = await self.update_item(existing["item_id"], item_data)
         else:
-            return await self.create_item(item_data)
+            zoho_item = await self.create_item(item_data)
+
+        zoho_item_id = zoho_item.get("item_id")
+        if image_path and zoho_item_id:
+            logger.info("Zoho sync_item image upload | sku=%s zoho_item_id=%s image_path=%s", sku, zoho_item_id, image_path)
+            await self.upload_item_image(zoho_item_id, image_path)
+
+        return zoho_item
 
     async def upload_item_image(self, zoho_item_id: str, image_path: Path) -> dict:
         """Upload an image for an existing Zoho inventory item."""
@@ -227,7 +261,17 @@ class ZohoClient:
 
     async def create_composite_item(self, composite_data: dict) -> dict:
         """Create a composite item in Zoho Inventory."""
-        result = await self._request("POST", "/compositeitems", json={"composite_item": composite_data})
+        logger.info(
+            "Zoho create_composite_item payload | sku=%s component_count=%s payload=%s",
+            composite_data.get("sku"),
+            len(composite_data.get("component_items", [])),
+            composite_data,
+        )
+        result = await self._request(
+            "POST",
+            "/compositeitems",
+            data={"JSONString": json.dumps(composite_data)},
+        )
         return result.get("composite_item", {})
 
     async def update_composite_item(self, composite_item_id: str, composite_data: dict) -> dict:
@@ -235,7 +279,7 @@ class ZohoClient:
         result = await self._request(
             "PUT",
             f"/compositeitems/{composite_item_id}",
-            json={"composite_item": composite_data},
+            data={"JSONString": json.dumps(composite_data)},
         )
         return result.get("composite_item", {})
 
@@ -251,7 +295,7 @@ class ZohoClient:
         name: str,
         rate: float,
         component_items: list[dict[str, Any]],
-        description: str = None,
+        description: Optional[str] = None,
         **extra_fields,
     ) -> dict:
         """Create or update a composite item in Zoho by SKU."""
@@ -277,7 +321,7 @@ class ZohoClient:
         self,
         zoho_item_id: str,
         quantity: int,
-        warehouse_id: str = None
+        warehouse_id: Optional[str] = None
     ) -> dict:
         """
         Update stock level for an item in Zoho.
@@ -309,7 +353,7 @@ class ZohoClient:
         result = await self._request(
             "POST",
             "/inventoryadjustments",
-            json={"inventory_adjustment": adjustment_data}
+            data={"JSONString": json.dumps(adjustment_data)}
         )
         return result
     
@@ -344,7 +388,7 @@ class ZohoClient:
         result = await self._request(
             "POST",
             "/salesorders",
-            json={"salesorder": order_data}
+            data={"JSONString": json.dumps(order_data)}
         )
         return result.get("salesorder", {})
     
