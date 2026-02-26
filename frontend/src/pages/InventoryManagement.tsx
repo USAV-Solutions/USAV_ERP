@@ -50,6 +50,9 @@ type ViewMode = 'list' | 'grouped'
 interface ExpandedRowProps {
   familyName: string
   variants: EnhancedVariant[]
+  onSyncVariant: (variant: EnhancedVariant) => void
+  syncingVariantId: number | null
+  syncDisabled: boolean
 }
 
 interface EnhancedVariant extends Variant {
@@ -135,7 +138,7 @@ const getSyncStatusChip = (status: string) => {
   return <Chip size="small" color={config.color} label={config.label} />
 }
 
-function ExpandedRow({ familyName, variants }: ExpandedRowProps) {
+function ExpandedRow({ familyName, variants, onSyncVariant, syncingVariantId, syncDisabled }: ExpandedRowProps) {
   const [gallerySku, setGallerySku] = useState<string | null>(null)
 
   return (
@@ -156,6 +159,7 @@ function ExpandedRow({ familyName, variants }: ExpandedRowProps) {
                 <TableCell>Color</TableCell>
                 <TableCell>Condition</TableCell>
                 <TableCell>Zoho Status</TableCell>
+                <TableCell align="right">Actions</TableCell>
                 <TableCell>Active</TableCell>
               </TableRow>
             </TableHead>
@@ -187,6 +191,16 @@ function ExpandedRow({ familyName, variants }: ExpandedRowProps) {
                   <TableCell>{variant.color_code || '-'}</TableCell>
                   <TableCell>{variant.condition_code || 'Used'}</TableCell>
                   <TableCell>{getSyncStatusChip(variant.zoho_sync_status)}</TableCell>
+                  <TableCell align="right">
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => onSyncVariant(variant)}
+                      disabled={syncDisabled || syncingVariantId === variant.id}
+                    >
+                      {syncingVariantId === variant.id ? 'Syncing...' : 'Sync to Zoho'}
+                    </Button>
+                  </TableCell>
                   <TableCell>
                     <Chip
                       size="small"
@@ -224,6 +238,7 @@ export default function InventoryManagement() {
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success')
   const [readinessDialogOpen, setReadinessDialogOpen] = useState(false)
   const [readinessData, setReadinessData] = useState<ZohoReadinessResponse | null>(null)
+  const [syncingVariantId, setSyncingVariantId] = useState<number | null>(null)
   const { hasRole } = useAuth()
   const queryClient = useQueryClient()
 
@@ -291,6 +306,32 @@ export default function InventoryManagement() {
     },
   })
 
+  const zohoSingleSyncMutation = useMutation({
+    mutationFn: async (variant: EnhancedVariant) => {
+      const response = await axiosClient.post(ZOHO.SYNC_SINGLE_ITEM(variant.id), {
+        include_images: true,
+        include_composites: true,
+        force_resync: true,
+      })
+      return { result: response.data, variant }
+    },
+    onSuccess: async ({ variant }) => {
+      setSnackbarSeverity('success')
+      setSnackbarMessage(`Zoho sync completed for ${variant.full_sku}.`)
+      setSnackbarOpen(true)
+      setSyncingVariantId(null)
+      await queryClient.invalidateQueries({ queryKey: ['variants'] })
+      await queryClient.invalidateQueries({ queryKey: ['zoho-sync-progress'] })
+    },
+    onError: (error: AxiosError<{ detail?: string }>) => {
+      const detail = error.response?.data?.detail || 'Single-item Zoho sync failed.'
+      setSnackbarSeverity('error')
+      setSnackbarMessage(detail)
+      setSnackbarOpen(true)
+      setSyncingVariantId(null)
+    },
+  })
+
   const { data: zohoSyncProgress } = useQuery<ZohoSyncProgressResponse | null>({
     queryKey: ['zoho-sync-progress'],
     queryFn: async () => {
@@ -306,6 +347,11 @@ export default function InventoryManagement() {
 
   const handleStartZohoSync = async () => {
     await zohoBulkSyncMutation.mutateAsync()
+  }
+
+  const handleSyncSingleVariant = async (variant: EnhancedVariant) => {
+    setSyncingVariantId(variant.id)
+    await zohoSingleSyncMutation.mutateAsync(variant)
   }
 
   const runningStatus = zohoSyncProgress?.status
@@ -614,18 +660,19 @@ export default function InventoryManagement() {
                   <TableCell>Color</TableCell>
                   <TableCell>Condition</TableCell>
                   <TableCell>Zoho Status</TableCell>
+                  <TableCell align="right">Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={8} align="center">
+                    <TableCell colSpan={9} align="center">
                       Loading...
                     </TableCell>
                   </TableRow>
                 ) : paginatedListData.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} align="center">
+                    <TableCell colSpan={9} align="center">
                       No items found
                     </TableCell>
                   </TableRow>
@@ -661,6 +708,20 @@ export default function InventoryManagement() {
                       <TableCell>{variant.color_code || '-'}</TableCell>
                       <TableCell>{variant.condition_code || 'U'}</TableCell>
                       <TableCell>{getSyncStatusChip(variant.zoho_sync_status)}</TableCell>
+                      <TableCell align="right">
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={() => void handleSyncSingleVariant(variant)}
+                          disabled={
+                            isZohoSyncRunning ||
+                            zohoSingleSyncMutation.isPending ||
+                            syncingVariantId === variant.id
+                          }
+                        >
+                          {syncingVariantId === variant.id ? 'Syncing...' : 'Sync to Zoho'}
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   ))
                 )}
@@ -722,6 +783,9 @@ export default function InventoryManagement() {
                         <ExpandedRow
                           familyName={group.name}
                           variants={group.variants}
+                          onSyncVariant={(variant) => void handleSyncSingleVariant(variant)}
+                          syncingVariantId={syncingVariantId}
+                          syncDisabled={isZohoSyncRunning || zohoSingleSyncMutation.isPending}
                         />
                       )}
                     </>

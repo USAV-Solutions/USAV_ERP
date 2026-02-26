@@ -28,6 +28,23 @@ class ZohoBulkSyncRequest(BaseModel):
     )
 
 
+class ZohoSingleSyncRequest(BaseModel):
+    """Request payload for syncing one variant to Zoho Inventory."""
+
+    include_images: bool = Field(
+        default=True,
+        description="Upload variant thumbnail image to Zoho item when available.",
+    )
+    include_composites: bool = Field(
+        default=True,
+        description="When true, sync Bundle/Kit identities as composite items.",
+    )
+    force_resync: bool = Field(
+        default=True,
+        description="When true, allow sync regardless of current Zoho sync status.",
+    )
+
+
 class ZohoBulkSyncItemResult(BaseModel):
     """Per-variant sync result."""
 

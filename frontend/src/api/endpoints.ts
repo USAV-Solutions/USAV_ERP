@@ -60,6 +60,7 @@ export const IMAGES = {
 
 export const ZOHO = {
   SYNC_ITEMS: '/zoho/sync/items',
+  SYNC_SINGLE_ITEM: (variantId: number) => `/zoho/sync/items/${variantId}`,
   SYNC_READINESS: '/zoho/sync/readiness',
   SYNC_ITEMS_START: '/zoho/sync/items/start',
   SYNC_ITEMS_PROGRESS: '/zoho/sync/items/progress',

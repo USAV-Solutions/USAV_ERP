@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -31,10 +32,12 @@ from app.modules.inventory.schemas import (
     ZohoReadinessItem,
     ZohoReadinessRequest,
     ZohoReadinessResponse,
+    ZohoSingleSyncRequest,
     ZohoSyncProgressResponse,
 )
 
 router = APIRouter(prefix="/zoho", tags=["Zoho Sync"])
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -182,6 +185,33 @@ def _build_item_payload(variant: ProductVariant) -> dict:
     return {key: value for key, value in payload.items() if value is not None}
 
 
+def _debug_sync_context(variant: ProductVariant, payload: dict, include_images: bool) -> None:
+    identity = variant.identity
+    family = identity.family if identity else None
+    logger.info(
+        "Zoho single-sync payload prepared | variant_id=%s sku=%s identity_id=%s identity_type=%s include_images=%s has_thumbnail=%s payload=%s",
+        variant.id,
+        variant.full_sku,
+        variant.identity_id,
+        identity.type.value if identity else None,
+        include_images,
+        bool(variant.thumbnail_url),
+        payload,
+    )
+    if family:
+        logger.info(
+            "Zoho single-sync family context | variant_id=%s product_id=%s base_name=%s description_len=%s dimensions=(%s,%s,%s) weight=%s",
+            variant.id,
+            family.product_id,
+            family.base_name,
+            len(family.description or ""),
+            family.dimension_length,
+            family.dimension_width,
+            family.dimension_height,
+            family.weight,
+        )
+
+
 async def _sync_single_standard_variant(
     db: AsyncSession,
     zoho_client: ZohoClient,
@@ -190,7 +220,16 @@ async def _sync_single_standard_variant(
     synced_item_ids_by_identity: dict[int, str],
 ) -> ZohoBulkSyncItemResult:
     payload = _build_item_payload(variant)
+    _debug_sync_context(variant=variant, payload=payload, include_images=data.include_images)
     item_name = payload.get("name", variant.full_sku)
+    logger.info(
+        "Zoho standard item sync call | variant_id=%s sku=%s name=%s rate=%s extras=%s",
+        variant.id,
+        variant.full_sku,
+        item_name,
+        payload.get("rate", 0),
+        {k: v for k, v in payload.items() if k not in {"name", "sku", "rate", "description"}},
+    )
     zoho_item = await zoho_client.sync_item(
         sku=variant.full_sku,
         name=item_name,
@@ -202,6 +241,13 @@ async def _sync_single_standard_variant(
     zoho_item_id = str(zoho_item.get("item_id", "")) if zoho_item else ""
     if not zoho_item_id:
         raise ValueError("Zoho response missing item_id")
+
+    logger.info(
+        "Zoho standard item sync success | variant_id=%s sku=%s zoho_item_id=%s",
+        variant.id,
+        variant.full_sku,
+        zoho_item_id,
+    )
 
     image_uploaded = False
     if data.include_images:
@@ -273,8 +319,18 @@ async def _sync_single_composite_variant(
 
     payload = _build_item_payload(variant)
     payload["component_items"] = component_items
+    _debug_sync_context(variant=variant, payload=payload, include_images=data.include_images)
 
     item_name = payload.get("name", variant.full_sku)
+    logger.info(
+        "Zoho composite item sync call | variant_id=%s sku=%s name=%s rate=%s component_count=%s extras=%s",
+        variant.id,
+        variant.full_sku,
+        item_name,
+        payload.get("rate", 0),
+        len(component_items),
+        {k: v for k, v in payload.items() if k not in {"name", "sku", "rate", "description", "component_items"}},
+    )
     composite_item = await zoho_client.sync_composite_item(
         sku=variant.full_sku,
         name=item_name,
@@ -289,6 +345,13 @@ async def _sync_single_composite_variant(
         composite_item_id = str(composite_item.get("item_id", "")) if composite_item else ""
     if not composite_item_id:
         raise ValueError("Zoho response missing composite item id")
+
+    logger.info(
+        "Zoho composite item sync success | variant_id=%s sku=%s zoho_item_id=%s",
+        variant.id,
+        variant.full_sku,
+        composite_item_id,
+    )
 
     image_uploaded = False
     if data.include_images:
@@ -313,6 +376,118 @@ async def _sync_single_composite_variant(
         composite_synced=True,
         message="Synced as composite item",
     )
+
+
+async def _load_variant_for_single_sync(db: AsyncSession, variant_id: int) -> ProductVariant:
+    stmt = (
+        select(ProductVariant)
+        .options(
+            selectinload(ProductVariant.identity).selectinload(ProductIdentity.family),
+            selectinload(ProductVariant.listings),
+        )
+        .where(ProductVariant.id == variant_id)
+        .limit(1)
+    )
+    variant = (await db.execute(stmt)).scalar_one_or_none()
+    if variant is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Variant {variant_id} not found.",
+        )
+    if not variant.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Variant {variant_id} is inactive and cannot be synced.",
+        )
+    return variant
+
+
+@router.post("/sync/items/{variant_id}", response_model=ZohoBulkSyncItemResult)
+async def sync_single_item_to_zoho(
+    variant_id: int,
+    data: ZohoSingleSyncRequest,
+    _admin: AdminUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Sync a single variant to Zoho with detailed debug logging."""
+    if not _has_zoho_credentials():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Zoho credentials are missing (client_id/client_secret/refresh_token/organization_id).",
+        )
+
+    async with _JOB_LOCK:
+        if _CURRENT_JOB and _CURRENT_JOB.status in {"queued", "running", "stopping"}:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A Zoho bulk sync job is already running. Stop it before single-item sync.",
+            )
+
+    variant = await _load_variant_for_single_sync(db=db, variant_id=variant_id)
+
+    if not data.force_resync and variant.zoho_sync_status == ZohoSyncStatus.SYNCED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Variant {variant_id} is already SYNCED. Use force_resync=true to push again.",
+        )
+
+    zoho_client = ZohoClient()
+    identity_type = variant.identity.type if variant.identity else None
+    is_composite = data.include_composites and identity_type in {IdentityType.B, IdentityType.K}
+
+    logger.info(
+        "Zoho single-sync request | variant_id=%s sku=%s include_images=%s include_composites=%s force_resync=%s detected_composite=%s",
+        variant.id,
+        variant.full_sku,
+        data.include_images,
+        data.include_composites,
+        data.force_resync,
+        is_composite,
+    )
+
+    try:
+        if is_composite:
+            result = await _sync_single_composite_variant(
+                db=db,
+                zoho_client=zoho_client,
+                data=ZohoBulkSyncRequest(
+                    include_images=data.include_images,
+                    include_composites=data.include_composites,
+                    force_resync=data.force_resync,
+                    limit=1,
+                ),
+                variant=variant,
+                synced_item_ids_by_identity={},
+            )
+        else:
+            result = await _sync_single_standard_variant(
+                db=db,
+                zoho_client=zoho_client,
+                data=ZohoBulkSyncRequest(
+                    include_images=data.include_images,
+                    include_composites=data.include_composites,
+                    force_resync=data.force_resync,
+                    limit=1,
+                ),
+                variant=variant,
+                synced_item_ids_by_identity={},
+            )
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        variant.zoho_sync_status = ZohoSyncStatus.ERROR
+        await db.commit()
+        logger.exception(
+            "Zoho single-sync failed | variant_id=%s sku=%s error=%s",
+            variant.id,
+            variant.full_sku,
+            str(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Zoho single-item sync failed: {str(exc)}",
+        ) from exc
 
 
 async def _execute_bulk_sync(
