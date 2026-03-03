@@ -3,6 +3,7 @@ eBay Trading API Client.
 
 Implements the BasePlatformClient interface for eBay stores.
 """
+import asyncio
 from datetime import datetime, date, timedelta
 from typing import List, Optional
 import logging
@@ -17,6 +18,13 @@ from app.integrations.base import (
 )
 
 logger = logging.getLogger(__name__)
+
+# eBay's CDN occasionally returns stale edge-node IPs that refuse TCP
+# connections.  Transport-level retries force httpcore to re-resolve DNS
+# on each attempt, working around transient CDN routing issues.
+_TRANSPORT_RETRIES = 3          # retries at the httpcore transport layer
+_TOKEN_REFRESH_ATTEMPTS = 3     # higher-level retries around OAuth token refresh
+_TOKEN_RETRY_DELAY_SECS = 2     # pause between token-refresh retries
 
 
 class EbayClient(BasePlatformClient):
@@ -71,49 +79,85 @@ class EbayClient(BasePlatformClient):
     async def _refresh_access_token(self) -> bool:
         """
         Refresh the OAuth access token using the refresh token.
-        
+
+        Retries up to ``_TOKEN_REFRESH_ATTEMPTS`` times with a short delay
+        to work around transient CDN / DNS issues (eBay edge nodes that
+        refuse TCP connections).
+
         Returns:
             True if token was refreshed successfully
         """
         if not self.is_configured:
             logger.error(f"eBay {self.store_name} credentials not configured")
             return False
-        
-        try:
-            import base64
-            
-            # Create Basic Auth credentials
-            credentials = f"{self.app_id}:{self.cert_id}"
-            encoded_credentials = base64.b64encode(credentials.encode()).decode()
-            
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                headers = {
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Authorization": f"Basic {encoded_credentials}",
-                }
-                
-                data = {
-                    "grant_type": "refresh_token",
-                    "refresh_token": self.refresh_token,
-                    "scope": "https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/sell.fulfillment https://api.ebay.com/oauth/api_scope/sell.inventory"
-                }
-                
-                response = await client.post(self.oauth_url, headers=headers, data=data)
-                response.raise_for_status()
-                
-                token_data = response.json()
-                self._access_token = token_data.get("access_token")
-                expires_in = token_data.get("expires_in", 7200)  # Default 2 hours
-                
-                # Set expiration time (refresh 5 minutes before actual expiry)
-                self._token_expires_at = datetime.now() + timedelta(seconds=expires_in - 300)
-                
-                logger.info(f"eBay {self.store_name} access token refreshed successfully")
-                return True
-                
-        except Exception as e:
-            logger.error(f"Error refreshing eBay {self.store_name} token: {e}", exc_info=True)
-            return False
+
+        import base64
+
+        credentials = f"{self.app_id}:{self.cert_id}"
+        encoded_credentials = base64.b64encode(credentials.encode()).decode()
+
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Authorization": f"Basic {encoded_credentials}",
+        }
+        data = {
+            "grant_type": "refresh_token",
+            "refresh_token": self.refresh_token,
+            "scope": (
+                "https://api.ebay.com/oauth/api_scope "
+                "https://api.ebay.com/oauth/api_scope/sell.fulfillment "
+                "https://api.ebay.com/oauth/api_scope/sell.inventory"
+            ),
+        }
+
+        last_err: Exception | None = None
+        for attempt in range(1, _TOKEN_REFRESH_ATTEMPTS + 1):
+            try:
+                transport = httpx.AsyncHTTPTransport(retries=_TRANSPORT_RETRIES)
+                async with httpx.AsyncClient(
+                    transport=transport, timeout=30.0
+                ) as client:
+                    response = await client.post(
+                        self.oauth_url, headers=headers, data=data
+                    )
+                    response.raise_for_status()
+
+                    token_data = response.json()
+                    self._access_token = token_data.get("access_token")
+                    expires_in = token_data.get("expires_in", 7200)
+
+                    # Refresh 5 minutes before actual expiry
+                    self._token_expires_at = datetime.now() + timedelta(
+                        seconds=expires_in - 300
+                    )
+
+                    logger.info(
+                        f"eBay {self.store_name} access token refreshed "
+                        f"successfully (attempt {attempt})"
+                    )
+                    return True
+
+            except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+                last_err = e
+                logger.warning(
+                    f"eBay {self.store_name} token refresh attempt {attempt}/"
+                    f"{_TOKEN_REFRESH_ATTEMPTS} failed (connect): {e}"
+                )
+                if attempt < _TOKEN_REFRESH_ATTEMPTS:
+                    await asyncio.sleep(_TOKEN_RETRY_DELAY_SECS * attempt)
+            except Exception as e:
+                logger.error(
+                    f"Error refreshing eBay {self.store_name} token: {e}",
+                    exc_info=True,
+                )
+                return False
+
+        logger.error(
+            f"eBay {self.store_name} token refresh failed after "
+            f"{_TOKEN_REFRESH_ATTEMPTS} attempts: {last_err}",
+            exc_info=True,
+        )
+        return False
     
     async def _get_access_token(self) -> Optional[str]:
         """
@@ -189,15 +233,17 @@ class EbayClient(BasePlatformClient):
         logger.info(f"eBay {self.store_name} fetch_orders called: since={since}, until={until}, status={status}")
         
         if not self.is_configured:
-            logger.error(f"eBay {self.store_name} credentials not configured")
-            return []
+            message = f"eBay {self.store_name} credentials not configured"
+            logger.error(message)
+            raise RuntimeError(message)
         
         # Get valid access token
         logger.debug(f"eBay {self.store_name}: Obtaining access token")
         access_token = await self._get_access_token()
         if not access_token:
-            logger.error(f"eBay {self.store_name} unable to obtain access token")
-            return []
+            message = f"eBay {self.store_name} unable to obtain access token"
+            logger.error(message)
+            raise RuntimeError(message)
         
         try:
             # Build filter string for eBay API
@@ -219,8 +265,13 @@ class EbayClient(BasePlatformClient):
             
             filter_param = ",".join(filters) if filters else None
             
-            # Make API request
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            # Make API request – use transport-level retries so that
+            # httpcore re-resolves DNS on each retry, working around
+            # transient CDN edge-node failures.
+            transport = httpx.AsyncHTTPTransport(retries=_TRANSPORT_RETRIES)
+            async with httpx.AsyncClient(
+                transport=transport, timeout=30.0
+            ) as client:
                 headers = {
                     "Authorization": f"Bearer {access_token}",
                     "Content-Type": "application/json",
@@ -277,17 +328,15 @@ class EbayClient(BasePlatformClient):
                 return orders
                 
         except httpx.HTTPStatusError as e:
-            logger.error(
-                f"eBay {self.store_name}: HTTP error {e.response.status_code} - {e.response.text}",
-                exc_info=True
+            message = (
+                f"eBay {self.store_name}: HTTP error {e.response.status_code} - {e.response.text}"
             )
-            return []
+            logger.error(message, exc_info=True)
+            raise RuntimeError(message) from e
         except Exception as e:
-            logger.error(
-                f"eBay {self.store_name}: Error fetching orders: {e}",
-                exc_info=True
-            )
-            return []
+            message = f"eBay {self.store_name}: Error fetching orders: {e}"
+            logger.error(message, exc_info=True)
+            raise RuntimeError(message) from e
     
     async def get_order(self, order_id: str) -> Optional[ExternalOrder]:
         """
