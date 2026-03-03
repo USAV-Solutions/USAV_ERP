@@ -8,6 +8,7 @@ try:
         Color,
         Condition,
         ConditionCode,
+        Customer,
         IdentityType,
         InventoryItem,
         InventoryStatus,
@@ -19,6 +20,7 @@ try:
         ProductFamily,
         ProductIdentity,
         ProductVariant,
+        ZohoSyncMixin,
         ZohoSyncStatus,
     )
 except ImportError as e:
@@ -58,6 +60,8 @@ __all__ = [
     "BundleRole",
     "Platform",
     "UserRole",
+    # Mixins
+    "ZohoSyncMixin",
     # Lookup Models
     "Brand",
     "Color",
@@ -70,6 +74,7 @@ __all__ = [
     "BundleComponent",
     "PlatformListing",
     "InventoryItem",
+    "Customer",
     "User",
     # Order Models
     "IntegrationState",

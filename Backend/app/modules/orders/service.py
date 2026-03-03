@@ -15,11 +15,12 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional, Sequence
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.integrations.base import BasePlatformClient, ExternalOrder, ExternalOrderItem
-from app.models.entities import Platform, PlatformListing
+from app.models.entities import Platform, PlatformListing, Customer
 from app.modules.orders.models import (
     IntegrationSyncStatus,
     Order,
@@ -322,12 +323,16 @@ class OrderSyncService:
         if existing is not None:
             return False
 
+        # Upsert/lookup Customer (if any data is available)
+        customer_id = await self._get_or_create_customer(ext)
+
         # Build the Order header
         order_data = {
             "platform": platform,
             "external_order_id": ext.platform_order_id,
             "external_order_number": ext.platform_order_number,
             "status": OrderStatus.PENDING,
+            "customer_id": customer_id,
             "customer_name": ext.customer_name,
             "customer_email": ext.customer_email,
             "shipping_address_line1": ext.ship_address_line1,
@@ -359,6 +364,48 @@ class OrderSyncService:
             await self._ingest_item(ext_item, order, platform, response)
 
         return True
+
+    async def _get_or_create_customer(self, ext: ExternalOrder) -> Optional[int]:
+        """Find or create a Customer from external order details."""
+        if not (ext.customer_name or ext.customer_email):
+            return None
+
+        # Prefer email for deterministic matching
+        if ext.customer_email:
+            existing = await self.session.execute(
+                select(Customer).where(Customer.email == ext.customer_email)
+            )
+            customer = existing.scalar_one_or_none()
+            if customer:
+                return customer.id
+
+        # Fallback: match by name + postal code if available
+        if ext.customer_name:
+            query = select(Customer).where(Customer.name == ext.customer_name)
+            if ext.ship_postal_code:
+                query = query.where(Customer.postal_code == ext.ship_postal_code)
+            existing = await self.session.execute(query)
+            customer = existing.scalar_one_or_none()
+            if customer:
+                return customer.id
+
+        # Create new customer
+        customer = Customer(
+            name=ext.customer_name or "Unknown",
+            email=ext.customer_email,
+            phone=None,
+            company_name=None,
+            address_line1=ext.ship_address_line1,
+            address_line2=ext.ship_address_line2,
+            city=ext.ship_city,
+            state=ext.ship_state,
+            postal_code=ext.ship_postal_code,
+            country=ext.ship_country or "US",
+            is_active=True,
+        )
+        self.session.add(customer)
+        await self.session.flush()
+        return customer.id
 
     async def _ingest_item(
         self,

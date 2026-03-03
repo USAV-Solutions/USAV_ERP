@@ -6,6 +6,7 @@ Handles sync between USAV Inventory and Zoho Inventory/Books.
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Any
+import asyncio
 import logging
 import mimetypes
 import json
@@ -15,6 +16,14 @@ import httpx
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+class RateLimitError(Exception):
+    """Zoho rate limit / throttling error."""
+
+    def __init__(self, message: str, retry_after: Optional[int] = None):
+        super().__init__(message)
+        self.retry_after = retry_after
 
 
 class ZohoClient:
@@ -34,6 +43,11 @@ class ZohoClient:
     ZOHO_INVENTORY_API = "https://www.zohoapis.com/inventory/v1"
     ZOHO_BOOKS_API = "https://www.zohoapis.com/books/v3"
     
+    # Shared token across instances to avoid refreshing per request
+    _shared_access_token: Optional[str] = None
+    _shared_token_expires_at: Optional[datetime] = None
+    _token_lock: asyncio.Lock = asyncio.Lock()
+
     def __init__(
         self,
         client_id: Optional[str] = None,
@@ -54,18 +68,25 @@ class ZohoClient:
         self._token_expires_at = None
     
     async def _ensure_access_token(self):
-        """Refresh access token if needed."""
-        if self._access_token and self._token_expires_at:
-            if datetime.now() < self._token_expires_at:
+        """Refresh access token if needed, with shared cache and lock."""
+        async with ZohoClient._token_lock:
+            # Reuse shared token if still valid
+            if (
+                ZohoClient._shared_access_token
+                and ZohoClient._shared_token_expires_at
+                and datetime.now() < ZohoClient._shared_token_expires_at
+            ):
+                self._access_token = ZohoClient._shared_access_token
+                self._token_expires_at = ZohoClient._shared_token_expires_at
                 return
-        
-        await self._refresh_access_token()
+
+            await self._refresh_access_token()
     
     async def _refresh_access_token(self):
         """Get new access token using refresh token."""
         if not all([self.client_id, self.client_secret, self.refresh_token]):
             raise ValueError("Zoho credentials not configured")
-        
+
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{self.accounts_url}/oauth/v2/token",
@@ -76,18 +97,34 @@ class ZohoClient:
                     "grant_type": "refresh_token",
                 },
             )
-            
-            if response.status_code != 200:
-                logger.error(f"Failed to refresh Zoho token: {response.text}")
-                raise Exception("Failed to refresh Zoho access token")
-            
-            data = response.json()
-            self._access_token = data["access_token"]
-            # Zoho tokens expire in 1 hour, refresh slightly before
-            from datetime import timedelta
-            self._token_expires_at = datetime.now() + timedelta(minutes=55)
-            
-            logger.info("Zoho access token refreshed")
+
+        retry_after = None
+        if response.status_code == 429:
+            retry_after_header = response.headers.get("Retry-After")
+            retry_after = int(retry_after_header) if retry_after_header and retry_after_header.isdigit() else 60
+            logger.error("Zoho token refresh rate-limited (429). Retry after %ss", retry_after)
+            raise RateLimitError("Zoho token refresh rate-limited", retry_after)
+
+        if response.status_code == 400 and "too many requests" in response.text.lower():
+            retry_after_header = response.headers.get("Retry-After")
+            retry_after = int(retry_after_header) if retry_after_header and retry_after_header.isdigit() else 60
+            logger.error("Zoho token refresh throttled (400). Retry after %ss | body=%s", retry_after, response.text)
+            raise RateLimitError("Zoho token refresh throttled", retry_after)
+
+        if response.status_code != 200:
+            logger.error(f"Failed to refresh Zoho token: {response.text}")
+            raise Exception("Failed to refresh Zoho access token")
+
+        data = response.json()
+        self._access_token = data["access_token"]
+        # Zoho tokens expire in 1 hour, refresh slightly before
+        from datetime import timedelta
+        self._token_expires_at = datetime.now() + timedelta(minutes=55)
+
+        ZohoClient._shared_access_token = self._access_token
+        ZohoClient._shared_token_expires_at = self._token_expires_at
+
+        logger.info("Zoho access token refreshed")
     
     async def _request(
         self,
@@ -96,22 +133,13 @@ class ZohoClient:
         api: str = "inventory",
         **kwargs
     ) -> dict:
-        """Make authenticated request to Zoho API."""
+        """Make authenticated request to Zoho API with throttling awareness."""
         await self._ensure_access_token()
-        
+
         base_url = self.inventory_api_url if api == "inventory" else self.books_api_url
         url = f"{base_url}{endpoint}"
-        
-        headers = kwargs.pop("headers", {})
-        auth_headers = {
-            "Authorization": f"Zoho-oauthtoken {self._access_token}",
-        }
-        for key, value in auth_headers.items():
-            headers.setdefault(key, value)
 
-        if "json" in kwargs and "files" not in kwargs:
-            headers.setdefault("Content-Type", "application/json")
-        
+        headers = kwargs.pop("headers", {})
         params = kwargs.pop("params", {})
         params["organization_id"] = self.organization_id
 
@@ -142,21 +170,55 @@ class ZohoClient:
             payload_mode,
             payload_keys,
         )
-        
+
         async with httpx.AsyncClient() as client:
-            response = await client.request(
-                method,
-                url,
-                headers=headers,
-                params=params,
-                **kwargs
-            )
-            
-            if response.status_code not in [200, 201]:
-                logger.error(f"Zoho API error: {response.status_code} - {response.text}")
-                raise Exception(f"Zoho API error: {response.text}")
-            
-            return response.json()
+            # Retry once on 401 after a token refresh
+            for attempt in range(2):
+                auth_headers = {
+                    "Authorization": f"Zoho-oauthtoken {self._access_token}",
+                }
+                if "json" in kwargs and "files" not in kwargs:
+                    headers.setdefault("Content-Type", "application/json")
+                request_headers = {**auth_headers, **headers}
+
+                response = await client.request(
+                    method,
+                    url,
+                    headers=request_headers,
+                    params=params,
+                    **kwargs
+                )
+
+                if response.status_code in (429,):
+                    retry_after_header = response.headers.get("Retry-After")
+                    retry_after = int(retry_after_header) if retry_after_header and retry_after_header.isdigit() else 60
+                    logger.error("Zoho API rate limit hit (429). Retry after %ss | endpoint=%s", retry_after, endpoint)
+                    raise RateLimitError("Zoho API rate limit hit", retry_after)
+
+                # Zoho sometimes returns 400 with an Access Denied + too many requests message
+                if response.status_code == 400 and "too many requests" in response.text.lower():
+                    retry_after_header = response.headers.get("Retry-After")
+                    retry_after = int(retry_after_header) if retry_after_header and retry_after_header.isdigit() else 60
+                    logger.error(
+                        "Zoho API throttled (400 too many requests). Retry after %ss | endpoint=%s body=%s",
+                        retry_after,
+                        endpoint,
+                        response.text,
+                    )
+                    raise RateLimitError("Zoho API throttled", retry_after)
+
+                if response.status_code == 401 and attempt == 0:
+                    # Token might be expired; refresh and retry once
+                    await self._refresh_access_token()
+                    continue
+
+                if response.status_code not in [200, 201]:
+                    logger.error(f"Zoho API error: {response.status_code} - {response.text}")
+                    raise Exception(f"Zoho API error: {response.text}")
+
+                return response.json()
+
+        raise Exception("Zoho API request failed after retry")
     
     # =========================================================================
     # ITEM SYNC
@@ -412,6 +474,128 @@ class ZohoClient:
             data={"JSONString": json.dumps(order_data)}
         )
         return result.get("salesorder", {})
+
+    async def update_salesorder(self, salesorder_id: str, order_data: dict) -> dict:
+        """Update an existing sales order in Zoho."""
+        result = await self._request(
+            "PUT",
+            f"/salesorders/{salesorder_id}",
+            data={"JSONString": json.dumps(order_data)},
+        )
+        return result.get("salesorder", {})
+
+    async def get_salesorder(self, salesorder_id: str) -> dict:
+        """Fetch a single sales order by ID."""
+        result = await self._request("GET", f"/salesorders/{salesorder_id}")
+        return result.get("salesorder", {})
+
+    async def list_salesorders(
+        self,
+        *,
+        last_modified_time: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 200,
+    ) -> List[dict]:
+        """
+        List sales orders, optionally filtering by last modification time.
+
+        ``last_modified_time`` format expected by Zoho: ``YYYY-MM-DDTHH:MM:SSZ``
+        """
+        params: dict[str, Any] = {"page": page, "per_page": per_page}
+        if last_modified_time:
+            params["last_modified_time"] = last_modified_time
+        result = await self._request("GET", "/salesorders", params=params)
+        return result.get("salesorders", [])
+
+    # =========================================================================
+    # CONTACTS (Customers)
+    # =========================================================================
+
+    async def create_contact(self, contact_data: dict) -> dict:
+        """Create a contact (customer) in Zoho Inventory."""
+        logger.info(
+            "Zoho create_contact payload | email=%s name=%s",
+            contact_data.get("email"),
+            contact_data.get("contact_name"),
+        )
+        result = await self._request(
+            "POST",
+            "/contacts",
+            data={"JSONString": json.dumps(contact_data)},
+        )
+        return result.get("contact", {})
+
+    async def update_contact(self, contact_id: str, contact_data: dict) -> dict:
+        """Update an existing contact in Zoho Inventory."""
+        result = await self._request(
+            "PUT",
+            f"/contacts/{contact_id}",
+            data={"JSONString": json.dumps(contact_data)},
+        )
+        return result.get("contact", {})
+
+    async def get_contact(self, contact_id: str) -> dict:
+        """Fetch a single contact by ID."""
+        result = await self._request("GET", f"/contacts/{contact_id}")
+        return result.get("contact", {})
+
+    async def get_contact_by_email(self, email: str) -> Optional[dict]:
+        """Find a Zoho contact by email address."""
+        result = await self._request("GET", "/contacts", params={"email": email})
+        contacts = result.get("contacts", [])
+        return contacts[0] if contacts else None
+
+    async def list_contacts(
+        self,
+        *,
+        last_modified_time: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 200,
+    ) -> List[dict]:
+        """List contacts, optionally filtering by last modification time."""
+        params: dict[str, Any] = {"page": page, "per_page": per_page}
+        if last_modified_time:
+            params["last_modified_time"] = last_modified_time
+        result = await self._request("GET", "/contacts", params=params)
+        return result.get("contacts", [])
+
+    # =========================================================================
+    # STATUS TOGGLES (soft-delete / reactivate)
+    # =========================================================================
+
+    async def mark_item_inactive(self, zoho_item_id: str) -> dict:
+        """Mark an item as *inactive* in Zoho (soft-delete)."""
+        return await self._request("POST", f"/items/{zoho_item_id}/inactive")
+
+    async def mark_item_active(self, zoho_item_id: str) -> dict:
+        """Mark an item as *active* in Zoho (restore)."""
+        return await self._request("POST", f"/items/{zoho_item_id}/active")
+
+    async def mark_contact_inactive(self, contact_id: str) -> dict:
+        """Mark a contact as *inactive* in Zoho (soft-delete)."""
+        return await self._request("POST", f"/contacts/{contact_id}/inactive")
+
+    async def mark_contact_active(self, contact_id: str) -> dict:
+        """Mark a contact as *active* in Zoho (restore)."""
+        return await self._request("POST", f"/contacts/{contact_id}/active")
+
+    # =========================================================================
+    # ITEMS – LISTING HELPERS (for reconciliation)
+    # =========================================================================
+
+    async def list_items(
+        self,
+        *,
+        last_modified_time: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 200,
+    ) -> List[dict]:
+        """List items, optionally since *last_modified_time*."""
+        params: dict[str, Any] = {"page": page, "per_page": per_page}
+        if last_modified_time:
+            params["last_modified_time"] = last_modified_time
+        result = await self._request("GET", "/items", params=params)
+        return result.get("items", [])
     
     async def health_check(self) -> bool:
         """Check if Zoho API is accessible."""

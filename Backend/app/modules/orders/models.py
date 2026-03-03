@@ -32,11 +32,11 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
-from app.models.entities import TimestampMixin
+from app.models.entities import TimestampMixin, ZohoSyncMixin
 
 if TYPE_CHECKING:
     from typing import List
-    from app.models.entities import ProductVariant, InventoryItem
+    from app.models.entities import ProductVariant, InventoryItem, Customer
 
 
 # ============================================================================
@@ -144,14 +144,14 @@ class IntegrationState(Base, TimestampMixin):
 # ORDER HEADER
 # ============================================================================
 
-class Order(Base, TimestampMixin):
+class Order(Base, ZohoSyncMixin, TimestampMixin):
     """
     Top-level customer order imported from an external sales platform.
 
     The ``UNIQUE(platform, external_order_id)`` constraint guarantees
     idempotent ingestion – overlapping sync windows are safe.
     """
-    __tablename__ = "order"
+    __tablename__ = "orders"
 
     id: Mapped[int] = mapped_column(
         BigInteger,
@@ -178,6 +178,14 @@ class Order(Base, TimestampMixin):
         nullable=False,
         default=OrderStatus.PENDING,
         comment="Current order processing status.",
+    )
+
+    # ---- Customer (normalised) ----
+    customer_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("customer.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="FK to the normalised Customer record.",
     )
 
     # ---- Customer ----
@@ -253,6 +261,11 @@ class Order(Base, TimestampMixin):
     )
 
     # ---- Relationships ----
+    customer: Mapped[Optional["Customer"]] = relationship(
+        "Customer",
+        back_populates="orders",
+        lazy="selectin",
+    )
     items: Mapped[list["OrderItem"]] = relationship(
         "OrderItem",
         back_populates="order",
@@ -267,6 +280,8 @@ class Order(Base, TimestampMixin):
         Index("ix_order_status", "status"),
         Index("ix_order_ordered_at", "ordered_at"),
         Index("ix_order_external_id", "external_order_id"),
+        Index("ix_order_customer_id", "customer_id"),
+        Index("ix_order_zoho_id", "zoho_id"),
     )
 
     def __repr__(self) -> str:
@@ -297,7 +312,7 @@ class OrderItem(Base, TimestampMixin):
     )
     order_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("order.id", ondelete="CASCADE"),
+        ForeignKey("orders.id", ondelete="CASCADE"),
         nullable=False,
         comment="Parent order.",
     )

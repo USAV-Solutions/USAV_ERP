@@ -67,6 +67,13 @@ export const ZOHO = {
   SYNC_ITEMS_STOP: '/zoho/sync/items/stop',
 }
 
+// Force-sync (two-way Zoho sync engine) endpoints
+export const SYNC = {
+  ITEM: (variantId: number) => `/sync/items/${variantId}`,
+  ORDER: (orderId: number) => `/sync/orders/${orderId}`,
+  CUSTOMER: (customerId: number) => `/sync/customers/${customerId}`,
+}
+
 // Order endpoints – matches Backend routes.py prefix /orders
 export const ORDERS = {
   // CRUD

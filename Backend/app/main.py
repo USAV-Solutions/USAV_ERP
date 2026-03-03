@@ -17,6 +17,17 @@ from app.api import api_router
 from app.core.config import settings
 from app.core.database import close_db, engine
 from app.modules.orders.routes import router as orders_router
+from app.modules.sync.endpoints import router as sync_router
+from app.integrations.zoho.webhooks import (
+    register_webhook_handler,
+    router as zoho_webhooks_router,
+)
+from app.integrations.zoho.sync_engine import (
+    process_contact_inbound,
+    process_item_inbound,
+    process_order_inbound,
+    register_sync_listeners,
+)
 
 
 logging.basicConfig(
@@ -35,7 +46,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     print(f"🚀 Starting {settings.app_name} v{settings.app_version}")
     print(f"📊 Environment: {settings.environment}")
     print(f"🔗 Database: {settings.db_host}:{settings.db_port}/{settings.db_name}")
-    
+
+    # Register Zoho sync event listeners & webhook handlers
+    register_sync_listeners()
+    register_webhook_handler("item.created", process_item_inbound)
+    register_webhook_handler("item.updated", process_item_inbound)
+    register_webhook_handler("contact.created", process_contact_inbound)
+    register_webhook_handler("contact.updated", process_contact_inbound)
+    register_webhook_handler("salesorder.created", process_order_inbound)
+    register_webhook_handler("salesorder.updated", process_order_inbound)
+
     yield
     
     # Shutdown
@@ -145,6 +165,11 @@ async def root():
 # Include API router with prefix
 app.include_router(api_router, prefix=settings.api_prefix)
 app.include_router(orders_router, prefix=settings.api_prefix)
+app.include_router(sync_router, prefix=settings.api_prefix)
+
+# Zoho webhooks live outside the API prefix so that Zoho's static
+# webhook URL config stays simple (e.g. https://api.example.com/webhooks/zoho).
+app.include_router(zoho_webhooks_router)
 
 
 if __name__ == "__main__":

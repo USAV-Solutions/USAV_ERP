@@ -32,10 +32,10 @@ class OrderRepository(BaseRepository[Order]):
     # ------------------------------------------------------------------
 
     async def get_with_items(self, order_id: int) -> Optional[Order]:
-        """Load an order together with all its line items."""
+        """Load an order together with all its line items and customer."""
         stmt = (
             select(Order)
-            .options(selectinload(Order.items))
+            .options(selectinload(Order.items), selectinload(Order.customer))
             .where(Order.id == order_id)
         )
         result = await self.session.execute(stmt)
@@ -72,7 +72,10 @@ class OrderRepository(BaseRepository[Order]):
         ``item_status`` filters to orders that contain **at least one** item
         matching the given status (e.g. "show me orders with UNMATCHED items").
         """
-        stmt = select(Order).options(selectinload(Order.items))
+        stmt = select(Order).options(
+            selectinload(Order.items),
+            selectinload(Order.customer),
+        )
 
         if platform is not None:
             stmt = stmt.where(Order.platform == platform)

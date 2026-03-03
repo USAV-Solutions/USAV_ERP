@@ -35,6 +35,13 @@ import {
   IconButton,
   Stack,
   Collapse,
+  Snackbar,
+  Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  LinearProgress,
 } from '@mui/material'
 import {
   Search,
@@ -42,10 +49,12 @@ import {
   Warning,
   KeyboardArrowDown,
   KeyboardArrowUp,
+  CloudSync,
 } from '@mui/icons-material'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 
 import { listOrders, getOrder, getSyncStatus } from '../api/orders'
+import { forceSyncOrder } from '../api/sync'
 import type {
   OrderBrief,
   OrderListResponse,
@@ -113,6 +122,20 @@ export default function OrdersManagement() {
   // Expanded order rows
   const [expandedOrderId, setExpandedOrderId] = useState<number | null>(null)
 
+  // Force-sync state
+  const [syncingOrderId, setSyncingOrderId] = useState<number | null>(null)
+  const [snackbarOpen, setSnackbarOpen] = useState(false)
+  const [snackbarMessage, setSnackbarMessage] = useState('')
+  const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success')
+
+  // Bulk Zoho sync (matched orders only)
+  const [bulkDialogOpen, setBulkDialogOpen] = useState(false)
+  const [bulkLoading, setBulkLoading] = useState(false)
+  const [bulkError, setBulkError] = useState<string | null>(null)
+  const [bulkTotal, setBulkTotal] = useState(0)
+  const [bulkProgress, setBulkProgress] = useState({ queued: 0, success: 0, failed: 0 })
+  const [bulkDone, setBulkDone] = useState(false)
+
   // ── Queries ──────────────────────────────────────────────────────
 
   const {
@@ -142,6 +165,89 @@ export default function OrdersManagement() {
 
   // ── Handlers ─────────────────────────────────────────────────────
 
+  const forceSyncMutation = useMutation({
+    mutationFn: (orderId: number) => forceSyncOrder(orderId),
+    onMutate: (orderId) => setSyncingOrderId(orderId),
+    onSuccess: (_data, orderId) => {
+      setSnackbarSeverity('success')
+      setSnackbarMessage(`Order #${orderId} queued for Zoho sync.`)
+      setSnackbarOpen(true)
+      setSyncingOrderId(null)
+    },
+    onError: (error: { response?: { data?: { detail?: string } }; message?: string }, orderId) => {
+      const detail = error.response?.data?.detail || error.message || 'Force sync failed.'
+      setSnackbarSeverity('error')
+      setSnackbarMessage(`Order #${orderId}: ${detail}`)
+      setSnackbarOpen(true)
+      setSyncingOrderId(null)
+    },
+  })
+
+  const handleForceSync = (orderId: number, e: React.MouseEvent) => {
+    e.stopPropagation() // prevent row expand
+    forceSyncMutation.mutate(orderId)
+  }
+
+  const handleBulkSync = async () => {
+    setBulkLoading(true)
+    setBulkError(null)
+    setBulkDone(false)
+    setBulkProgress({ queued: 0, success: 0, failed: 0 })
+
+    try {
+      // Fetch all orders (cap at 2000 to avoid runaway)
+      const pageSize = 500
+      let skip = 0
+      let eligibleIds: number[] = []
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const batch = await listOrders({ skip, limit: pageSize })
+        const matched = batch.items.filter((o) => o.unmatched_count === 0).map((o) => o.id)
+        eligibleIds = eligibleIds.concat(matched)
+
+        if (batch.items.length < pageSize || eligibleIds.length >= 2000) {
+          break
+        }
+        skip += pageSize
+      }
+
+      setBulkTotal(eligibleIds.length)
+
+      if (!eligibleIds.length) {
+        setBulkDone(true)
+        return
+      }
+
+      let firstError: string | null = null
+
+      // Sequentially queue to avoid API burst
+      for (const id of eligibleIds) {
+        try {
+          await forceSyncOrder(id)
+          setBulkProgress((p) => ({ queued: p.queued + 1, success: p.success + 1, failed: p.failed }))
+        } catch (err: any) {
+          setBulkProgress((p) => ({ queued: p.queued + 1, success: p.success, failed: p.failed + 1 }))
+          if (!firstError) {
+            firstError = err?.message || 'One or more orders failed to queue.'
+          }
+        }
+      }
+
+      if (firstError) {
+        setBulkError(firstError)
+      }
+
+      setBulkDone(true)
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      await queryClient.invalidateQueries({ queryKey: ['syncStatus'] })
+    } catch (err: any) {
+      setBulkError(err?.message || 'Failed to load orders for bulk sync.')
+    } finally {
+      setBulkLoading(false)
+    }
+  }
+
   const resetFilters = () => {
     setPlatformFilter('')
     setStatusFilter('')
@@ -149,6 +255,8 @@ export default function OrdersManagement() {
     setSearch('')
     setPage(0)
   }
+
+  const bulkPercent = bulkTotal ? Math.min(Math.round((bulkProgress.queued / bulkTotal) * 100), 100) : 0
 
   // ── Render ───────────────────────────────────────────────────────
 
@@ -169,6 +277,20 @@ export default function OrdersManagement() {
             </IconButton>
           </Tooltip>
           {hasRole(['ADMIN']) && <AdminDateRangeSync />}
+          {hasRole(['ADMIN']) && (
+            <Button
+              variant="outlined"
+              onClick={() => {
+                setBulkDialogOpen(true)
+                setBulkError(null)
+                setBulkDone(false)
+                setBulkTotal(0)
+                setBulkProgress({ queued: 0, success: 0, failed: 0 })
+              }}
+            >
+              Sync matched to Zoho
+            </Button>
+          )}
           <OrderSyncButton />
         </Stack>
       </Box>
@@ -361,18 +483,19 @@ export default function OrdersManagement() {
                 <TableCell align="right">Total</TableCell>
                 <TableCell>Status</TableCell>
                 <TableCell>Ordered</TableCell>
+                {hasRole(['ADMIN']) && <TableCell align="center">Zoho</TableCell>}
               </TableRow>
             </TableHead>
             <TableBody>
               {ordersLoading ? (
                 <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={10} align="center" sx={{ py: 4 }}>
                     <CircularProgress />
                   </TableCell>
                 </TableRow>
               ) : !ordersData?.items.length ? (
                 <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={10} align="center" sx={{ py: 4 }}>
                     No orders found
                   </TableCell>
                 </TableRow>
@@ -436,10 +559,30 @@ export default function OrdersManagement() {
                               : '—'}
                           </Typography>
                         </TableCell>
+                        {hasRole(['ADMIN']) && (
+                          <TableCell align="center">
+                            <Tooltip title="Sync this order to Zoho">
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  color="primary"
+                                  onClick={(e) => handleForceSync(order.id, e)}
+                                  disabled={syncingOrderId === order.id}
+                                >
+                                  {syncingOrderId === order.id ? (
+                                    <CircularProgress size={18} />
+                                  ) : (
+                                    <CloudSync fontSize="small" />
+                                  )}
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          </TableCell>
+                        )}
                       </TableRow>
                       {/* Expandable items panel */}
                       <TableRow>
-                        <TableCell sx={{ py: 0 }} colSpan={9}>
+                        <TableCell sx={{ py: 0 }} colSpan={10}>
                           <Collapse in={isExpanded} timeout="auto" unmountOnExit>
                             <OrderItemsPanel orderId={order.id} />
                           </Collapse>
@@ -465,6 +608,82 @@ export default function OrdersManagement() {
           }}
         />
       </Paper>
+
+      {/* Bulk Zoho sync dialog */}
+      <Dialog
+        open={bulkDialogOpen}
+        onClose={bulkLoading ? undefined : () => setBulkDialogOpen(false)}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>Sync matched orders to Zoho</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2}>
+            <Typography variant="body2" color="text.secondary">
+              Only orders with 0 unmatched items will be queued. Fetches up to 2000 orders and queues
+              them sequentially to avoid API spikes.
+            </Typography>
+            <Stack spacing={1}>
+              <Typography variant="body2">
+                Eligible orders: {bulkTotal}
+              </Typography>
+              <Typography variant="body2">
+                Success: {bulkProgress.success} · Failed: {bulkProgress.failed}
+              </Typography>
+              <LinearProgress
+                variant={bulkTotal ? 'determinate' : 'indeterminate'}
+                value={bulkTotal ? bulkPercent : undefined}
+              />
+              {bulkTotal > 0 && (
+                <Typography variant="caption" color="text.secondary">
+                  {bulkPercent}%
+                </Typography>
+              )}
+            </Stack>
+            {bulkLoading && (
+              <Alert severity="info" icon={<CircularProgress size={16} />}>
+                Queueing matched orders to Zoho...
+              </Alert>
+            )}
+            {bulkDone && !bulkLoading && !bulkError && bulkTotal > 0 && (
+              <Alert severity="success">All matched orders queued successfully.</Alert>
+            )}
+            {bulkDone && !bulkLoading && bulkTotal === 0 && (
+              <Alert severity="info">No matched orders found to sync.</Alert>
+            )}
+            {bulkError && (
+              <Alert severity="warning" sx={{ whiteSpace: 'pre-line' }}>
+                {bulkError}
+              </Alert>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBulkDialogOpen(false)} disabled={bulkLoading}>
+            Close
+          </Button>
+          <Button onClick={handleBulkSync} variant="contained" disabled={bulkLoading}>
+            {bulkLoading ? 'Syncing…' : 'Start sync'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Force-sync feedback */}
+      <Snackbar
+        open={snackbarOpen}
+        autoHideDuration={4000}
+        onClose={() => setSnackbarOpen(false)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert
+          onClose={() => setSnackbarOpen(false)}
+          severity={snackbarSeverity}
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {snackbarMessage}
+        </Alert>
+      </Snackbar>
     </Box>
   )
 }

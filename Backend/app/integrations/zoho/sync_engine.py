@@ -1,0 +1,757 @@
+"""
+Zoho two-way sync engine.
+
+Provides:
+* **Outbound** – SQLAlchemy event listeners on ``ProductVariant`` and
+  ``Customer`` that enqueue background tasks whenever a record is created
+  or updated (unless the change originated from an inbound webhook).
+* **Inbound** – Functions consumed by the webhook dispatcher to apply
+  Zoho-side changes to the local database (with echo-loop prevention).
+* **Mappers** – Convert local models to/from Zoho API payloads.
+
+The "queue" is currently ``asyncio.create_task`` which runs in-process
+(sufficient for single-instance deployments).  Swapping to Redis/ARQ later
+requires only changing ``_enqueue_*`` helpers.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+from datetime import datetime
+from typing import Any, Optional
+
+from sqlalchemy import event
+
+from app.core.database import async_session_factory
+from app.integrations.zoho.client import ZohoClient, RateLimitError
+from app.integrations.zoho.security import generate_payload_hash
+from app.models.entities import Customer, ProductVariant
+from app.modules.orders.models import Order, OrderItem
+
+logger = logging.getLogger(__name__)
+
+
+# =========================================================================
+# PAYLOAD MAPPERS  (USAV → Zoho)
+# =========================================================================
+
+def variant_to_zoho_payload(variant: ProductVariant) -> dict[str, Any]:
+    """Build the Zoho item payload from a *fully‑loaded* ProductVariant."""
+    identity = getattr(variant, "identity", None)
+    family = identity.family if identity else None
+
+    payload: dict[str, Any] = {
+        "name": variant.variant_name or (family.base_name if family else variant.full_sku),
+        "sku": variant.full_sku,
+        "description": family.description if family else "",
+    }
+
+    # Price – take the first available listing price.
+    # Some call sites (or legacy code) may accidentally attach a single
+    # PlatformListing instance instead of a list; normalize to an iterable
+    # to avoid TypeError: 'PlatformListing' object is not iterable.
+    listings_attr = getattr(variant, "listings", None) or []
+    listings = (
+        listings_attr
+        if isinstance(listings_attr, (list, tuple))
+        else [listings_attr]
+    )
+
+    listing_prices = [
+        float(listing.listing_price)
+        for listing in listings
+        if listing and listing.listing_price is not None
+    ]
+    if listing_prices:
+        payload["rate"] = listing_prices[0]
+
+    if family:
+        if family.weight is not None:
+            payload["weight"] = float(family.weight)
+        if family.dimension_length is not None:
+            payload["length"] = float(family.dimension_length)
+        if family.dimension_width is not None:
+            payload["width"] = float(family.dimension_width)
+        if family.dimension_height is not None:
+            payload["height"] = float(family.dimension_height)
+
+    return {k: v for k, v in payload.items() if v is not None}
+
+
+def customer_to_zoho_payload(customer: Customer) -> dict[str, Any]:
+    """Build a Zoho *contact* payload from a local ``Customer``."""
+    payload: dict[str, Any] = {
+        "contact_name": customer.name,
+        "contact_type": "customer",
+    }
+    if customer.email:
+        payload["email"] = customer.email
+    if customer.phone:
+        payload["phone"] = customer.phone
+    if customer.company_name:
+        payload["company_name"] = customer.company_name
+
+    # Billing address
+    address: dict[str, str] = {}
+    if customer.address_line1:
+        address["address"] = customer.address_line1
+    if customer.address_line2:
+        address["street2"] = customer.address_line2
+    if customer.city:
+        address["city"] = customer.city
+    if customer.state:
+        address["state"] = customer.state
+    if customer.postal_code:
+        address["zip"] = customer.postal_code
+    if customer.country:
+        address["country"] = customer.country
+    if address:
+        payload["billing_address"] = address
+
+    return payload
+
+
+# =========================================================================
+# INBOUND MAPPERS  (Zoho → USAV)
+# =========================================================================
+
+def zoho_contact_to_customer_fields(data: dict) -> dict[str, Any]:
+    """Extract Customer-relevant fields from a Zoho contact payload."""
+    fields: dict[str, Any] = {}
+    if "contact_name" in data:
+        fields["name"] = data["contact_name"]
+    if "email" in data:
+        fields["email"] = data["email"]
+    if "phone" in data:
+        fields["phone"] = data["phone"]
+    if "company_name" in data:
+        fields["company_name"] = data["company_name"]
+    addr = data.get("billing_address") or {}
+    if addr.get("address"):
+        fields["address_line1"] = addr["address"]
+    if addr.get("street2"):
+        fields["address_line2"] = addr["street2"]
+    if addr.get("city"):
+        fields["city"] = addr["city"]
+    if addr.get("state"):
+        fields["state"] = addr["state"]
+    if addr.get("zip"):
+        fields["postal_code"] = addr["zip"]
+    if addr.get("country"):
+        fields["country"] = addr["country"]
+    return fields
+
+
+# =========================================================================
+# OUTBOUND SYNC WORKERS
+# =========================================================================
+
+async def sync_variant_outbound(variant_id: int) -> None:
+    """
+    Push a single ``ProductVariant`` to Zoho Inventory (create or update).
+
+    Uses a fresh DB session so it is safe to call from a background task.
+    """
+    from sqlalchemy.orm import selectinload
+    from sqlalchemy import select
+    from app.models.entities import ProductIdentity
+
+    async with async_session_factory() as db:
+        stmt = (
+            select(ProductVariant)
+            .options(
+                selectinload(ProductVariant.identity).selectinload(ProductIdentity.family),
+                selectinload(ProductVariant.listings),
+            )
+            .where(ProductVariant.id == variant_id)
+        )
+        variant = (await db.execute(stmt)).scalar_one_or_none()
+        if variant is None:
+            logger.warning("sync_variant_outbound: variant %s not found", variant_id)
+            return
+
+        payload = variant_to_zoho_payload(variant)
+        new_hash = generate_payload_hash(payload)
+
+        if new_hash == variant.zoho_last_sync_hash:
+            logger.debug("sync_variant_outbound: variant %s unchanged (hash match)", variant_id)
+            return
+
+        try:
+            zoho = ZohoClient()
+            zoho_item = await zoho.sync_item(
+                sku=payload.get("sku", variant.full_sku),
+                name=payload.get("name", variant.full_sku),
+                rate=float(payload.get("rate", 0) or 0),
+                description=payload.get("description", ""),
+                **{k: v for k, v in payload.items() if k not in {"name", "sku", "rate", "description"}},
+            )
+
+            zoho_item_id = str(zoho_item.get("item_id", ""))
+            if zoho_item_id:
+                variant.zoho_item_id = zoho_item_id
+
+            variant.zoho_last_sync_hash = new_hash
+            variant.zoho_last_synced_at = datetime.now()
+            variant.zoho_sync_error = None
+            await db.commit()
+
+            logger.info(
+                "sync_variant_outbound: variant %s synced to Zoho (item_id=%s)",
+                variant_id,
+                zoho_item_id,
+            )
+        except RateLimitError as exc:
+            variant.zoho_sync_error = str(exc)
+            await db.commit()
+            logger.warning("sync_variant_outbound: variant %s rate-limited (retry_after=%s)", variant_id, getattr(exc, "retry_after", None))
+            raise
+        except Exception as exc:
+            variant.zoho_sync_error = str(exc)[:2000]
+            await db.commit()
+            logger.exception("sync_variant_outbound: variant %s failed", variant_id)
+
+
+async def sync_customer_outbound(customer_id: int) -> None:
+    """
+    Push a single ``Customer`` to Zoho Inventory *Contacts* (create or update).
+    """
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        customer = (await db.execute(
+            select(Customer).where(Customer.id == customer_id)
+        )).scalar_one_or_none()
+
+        if customer is None:
+            logger.warning("sync_customer_outbound: customer %s not found", customer_id)
+            return
+
+        payload = customer_to_zoho_payload(customer)
+        new_hash = generate_payload_hash(payload)
+
+        if new_hash == customer.zoho_last_sync_hash:
+            logger.debug("sync_customer_outbound: customer %s unchanged (hash match)", customer_id)
+            return
+
+        try:
+            zoho = ZohoClient()
+
+            # If no zoho_id but email exists, try to find existing contact by email first
+            if not customer.zoho_id and customer.email:
+                existing = await zoho.get_contact_by_email(customer.email)
+                if existing:
+                    customer.zoho_id = str(existing.get("contact_id", ""))
+
+            if customer.zoho_id:
+                contact = await zoho.update_contact(customer.zoho_id, payload)
+            else:
+                contact = await zoho.create_contact(payload)
+
+            contact_id = str(contact.get("contact_id", ""))
+            if contact_id:
+                customer.zoho_id = contact_id
+
+            # Soft-delete mapping
+            if customer.is_active:
+                if customer.zoho_id:
+                    await zoho.mark_contact_active(customer.zoho_id)
+            else:
+                if customer.zoho_id:
+                    await zoho.mark_contact_inactive(customer.zoho_id)
+
+            customer.zoho_last_sync_hash = new_hash
+            customer.zoho_last_synced_at = datetime.now()
+            customer.zoho_sync_error = None
+            customer._updated_by_sync = True
+            await db.commit()
+
+            logger.info(
+                "sync_customer_outbound: customer %s synced to Zoho (contact_id=%s)",
+                customer_id,
+                customer.zoho_id,
+            )
+        except Exception as exc:
+            message = str(exc)
+            # Handle duplicate name error by looking up existing contact
+            if "3062" in message or "already exists" in message:
+                zoho = ZohoClient()
+                resolved_id: Optional[str] = None
+
+                if customer.email:
+                    existing = await zoho.get_contact_by_email(customer.email)
+                    if existing:
+                        resolved_id = str(existing.get("contact_id", ""))
+
+                if not resolved_id and customer.name:
+                    # Fallback: scan first page of contacts for matching name
+                    contacts = await zoho.list_contacts(page=1, per_page=200)
+                    for c in contacts:
+                        if c.get("contact_name") == customer.name:
+                            resolved_id = str(c.get("contact_id", ""))
+                            break
+
+                if resolved_id:
+                    customer.zoho_id = resolved_id
+                    customer.zoho_last_sync_hash = new_hash
+                    customer.zoho_last_synced_at = datetime.now()
+                    customer.zoho_sync_error = None
+                    customer._updated_by_sync = True
+                    await db.commit()
+                    logger.info(
+                        "sync_customer_outbound: customer %s linked to existing Zoho contact %s",
+                        customer_id,
+                        resolved_id,
+                    )
+                    return
+
+            customer.zoho_sync_error = message[:2000]
+            customer._updated_by_sync = True
+            await db.commit()
+            logger.exception("sync_customer_outbound: customer %s failed", customer_id)
+
+
+# =========================================================================
+# INBOUND SYNC WORKERS  (called by webhook dispatcher)
+# =========================================================================
+
+async def process_item_inbound(payload: dict) -> None:
+    """
+    Apply an inbound Zoho item webhook to the local ``ProductVariant``.
+
+    Echo-loop prevention:
+    1. Hash the incoming payload — if it matches ``zoho_last_sync_hash``, skip.
+    2. Set ``_updated_by_sync = True`` on the entity before commit so that
+       the ``after_update`` listener does not re-enqueue an outbound sync.
+    """
+    from sqlalchemy import select
+
+    item_data = payload.get("item") or payload
+    zoho_item_id = str(item_data.get("item_id", ""))
+    sku = item_data.get("sku", "")
+
+    if not zoho_item_id and not sku:
+        logger.warning("process_item_inbound: payload missing item_id and sku")
+        return
+
+    new_hash = generate_payload_hash(item_data)
+
+    async with async_session_factory() as db:
+        # Locate by zoho_item_id first, fallback to SKU
+        stmt = select(ProductVariant)
+        if zoho_item_id:
+            stmt = stmt.where(ProductVariant.zoho_item_id == zoho_item_id)
+        else:
+            stmt = stmt.where(ProductVariant.full_sku == sku)
+
+        variant = (await db.execute(stmt)).scalar_one_or_none()
+        if variant is None:
+            logger.info("process_item_inbound: no local variant for zoho_item_id=%s sku=%s", zoho_item_id, sku)
+            return
+
+        if variant.zoho_last_sync_hash == new_hash:
+            logger.debug("process_item_inbound: variant %s hash unchanged, skipping", variant.id)
+            return
+
+        # Apply fields we care about
+        if item_data.get("name"):
+            variant.variant_name = item_data["name"]
+        if item_data.get("status") == "inactive":
+            variant.is_active = False
+        elif item_data.get("status") == "active":
+            variant.is_active = True
+
+        variant.zoho_item_id = zoho_item_id or variant.zoho_item_id
+        variant.zoho_last_sync_hash = new_hash
+        variant.zoho_last_synced_at = datetime.now()
+        variant.zoho_sync_error = None
+
+        # CRITICAL: prevent echo loop
+        variant._updated_by_sync = True
+        await db.commit()
+
+        logger.info("process_item_inbound: variant %s updated from Zoho", variant.id)
+
+
+async def process_contact_inbound(payload: dict) -> None:
+    """
+    Apply an inbound Zoho contact webhook to the local ``Customer``.
+    """
+    from sqlalchemy import select
+
+    contact_data = payload.get("contact") or payload
+    zoho_contact_id = str(contact_data.get("contact_id", ""))
+
+    if not zoho_contact_id:
+        logger.warning("process_contact_inbound: missing contact_id in payload")
+        return
+
+    new_hash = generate_payload_hash(contact_data)
+
+    async with async_session_factory() as db:
+        stmt = select(Customer).where(Customer.zoho_id == zoho_contact_id)
+        customer = (await db.execute(stmt)).scalar_one_or_none()
+
+        if customer is None:
+            # New contact from Zoho — create locally
+            fields = zoho_contact_to_customer_fields(contact_data)
+            customer = Customer(
+                zoho_id=zoho_contact_id,
+                zoho_last_sync_hash=new_hash,
+                zoho_last_synced_at=datetime.now(),
+                **fields,
+            )
+            customer._updated_by_sync = True
+            db.add(customer)
+            await db.commit()
+            logger.info("process_contact_inbound: created customer from Zoho contact %s", zoho_contact_id)
+            return
+
+        if customer.zoho_last_sync_hash == new_hash:
+            logger.debug("process_contact_inbound: customer %s hash unchanged", customer.id)
+            return
+
+        fields = zoho_contact_to_customer_fields(contact_data)
+        for key, value in fields.items():
+            setattr(customer, key, value)
+
+        customer.zoho_last_sync_hash = new_hash
+        customer.zoho_last_synced_at = datetime.now()
+        customer.zoho_sync_error = None
+        customer._updated_by_sync = True
+        await db.commit()
+
+        logger.info("process_contact_inbound: customer %s updated from Zoho", customer.id)
+
+
+# =========================================================================
+# ORDER OUTBOUND SYNC  (dependency-aware)
+# =========================================================================
+
+_ORDER_SYNC_MAX_RETRIES = 1  # retained for reference; no auto-retry to preserve Zoho API quota
+_ORDER_SYNC_RETRY_DELAY_SECS = 0
+
+
+def order_to_zoho_payload(order: Order) -> dict[str, Any]:
+    """Build a Zoho SalesOrder payload from a local ``Order``."""
+    # Hard guard: Zoho requires an existing contact; fail fast if missing
+    customer: Optional[Customer] = getattr(order, "customer", None)
+    if not (customer and customer.zoho_id):
+        raise ValueError("Order is missing customer.zoho_id; sync customer first.")
+
+    payload: dict[str, Any] = {
+        "reference_number": order.external_order_id,
+        "date": (order.ordered_at or order.created_at).strftime("%Y-%m-%d"),
+    }
+
+    # Customer
+    payload["customer_id"] = customer.zoho_id
+
+    # Line items
+    line_items: list[dict[str, Any]] = []
+    for item in (order.items or []):
+        li: dict[str, Any] = {
+            "name": item.item_name,
+            "quantity": item.quantity,
+            "rate": float(item.unit_price),
+        }
+        variant = getattr(item, "variant", None)
+        if variant and variant.zoho_item_id:
+            li["item_id"] = variant.zoho_item_id
+        line_items.append(li)
+    payload["line_items"] = line_items
+
+    # Shipping address
+    addr_fields = {
+        "address": order.shipping_address_line1,
+        "street2": order.shipping_address_line2,
+        "city": order.shipping_city,
+        "state": order.shipping_state,
+        "zip": order.shipping_postal_code,
+        "country": order.shipping_country,
+    }
+    shipping = {k: v for k, v in addr_fields.items() if v}
+    if shipping:
+        payload["shipping_address"] = _sanitize_shipping_address(shipping)
+
+    return payload
+
+
+def _sanitize_shipping_address(addr: dict[str, str]) -> dict[str, str]:
+    """Trim shipping address fields to satisfy Zoho < 100 chars rule."""
+    max_total = 95  # keep some headroom below 100
+    max_field = 64
+
+    def _trim(value: str, limit: int) -> str:
+        return value if len(value) <= limit else value[: limit - 1].rstrip() + "…"
+
+    sanitized = {k: _trim(v, max_field) for k, v in addr.items() if v}
+
+    # Re-trim address field to keep total under limit if needed
+    if "address" in sanitized:
+        while len(sanitized["address"]) > max_total:
+            sanitized["address"] = sanitized["address"][:-1]
+    return sanitized
+
+
+async def sync_order_outbound(order_id: int) -> None:
+    """
+    Push a single ``Order`` to Zoho as a SalesOrder.
+
+    **Dependency checks:**
+    - If the linked Customer has no ``zoho_id``, trigger customer sync first
+      and requeue with a delay.
+    - If any line-item's ProductVariant has no ``zoho_item_id``, trigger
+      variant sync first and requeue.
+    """
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    async with async_session_factory() as db:
+        stmt = (
+            select(Order)
+            .options(
+                selectinload(Order.customer),
+                selectinload(Order.items).selectinload(OrderItem.variant),
+            )
+            .where(Order.id == order_id)
+        )
+        order = (await db.execute(stmt)).scalar_one_or_none()
+        if order is None:
+            logger.warning("sync_order_outbound: order %s not found", order_id)
+            return
+
+        # ---- DEPENDENCY: Customer must exist and have zoho_id ----
+        customer = order.customer
+        if customer is None:
+            order.zoho_sync_error = "Cannot sync order: no linked customer record."
+            order._updated_by_sync = True
+            await db.commit()
+            logger.error("sync_order_outbound: order %s has no customer", order_id)
+            return
+
+        if not customer.zoho_id:
+            logger.info(
+                "sync_order_outbound: order %s waiting on customer %s zoho_id",
+                order_id, customer.id,
+            )
+            await sync_customer_outbound(customer.id)
+            await db.refresh(customer)
+
+            if not customer.zoho_id:
+                order.zoho_sync_error = f"Customer {customer.id} missing zoho_id; sync customer first."
+                order._updated_by_sync = True
+                await db.commit()
+                return
+
+        # ---- DEPENDENCY: All line-item variants must have zoho_item_id ----
+        missing_variants: list[int] = []
+        for item in (order.items or []):
+            variant = getattr(item, "variant", None)
+            if variant and not variant.zoho_item_id:
+                missing_variants.append(variant.id)
+
+        if missing_variants:
+            logger.info(
+                "sync_order_outbound: order %s waiting on %d variants",
+                order_id, len(missing_variants),
+            )
+            for vid in missing_variants:
+                try:
+                    await sync_variant_outbound(vid)
+                except RateLimitError as exc:
+                    order.zoho_sync_error = f"Zoho rate limit while syncing variants; retry after {getattr(exc, 'retry_after', 60)}s."
+                    order._updated_by_sync = True
+                    await db.commit()
+                    return
+            # Refresh variants and re-check once
+            refreshed_missing: list[int] = []
+            for item in (order.items or []):
+                variant = getattr(item, "variant", None)
+                if variant:
+                    await db.refresh(variant)
+                    if not variant.zoho_item_id:
+                        refreshed_missing.append(variant.id)
+
+            if refreshed_missing:
+                order.zoho_sync_error = (
+                    f"Variants {refreshed_missing} missing zoho_item_id; sync variants first."
+                )
+                order._updated_by_sync = True
+                await db.commit()
+                return
+
+        # ---- All dependencies met: build payload & push ----
+        payload = order_to_zoho_payload(order)
+        new_hash = generate_payload_hash(payload)
+
+        if new_hash == order.zoho_last_sync_hash:
+            logger.debug("sync_order_outbound: order %s unchanged (hash match)", order_id)
+            return
+
+        try:
+            zoho = ZohoClient()
+            if order.zoho_id:
+                so = await zoho.update_salesorder(order.zoho_id, payload)
+            else:
+                so = await zoho.create_sales_order(payload)
+
+            so_id = str(so.get("salesorder_id", ""))
+            if so_id:
+                order.zoho_id = so_id
+
+            order.zoho_last_sync_hash = new_hash
+            order.zoho_last_synced_at = datetime.now()
+            order.zoho_sync_error = None
+            order._updated_by_sync = True
+            await db.commit()
+
+            logger.info(
+                "sync_order_outbound: order %s synced to Zoho (salesorder_id=%s)",
+                order_id, so_id,
+            )
+        except RateLimitError as exc:
+            order.zoho_sync_error = (
+                f"Zoho rate limit hit; retry after {getattr(exc, 'retry_after', 60)}s."
+            )[:2000]
+            order._updated_by_sync = True
+            await db.commit()
+            logger.warning("sync_order_outbound: order %s rate-limited", order_id)
+            return
+        except Exception as exc:
+            logger.error(
+                "sync_order_outbound: order %s payload failed | payload=%s",
+                order_id,
+                payload,
+            )
+            order.zoho_sync_error = str(exc)[:2000]
+            order._updated_by_sync = True
+            await db.commit()
+            logger.exception("sync_order_outbound: order %s failed", order_id)
+
+
+# =========================================================================
+# ORDER INBOUND SYNC
+# =========================================================================
+
+async def process_order_inbound(payload: dict) -> None:
+    """
+    Apply an inbound Zoho SalesOrder webhook to the local ``Order``.
+
+    Only updates *status* and selected metadata fields — we do NOT
+    overwrite line-items from the Zoho side.
+    """
+    from sqlalchemy import select
+
+    so_data = payload.get("salesorder") or payload
+    zoho_so_id = str(so_data.get("salesorder_id", ""))
+
+    if not zoho_so_id:
+        logger.warning("process_order_inbound: missing salesorder_id")
+        return
+
+    new_hash = generate_payload_hash(so_data)
+
+    async with async_session_factory() as db:
+        stmt = select(Order).where(Order.zoho_id == zoho_so_id)
+        order = (await db.execute(stmt)).scalar_one_or_none()
+        if order is None:
+            logger.info("process_order_inbound: no local order for zoho_id=%s", zoho_so_id)
+            return
+
+        if order.zoho_last_sync_hash == new_hash:
+            logger.debug("process_order_inbound: order %s hash unchanged", order.id)
+            return
+
+        # Map Zoho status → local status (broad mapping)
+        _ZOHO_STATUS_MAP = {
+            "draft": "PENDING",
+            "confirmed": "PROCESSING",
+            "packed": "READY_TO_SHIP",
+            "shipped": "SHIPPED",
+            "delivered": "DELIVERED",
+            "void": "CANCELLED",
+        }
+        zoho_status = so_data.get("status", "").lower()
+        if zoho_status in _ZOHO_STATUS_MAP:
+            from app.modules.orders.models import OrderStatus
+            order.status = OrderStatus(_ZOHO_STATUS_MAP[zoho_status])
+
+        order.zoho_last_sync_hash = new_hash
+        order.zoho_last_synced_at = datetime.now()
+        order.zoho_sync_error = None
+        order._updated_by_sync = True
+        await db.commit()
+
+        logger.info("process_order_inbound: order %s updated from Zoho", order.id)
+
+
+# =========================================================================
+# BACKGROUND TASK DISPATCHING HELPERS
+# =========================================================================
+
+def _enqueue_variant_sync(variant_id: int) -> None:
+    """Fire-and-forget background task for variant outbound sync."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(sync_variant_outbound(variant_id))
+    except RuntimeError:
+        logger.debug("_enqueue_variant_sync: no running event loop, skipping")
+
+
+def _enqueue_customer_sync(customer_id: int) -> None:
+    """Fire-and-forget background task for customer outbound sync."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(sync_customer_outbound(customer_id))
+    except RuntimeError:
+        logger.debug("_enqueue_customer_sync: no running event loop, skipping")
+
+
+def _enqueue_order_sync(order_id: int) -> None:
+    """Fire-and-forget background task for order outbound sync."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(sync_order_outbound(order_id))
+    except RuntimeError:
+        logger.debug("_enqueue_order_sync: no running event loop, skipping")
+
+
+# =========================================================================
+# SQLALCHEMY EVENT LISTENERS
+# =========================================================================
+
+def _on_variant_after_write(mapper, connection, target: ProductVariant):
+    """Enqueue outbound sync unless this write originated from an inbound sync."""
+    if target._updated_by_sync:
+        return
+    _enqueue_variant_sync(target.id)
+
+
+def _on_customer_after_write(mapper, connection, target: Customer):
+    """Enqueue outbound sync unless this write originated from an inbound sync."""
+    if target._updated_by_sync:
+        return
+    _enqueue_customer_sync(target.id)
+
+
+def _on_order_after_write(mapper, connection, target: Order):
+    """Enqueue outbound sync unless this write originated from an inbound sync."""
+    if target._updated_by_sync:
+        return
+    _enqueue_order_sync(target.id)
+
+
+def register_sync_listeners() -> None:
+    """
+    Attach SQLAlchemy ``after_insert`` / ``after_update`` listeners.
+
+    Call once at application startup (e.g. inside the lifespan handler).
+    """
+    event.listen(ProductVariant, "after_insert", _on_variant_after_write)
+    event.listen(ProductVariant, "after_update", _on_variant_after_write)
+    event.listen(Customer, "after_insert", _on_customer_after_write)
+    event.listen(Customer, "after_update", _on_customer_after_write)
+    event.listen(Order, "after_insert", _on_order_after_write)
+    event.listen(Order, "after_update", _on_order_after_write)
+    logger.info("Zoho sync event listeners registered")

@@ -30,6 +30,8 @@ from app.core.database import Base
 if TYPE_CHECKING:
     from typing import List
 
+    from app.modules.orders.models import Order
+
 
 # ============================================================================
 # ENUMS
@@ -117,6 +119,48 @@ class TimestampMixin:
         onupdate=func.now(),
         nullable=False,
     )
+
+
+class ZohoSyncMixin:
+    """
+    Mixin providing Zoho Inventory sync-tracking columns.
+
+    Applied to Customer and Order.  ProductVariant uses its own
+    zoho_item_id / zoho_last_synced_at columns for historical reasons;
+    only the *missing* columns (hash, error) are added there directly.
+    """
+    zoho_id: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        index=True,
+        comment="Zoho Inventory record ID.",
+    )
+    zoho_last_sync_hash: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        nullable=True,
+        comment="SHA-256 hash of the last synced payload (echo-loop prevention).",
+    )
+    zoho_last_synced_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp of the last successful Zoho sync.",
+    )
+    zoho_sync_error: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Error message from the last failed Zoho sync attempt.",
+    )
+
+    # Transient flag – not persisted.  Set to True inside webhook /
+    # inbound-sync handlers so that the SQLAlchemy after_update listener
+    # skips re-enqueuing an outbound sync (echo-loop prevention).
+    @property
+    def _updated_by_sync(self) -> bool:
+        return getattr(self, "_zoho_updated_by_sync", False)
+
+    @_updated_by_sync.setter
+    def _updated_by_sync(self, value: bool) -> None:
+        self._zoho_updated_by_sync = value
 
 
 # ============================================================================
@@ -503,7 +547,28 @@ class ProductVariant(Base, TimestampMixin):
         default=True,
         comment="Soft-delete flag for discontinued variants.",
     )
-    
+    zoho_last_sync_hash: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        nullable=True,
+        comment="SHA-256 hash of the last synced payload (echo-loop prevention).",
+    )
+    zoho_sync_error: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Error message from the last failed Zoho sync attempt.",
+    )
+
+    # Transient flag – mirrors ZohoSyncMixin._updated_by_sync for
+    # echo-loop prevention on ProductVariant (which keeps its own
+    # zoho_item_id column rather than the mixin's zoho_id).
+    @property
+    def _updated_by_sync(self) -> bool:
+        return getattr(self, "_zoho_updated_by_sync", False)
+
+    @_updated_by_sync.setter
+    def _updated_by_sync(self, value: bool) -> None:
+        self._zoho_updated_by_sync = value
+
     # Relationships
     identity: Mapped["ProductIdentity"] = relationship(
         "ProductIdentity",
@@ -789,3 +854,77 @@ class InventoryItem(Base, TimestampMixin):
     
     def __repr__(self) -> str:
         return f"<InventoryItem(id={self.id}, serial='{self.serial_number}', status={self.status.value})>"
+
+
+# ============================================================================
+# CUSTOMER
+# ============================================================================
+
+class Customer(Base, ZohoSyncMixin, TimestampMixin):
+    """
+    Customer / Contact record.
+
+    Syncs bidirectionally with Zoho Inventory *Contacts*.
+    Orders reference a Customer via ``customer_id`` FK so that contact
+    details are normalised and the same customer can own multiple orders.
+    """
+    __tablename__ = "customer"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        autoincrement=True,
+    )
+    name: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+        comment="Customer full name.",
+    )
+    email: Mapped[Optional[str]] = mapped_column(
+        String(200),
+        nullable=True,
+        comment="Customer email address.",
+    )
+    phone: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Customer phone number.",
+    )
+    company_name: Mapped[Optional[str]] = mapped_column(
+        String(200),
+        nullable=True,
+        comment="Company / organisation name.",
+    )
+
+    # ---- Address ----
+    address_line1: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    address_line2: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    city: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    state: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    postal_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    country: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, server_default="US",
+    )
+
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        comment="Soft-delete flag; maps to Zoho 'inactive' status.",
+    )
+
+    # ---- Relationships ----
+    orders: Mapped["List[Order]"] = relationship(
+        "Order",
+        back_populates="customer",
+        lazy="selectin",
+    )
+
+    __table_args__ = (
+        Index("ix_customer_email", "email"),
+        Index("ix_customer_name", "name"),
+        Index("ix_customer_zoho_id", "zoho_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Customer(id={self.id}, name='{self.name}')>"

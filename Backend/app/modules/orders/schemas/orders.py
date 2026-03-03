@@ -11,6 +11,21 @@ from app.modules.orders.models import OrderItemStatus, OrderPlatform, OrderStatu
 
 
 # ============================================================================
+# CUSTOMER BRIEF (for order list serialisation)
+# ============================================================================
+
+class CustomerBrief(BaseModel):
+    """Minimal customer info embedded in order responses."""
+    id: int
+    name: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    company_name: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ============================================================================
 # ORDER ITEM SCHEMAS
 # ============================================================================
 
@@ -84,6 +99,7 @@ class OrderBrief(BaseModel):
     external_order_number: Optional[str] = None
     status: OrderStatus
     customer_name: Optional[str] = None
+    customer: Optional[CustomerBrief] = None
     total_amount: Decimal
     currency: str
     ordered_at: Optional[datetime] = None
@@ -104,6 +120,7 @@ class OrderDetail(BaseModel):
 
     customer_name: Optional[str] = None
     customer_email: Optional[str] = None
+    customer: Optional[CustomerBrief] = None
 
     shipping_address_line1: Optional[str] = None
     shipping_address_line2: Optional[str] = None
