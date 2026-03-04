@@ -15,64 +15,49 @@ function App() {
   const { isAuthenticated } = useAuth()
 
   return (
-    <>
-      {/* --- TEMPORARY DEBUG BANNER --- */}
-      <div style={{ 
-        padding: '16px', 
-        backgroundColor: '#ffeb3b', 
-        color: '#000', 
-        wordBreak: 'break-all',
-        marginBottom: '20px',
-        border: '2px solid red'
-      }}>
-        <strong>Full URL:</strong> {window.location.href} <br/><br/>
-        <strong>Query Params:</strong> {window.location.search || "No query parameters found"}
-      </div>
-    
-      <Routes>
-        {/* Public Routes */}
-        <Route
-          path="/login"
-          element={isAuthenticated ? <Navigate to="/" replace /> : <Login />}
-        />
-        <Route path="/auth/seatalk/callback" element={<SeaTalkCallback />} />
+    <Routes>
+      {/* Public Routes */}
+      <Route
+        path="/login"
+        element={isAuthenticated ? <Navigate to="/" replace /> : <Login />}
+      />
+      <Route path="/auth/seatalk/callback" element={<SeaTalkCallback />} />
 
-        {/* Protected Routes */}
-        <Route
-          element={
-            <RoleGuard allowedRoles={['ADMIN', 'WAREHOUSE_OP', 'SALES_REP']}>
-              <Layout />
-            </RoleGuard>
-          }
-        >
-          <Route path="/" element={<Dashboard />} />
+      {/* Protected Routes */}
+      <Route
+        element={
+          <RoleGuard allowedRoles={['ADMIN', 'WAREHOUSE_OP', 'SALES_REP']}>
+            <Layout />
+          </RoleGuard>
+        }
+      >
+        <Route path="/" element={<Dashboard />} />
 
-          {/* Warehouse Routes */}
-          <Route element={<RoleGuard allowedRoles={['ADMIN', 'WAREHOUSE_OP']} />}>
-            <Route path="/warehouse/ops" element={<WarehouseOps />} />
-          </Route>
-
-          {/* Catalog Routes */}
-          <Route element={<RoleGuard allowedRoles={['ADMIN', 'SALES_REP']} />}>
-            <Route path="/catalog/inventory" element={<InventoryManagement />} />
-            <Route path="/catalog/listings" element={<ProductListings />} />
-          </Route>
-
-          {/* Orders Routes */}
-          <Route element={<RoleGuard allowedRoles={['ADMIN', 'SALES_REP', 'WAREHOUSE_OP']} />}>
-            <Route path="/orders" element={<OrdersManagement />} />
-          </Route>
-
-          {/* Admin Routes */}
-          <Route element={<RoleGuard allowedRoles={['ADMIN']} />}>
-            <Route path="/admin/users" element={<UserManagement />} />
-          </Route>
+        {/* Warehouse Routes */}
+        <Route element={<RoleGuard allowedRoles={['ADMIN', 'WAREHOUSE_OP']} />}>
+          <Route path="/warehouse/ops" element={<WarehouseOps />} />
         </Route>
 
-        {/* Catch all */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </>
+        {/* Catalog Routes */}
+        <Route element={<RoleGuard allowedRoles={['ADMIN', 'SALES_REP']} />}>
+          <Route path="/catalog/inventory" element={<InventoryManagement />} />
+          <Route path="/catalog/listings" element={<ProductListings />} />
+        </Route>
+
+        {/* Orders Routes */}
+        <Route element={<RoleGuard allowedRoles={['ADMIN', 'SALES_REP', 'WAREHOUSE_OP']} />}>
+          <Route path="/orders" element={<OrdersManagement />} />
+        </Route>
+
+        {/* Admin Routes */}
+        <Route element={<RoleGuard allowedRoles={['ADMIN']} />}>
+          <Route path="/admin/users" element={<UserManagement />} />
+        </Route>
+      </Route>
+
+      {/* Catch all */}
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   )
 }
 

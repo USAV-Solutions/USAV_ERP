@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Box, Button, CircularProgress, Typography } from '@mui/material'
+import { Box, CircularProgress, Typography } from '@mui/material'
 
 interface SeaTalkLoginButtonProps {
   size?: 'small' | 'medium' | 'large'
@@ -8,6 +8,9 @@ interface SeaTalkLoginButtonProps {
   align?: 'left' | 'center' | 'right'
 }
 
+// How long (ms) to wait for the SDK to render before giving up and showing
+// the button container anyway — prevents an infinite spinner in environments
+// where the SDK is slow or the MutationObserver misses the injection.
 const SDK_RENDER_TIMEOUT_MS = 6000
 
 export default function SeaTalkLoginButton({
@@ -23,26 +26,15 @@ export default function SeaTalkLoginButton({
 
   const state = useMemo(() => Math.random().toString(36).substring(2, 15), [])
 
-  // 1. Detect if the user is viewing this inside the SeaTalk Mobile App
-  const isSeaTalkApp = useMemo(() => {
-    return /SeaTalk/i.test(navigator.userAgent)
-  }, [])
-
   useEffect(() => {
     if (!appId || !redirectUri) return
 
-    // If we are INSIDE SeaTalk, we don't need the external auth.js SDK
-    if (isSeaTalkApp) {
-      setButtonReady(true)
-      return
-    }
-
-    // --- EXTERNAL BROWSER LOGIC: Load the external auth.js SDK ---
     const existing = document.getElementById('seatalk-auth-sdk') as HTMLScriptElement | null
 
     if (existing) {
       if (existing.dataset.loaded === 'true') {
         setSdkLoaded(true)
+        // SDK already loaded from a previous visit — re-trigger its DOM scan
         window.dispatchEvent(new Event('load'))
       } else {
         const handleLoad = () => {
@@ -62,14 +54,16 @@ export default function SeaTalkLoginButton({
     script.onload = () => {
       script.dataset.loaded = 'true'
       setSdkLoaded(true)
+      // The SDK listens for window.onload to scan the DOM. In an SPA,
+      // that event fired long before this component mounted. Dispatch a
+      // synthetic load event so the SDK runs its initialization scan.
       window.dispatchEvent(new Event('load'))
     }
     document.body.appendChild(script)
-  }, [appId, redirectUri, isSeaTalkApp])
+  }, [appId, redirectUri])
 
   useEffect(() => {
-    // Skip the MutationObserver entirely if we are inside the SeaTalk app
-    if (!sdkLoaded || isSeaTalkApp) return
+    if (!sdkLoaded) return
 
     const buttonContainer = document.getElementById('seatalk_login_button')
     if (!buttonContainer) return
@@ -94,6 +88,8 @@ export default function SeaTalkLoginButton({
 
     observer.observe(buttonContainer, { childList: true, subtree: true })
 
+    // Safety timeout: if the SDK never renders (blocked CDN, SeaTalk WebView
+    // quirk, etc.) we show the container anyway after SDK_RENDER_TIMEOUT_MS.
     const timeout = window.setTimeout(() => {
       if (!hasRenderedButton()) {
         setButtonReady(true)
@@ -105,102 +101,68 @@ export default function SeaTalkLoginButton({
       observer.disconnect()
       window.clearTimeout(timeout)
     }
-  }, [sdkLoaded, isSeaTalkApp])
-
-  // --- INTERNAL SEATALK ONE-TAP HANDLER ---
-  const handleNativeOneTap = async () => {
-    try {
-      // Note: Replace `window.seatalk.getAuthCode` with the exact JS bridge 
-      // method provided in your SeaTalk Open Platform documentation.
-      // @ts-ignore - bypassing TS error for window.seatalk injection
-      if (window.seatalk && window.seatalk.getAuthCode) {
-        // @ts-ignore
-        const authCode = await window.seatalk.getAuthCode({ app_id: appId })
-        
-        // Silently send the code to your backend instead of a full page redirect
-        const response = await fetch('/auth/seatalk/callback', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: authCode, state: state })
-        })
-
-        if (response.ok) {
-          // Success! Update your React context/state or reload the page
-          window.location.reload()
-        } else {
-          console.error('Failed to authenticate with backend')
-        }
-      } else {
-        console.warn('SeaTalk JS bridge not found on window object.')
-      }
-    } catch (error) {
-      console.error('One-Tap login failed:', error)
-    }
-  }
+  }, [sdkLoaded])
 
   if (!appId || !redirectUri) {
     return null
   }
 
-  const logoSizeMap = { small: 18, medium: 22, large: 26 }
+  // Logo size mapping
+  const logoSizeMap = {
+    small: 18,
+    medium: 22,
+    large: 26,
+  }
 
   return (
-    <Box sx={{ minHeight: 56, display: 'flex', justifyContent: align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'flex-start' }}>
-      
-      {/* CONDITIONAL RENDER: 
-        If inside SeaTalk, show a native React button that fires the JS SDK.
-        If outside, render the external seatalk containers.
+    <Box sx={{ minHeight: 56 }}>
+      {/* SeaTalk App Info Configuration */}
+      <div
+        id="seatalk_login_app_info"
+        data-redirect_uri={redirectUri}
+        data-appid={appId}
+        data-response_type="code"
+        data-state={state}
+      />
+
+      {/*
+        The SDK container is ALWAYS visible (no display:none).
+        The SeaTalk auth.js SDK skips rendering into hidden elements.
+        We overlay the loading spinner on top of the container instead of
+        hiding the container while waiting.
       */}
-      {isSeaTalkApp ? (
-        <Button
-          variant={theme === 'dark' ? 'contained' : 'outlined'}
-          color="primary"
-          size={size}
-          onClick={handleNativeOneTap}
-          sx={{ textTransform: 'none', fontWeight: 'bold' }}
-        >
-          {copywriting}
-        </Button>
-      ) : (
-        <Box sx={{ width: '100%' }}>
-          <div
-            id="seatalk_login_app_info"
-            data-redirect_uri={redirectUri}
-            data-appid={appId}
-            data-response_type="code"
-            data-state={state}
-          />
-          <Box sx={{ position: 'relative', minHeight: 44 }}>
-            <div
-              id="seatalk_login_button"
-              data-size={size}
-              data-logo_size={logoSizeMap[size]}
-              data-copywriting={copywriting}
-              data-theme={theme}
-              data-align={align}
-            />
-            {!buttonReady && (
-              <Box
-                sx={{
-                  position: 'absolute',
-                  inset: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'flex-start',
-                  gap: 1,
-                  bgcolor: 'background.paper',
-                  zIndex: 1,
-                }}
-              >
-                <CircularProgress size={18} />
-                <Typography variant="body2" color="text.secondary">
-                  Loading SeaTalk login...
-                </Typography>
-              </Box>
-            )}
+      <Box sx={{ position: 'relative', minHeight: 44 }}>
+        {/* SDK button target — always in the visible layout */}
+        <div
+          id="seatalk_login_button"
+          data-size={size}
+          data-logo_size={logoSizeMap[size]}
+          data-copywriting={copywriting}
+          data-theme={theme}
+          data-align={align}
+        />
+
+        {/* Loading overlay — sits on top while SDK renders, disappears after */}
+        {!buttonReady && (
+          <Box
+            sx={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 1,
+              bgcolor: 'background.paper',
+              zIndex: 1,
+            }}
+          >
+            <CircularProgress size={18} />
+            <Typography variant="body2" color="text.secondary">
+              Loading SeaTalk login...
+            </Typography>
           </Box>
-        </Box>
-      )}
+        )}
+      </Box>
     </Box>
   )
 }
