@@ -34,6 +34,9 @@ from app.modules.auth.schemas import (
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 logger = logging.getLogger(__name__)
 
+# Default role assigned to first-time SeaTalk logins
+SEATALK_DEFAULT_ROLE = UserRole.SALES_REP
+
 # Cache for SeaTalk app access token
 _seatalk_token_cache: dict[str, any] = {
     "token": None,
@@ -355,7 +358,7 @@ async def seatalk_callback(
             seatalk_id=employee.employee_code,
             full_name=employee.name,
             hashed_password=get_password_hash(random_password),
-            role=UserRole.SALES_REP,  # Default role for new SeaTalk users
+            role=SEATALK_DEFAULT_ROLE,
             is_active=True,
         )
         db.add(user)
