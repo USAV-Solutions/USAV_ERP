@@ -299,7 +299,16 @@ class ZohoClient:
         if existing:
             zoho_item = await self.update_item(existing["item_id"], item_data)
         else:
-            zoho_item = await self.create_item(item_data)
+            try:
+                zoho_item = await self.create_item(item_data)
+            except Exception as exc:
+                # Handle duplicate item gracefully (code 1001 or "already exists")
+                if "already exists" in str(exc) or "code\":1001" in str(exc):
+                    logger.info("Zoho sync_item: item already exists, fetching by sku | sku=%s", sku)
+                    existing = await self.get_item_by_sku(sku)
+                    if existing:
+                        return existing
+                raise
 
         zoho_item_id = zoho_item.get("item_id")
         if image_path and zoho_item_id:

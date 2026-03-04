@@ -32,7 +32,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
-from app.models.entities import TimestampMixin, ZohoSyncMixin
+from app.models.entities import TimestampMixin, ZohoSyncMixin, ZohoSyncStatus
 
 if TYPE_CHECKING:
     from typing import List
@@ -179,6 +179,12 @@ class Order(Base, ZohoSyncMixin, TimestampMixin):
         default=OrderStatus.PENDING,
         comment="Current order processing status.",
     )
+    zoho_sync_status: Mapped[ZohoSyncStatus] = mapped_column(
+        Enum(ZohoSyncStatus, name="zoho_sync_status_enum", create_constraint=False),
+        nullable=False,
+        default=ZohoSyncStatus.PENDING,
+        comment="Outbound Zoho sync status.",
+    )
 
     # ---- Customer (normalised) ----
     customer_id: Mapped[Optional[int]] = mapped_column(
@@ -282,6 +288,7 @@ class Order(Base, ZohoSyncMixin, TimestampMixin):
         Index("ix_order_external_id", "external_order_id"),
         Index("ix_order_customer_id", "customer_id"),
         Index("ix_order_zoho_id", "zoho_id"),
+        Index("ix_orders_zoho_sync_status", "zoho_sync_status"),
     )
 
     def __repr__(self) -> str:

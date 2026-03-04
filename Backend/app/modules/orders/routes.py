@@ -314,6 +314,7 @@ async def list_orders(
                 external_order_id=o.external_order_id,
                 external_order_number=o.external_order_number,
                 status=o.status,
+                zoho_sync_status=o.zoho_sync_status,
                 customer_name=o.customer_name,
                 total_amount=o.total_amount,
                 currency=o.currency,

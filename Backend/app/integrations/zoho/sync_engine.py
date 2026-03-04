@@ -25,7 +25,7 @@ from sqlalchemy import event
 from app.core.database import async_session_factory
 from app.integrations.zoho.client import ZohoClient, RateLimitError
 from app.integrations.zoho.security import generate_payload_hash
-from app.models.entities import Customer, ProductVariant
+from app.models.entities import Customer, ProductVariant, ZohoSyncStatus
 from app.modules.orders.models import Order, OrderItem
 
 logger = logging.getLogger(__name__)
@@ -521,10 +521,17 @@ async def sync_order_outbound(order_id: int) -> None:
             logger.warning("sync_order_outbound: order %s not found", order_id)
             return
 
+        # Mark as actively syncing
+        order.zoho_sync_status = ZohoSyncStatus.PENDING
+        order._updated_by_sync = True
+        await db.commit()
+        order._updated_by_sync = False
+
         # ---- DEPENDENCY: Customer must exist and have zoho_id ----
         customer = order.customer
         if customer is None:
             order.zoho_sync_error = "Cannot sync order: no linked customer record."
+            order.zoho_sync_status = ZohoSyncStatus.ERROR
             order._updated_by_sync = True
             await db.commit()
             logger.error("sync_order_outbound: order %s has no customer", order_id)
@@ -540,6 +547,7 @@ async def sync_order_outbound(order_id: int) -> None:
 
             if not customer.zoho_id:
                 order.zoho_sync_error = f"Customer {customer.id} missing zoho_id; sync customer first."
+                order.zoho_sync_status = ZohoSyncStatus.ERROR
                 order._updated_by_sync = True
                 await db.commit()
                 return
@@ -561,6 +569,7 @@ async def sync_order_outbound(order_id: int) -> None:
                     await sync_variant_outbound(vid)
                 except RateLimitError as exc:
                     order.zoho_sync_error = f"Zoho rate limit while syncing variants; retry after {getattr(exc, 'retry_after', 60)}s."
+                    order.zoho_sync_status = ZohoSyncStatus.ERROR
                     order._updated_by_sync = True
                     await db.commit()
                     return
@@ -577,6 +586,7 @@ async def sync_order_outbound(order_id: int) -> None:
                 order.zoho_sync_error = (
                     f"Variants {refreshed_missing} missing zoho_item_id; sync variants first."
                 )
+                order.zoho_sync_status = ZohoSyncStatus.ERROR
                 order._updated_by_sync = True
                 await db.commit()
                 return
@@ -587,10 +597,45 @@ async def sync_order_outbound(order_id: int) -> None:
 
         if new_hash == order.zoho_last_sync_hash:
             logger.debug("sync_order_outbound: order %s unchanged (hash match)", order_id)
+            order.zoho_sync_status = ZohoSyncStatus.SYNCED
+            order.zoho_sync_error = None
+            order._updated_by_sync = True
+            await db.commit()
+            order._updated_by_sync = False
             return
 
         try:
             zoho = ZohoClient()
+
+            # If we don't yet have a zoho_id, try to locate an existing SalesOrder
+            # by reference_number to avoid duplicates when re-queuing the same order.
+            if not order.zoho_id:
+                existing_so_id: Optional[str] = None
+                try:
+                    for page in range(1, 4):  # scan first ~600 orders to keep quota safe
+                        salesorders = await zoho.list_salesorders(page=page, per_page=200)
+                        match = next(
+                            (
+                                so
+                                for so in salesorders
+                                if str(so.get("reference_number", "")) == order.external_order_id
+                            ),
+                            None,
+                        )
+                        if match:
+                            existing_so_id = str(match.get("salesorder_id", "")) or None
+                            break
+                        if len(salesorders) < 200:
+                            break  # no more pages
+                except Exception as lookup_exc:
+                    logger.warning(
+                        "sync_order_outbound: lookup existing salesorder failed: %s",
+                        lookup_exc,
+                    )
+
+                if existing_so_id:
+                    order.zoho_id = existing_so_id
+
             if order.zoho_id:
                 so = await zoho.update_salesorder(order.zoho_id, payload)
             else:
@@ -603,8 +648,10 @@ async def sync_order_outbound(order_id: int) -> None:
             order.zoho_last_sync_hash = new_hash
             order.zoho_last_synced_at = datetime.now()
             order.zoho_sync_error = None
+            order.zoho_sync_status = ZohoSyncStatus.SYNCED
             order._updated_by_sync = True
             await db.commit()
+            order._updated_by_sync = False
 
             logger.info(
                 "sync_order_outbound: order %s synced to Zoho (salesorder_id=%s)",
@@ -614,6 +661,7 @@ async def sync_order_outbound(order_id: int) -> None:
             order.zoho_sync_error = (
                 f"Zoho rate limit hit; retry after {getattr(exc, 'retry_after', 60)}s."
             )[:2000]
+            order.zoho_sync_status = ZohoSyncStatus.ERROR
             order._updated_by_sync = True
             await db.commit()
             logger.warning("sync_order_outbound: order %s rate-limited", order_id)
@@ -625,6 +673,7 @@ async def sync_order_outbound(order_id: int) -> None:
                 payload,
             )
             order.zoho_sync_error = str(exc)[:2000]
+            order.zoho_sync_status = ZohoSyncStatus.ERROR
             order._updated_by_sync = True
             await db.commit()
             logger.exception("sync_order_outbound: order %s failed", order_id)
@@ -680,6 +729,7 @@ async def process_order_inbound(payload: dict) -> None:
         order.zoho_last_sync_hash = new_hash
         order.zoho_last_synced_at = datetime.now()
         order.zoho_sync_error = None
+        order.zoho_sync_status = ZohoSyncStatus.SYNCED
         order._updated_by_sync = True
         await db.commit()
 

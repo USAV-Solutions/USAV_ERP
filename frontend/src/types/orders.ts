@@ -35,6 +35,7 @@ export type OrderItemStatus =
   | 'CANCELLED'
 
 export type IntegrationSyncStatus = 'IDLE' | 'SYNCING' | 'ERROR'
+export type ZohoSyncStatus = 'PENDING' | 'SYNCED' | 'ERROR' | 'DIRTY'
 
 // ── Order Item Schemas ───────────────────────────────────────────────
 
@@ -86,6 +87,7 @@ export interface OrderBrief {
   external_order_id: string
   external_order_number: string | null
   status: OrderStatus
+  zoho_sync_status: ZohoSyncStatus
   customer_name: string | null
   total_amount: string
   currency: string
@@ -101,6 +103,7 @@ export interface OrderDetail {
   external_order_id: string
   external_order_number: string | null
   status: OrderStatus
+  zoho_sync_status: ZohoSyncStatus
 
   customer_name: string | null
   customer_email: string | null

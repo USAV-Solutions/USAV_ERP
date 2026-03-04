@@ -7,7 +7,7 @@
  *   - Paginated MUI Table of OrderBrief rows with expandable item rows
  *   - OrderSyncButton in the header
  */
-import { useState, Fragment } from 'react'
+import { useState, Fragment, SyntheticEvent } from 'react'
 import {
   Box,
   Typography,
@@ -53,7 +53,7 @@ import {
 } from '@mui/icons-material'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 
-import { listOrders, getOrder, getSyncStatus } from '../api/orders'
+import { listOrders, getOrder, getSyncStatus, updateOrderStatus } from '../api/orders'
 import { forceSyncOrder } from '../api/sync'
 import type {
   OrderBrief,
@@ -63,9 +63,9 @@ import type {
   OrderStatus,
   OrderItemStatus,
   SyncStatusResponse,
+  ZohoSyncStatus,
 } from '../types/orders'
 
-import StatusBadge from '../components/orders/StatusBadge'
 import OrderSyncButton from '../components/orders/OrderSyncButton'
 import AdminDateRangeSync from '../components/orders/AdminDateRangeSync'
 import OrderItemsPanel from '../components/orders/OrderItemsPanel'
@@ -103,6 +103,13 @@ const ITEM_STATUS_OPTIONS: OrderItemStatus[] = [
   'CANCELLED',
 ]
 
+const ZOHO_SYNC_COLOR: Record<ZohoSyncStatus, 'default' | 'success' | 'error' | 'warning'> = {
+  PENDING: 'warning',
+  DIRTY: 'warning',
+  SYNCED: 'success',
+  ERROR: 'error',
+}
+
 // ── Component ────────────────────────────────────────────────────────
 
 export default function OrdersManagement() {
@@ -127,6 +134,7 @@ export default function OrdersManagement() {
   const [snackbarOpen, setSnackbarOpen] = useState(false)
   const [snackbarMessage, setSnackbarMessage] = useState('')
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success')
+  const [statusUpdatingId, setStatusUpdatingId] = useState<number | null>(null)
 
   // Bulk Zoho sync (matched orders only)
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false)
@@ -181,6 +189,25 @@ export default function OrdersManagement() {
       setSnackbarOpen(true)
       setSyncingOrderId(null)
     },
+  })
+
+  const updateStatusMutation = useMutation({
+    mutationFn: ({ orderId, status }: { orderId: number; status: OrderStatus }) =>
+      updateOrderStatus(orderId, { status }),
+    onMutate: ({ orderId }) => setStatusUpdatingId(orderId),
+    onSuccess: () => {
+      setSnackbarSeverity('success')
+      setSnackbarMessage('Shipping status updated.')
+      setSnackbarOpen(true)
+      queryClient.invalidateQueries({ queryKey: ['orders'] })
+    },
+    onError: (error: { response?: { data?: { detail?: string } }; message?: string }) => {
+      const detail = error.response?.data?.detail || error.message || 'Update failed.'
+      setSnackbarSeverity('error')
+      setSnackbarMessage(detail)
+      setSnackbarOpen(true)
+    },
+    onSettled: () => setStatusUpdatingId(null),
   })
 
   const handleForceSync = (orderId: number, e: React.MouseEvent) => {
@@ -257,6 +284,12 @@ export default function OrdersManagement() {
   }
 
   const bulkPercent = bulkTotal ? Math.min(Math.round((bulkProgress.queued / bulkTotal) * 100), 100) : 0
+  const columnCount = hasRole(['ADMIN']) ? 10 : 9
+
+  const handleStatusChange = (orderId: number, status: OrderStatus, e: SyntheticEvent) => {
+    e.stopPropagation()
+    updateStatusMutation.mutate({ orderId, status })
+  }
 
   // ── Render ───────────────────────────────────────────────────────
 
@@ -478,10 +511,10 @@ export default function OrdersManagement() {
                 <TableCell>Order #</TableCell>
                 <TableCell>Platform</TableCell>
                 <TableCell>Customer</TableCell>
-                <TableCell align="center">Items</TableCell>
                 <TableCell align="center">Unmatched</TableCell>
                 <TableCell align="right">Total</TableCell>
-                <TableCell>Status</TableCell>
+                <TableCell>Shipping Status</TableCell>
+                <TableCell>Zoho Sync</TableCell>
                 <TableCell>Ordered</TableCell>
                 {hasRole(['ADMIN']) && <TableCell align="center">Zoho</TableCell>}
               </TableRow>
@@ -489,13 +522,13 @@ export default function OrdersManagement() {
             <TableBody>
               {ordersLoading ? (
                 <TableRow>
-                  <TableCell colSpan={10} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={columnCount} align="center" sx={{ py: 4 }}>
                     <CircularProgress />
                   </TableCell>
                 </TableRow>
               ) : !ordersData?.items.length ? (
                 <TableRow>
-                  <TableCell colSpan={10} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={columnCount} align="center" sx={{ py: 4 }}>
                     No orders found
                   </TableCell>
                 </TableRow>
@@ -531,7 +564,6 @@ export default function OrdersManagement() {
                             {order.customer_name || '—'}
                           </Typography>
                         </TableCell>
-                        <TableCell align="center">{order.item_count}</TableCell>
                         <TableCell align="center">
                           {order.unmatched_count > 0 ? (
                             <Chip
@@ -550,7 +582,29 @@ export default function OrdersManagement() {
                           </Typography>
                         </TableCell>
                         <TableCell>
-                          <StatusBadge status={order.status} />
+                          <FormControl size="small" fullWidth>
+                            <Select
+                              value={order.status}
+                              size="small"
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={(e) => handleStatusChange(order.id, e.target.value as OrderStatus, e)}
+                              disabled={statusUpdatingId === order.id}
+                            >
+                              {ORDER_STATUS_OPTIONS.map((s) => (
+                                <MenuItem key={s} value={s}>
+                                  {s.replaceAll('_', ' ')}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            size="small"
+                            variant="outlined"
+                            color={ZOHO_SYNC_COLOR[order.zoho_sync_status]}
+                            label={order.zoho_sync_status}
+                          />
                         </TableCell>
                         <TableCell>
                           <Typography variant="body2">
@@ -582,7 +636,7 @@ export default function OrdersManagement() {
                       </TableRow>
                       {/* Expandable items panel */}
                       <TableRow>
-                        <TableCell sx={{ py: 0 }} colSpan={10}>
+                        <TableCell sx={{ py: 0 }} colSpan={columnCount}>
                           <Collapse in={isExpanded} timeout="auto" unmountOnExit>
                             <OrderItemsPanel orderId={order.id} />
                           </Collapse>
