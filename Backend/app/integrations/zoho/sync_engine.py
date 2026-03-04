@@ -487,11 +487,23 @@ def _sanitize_shipping_address(addr: dict[str, str]) -> dict[str, str]:
 
     sanitized = {k: _trim(v, max_field) for k, v in addr.items() if v}
 
-    # Re-trim address field to keep total under limit if needed
-    if "address" in sanitized:
-        while len(sanitized["address"]) > max_total:
+    # Helper to measure total length Zoho seems to enforce (concatenated fields)
+    def _total_len(parts: dict[str, str]) -> int:
+        ordered = [parts[k] for k in ("address", "street2", "city", "state", "zip", "country") if k in parts]
+        return len(", ".join(ordered))
+
+    # First, if total length still exceeds the threshold, drop street2 entirely.
+    if _total_len(sanitized) > max_total and "street2" in sanitized:
+        sanitized.pop("street2")
+
+    # If still too long, trim the main address field down until we fit or empty.
+    if _total_len(sanitized) > max_total and "address" in sanitized:
+        while _total_len(sanitized) > max_total and sanitized.get("address"):
             sanitized["address"] = sanitized["address"][:-1]
-    return sanitized
+        if sanitized.get("address") == "":
+            sanitized.pop("address")
+
+    return {k: v for k, v in sanitized.items() if v}
 
 
 async def sync_order_outbound(order_id: int) -> None:
