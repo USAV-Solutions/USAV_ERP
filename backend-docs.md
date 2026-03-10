@@ -112,7 +112,7 @@ Backend/
 │   │   │   │   ├── bundles.py        # Bundle Component (BOM) management
 │   │   │   │   ├── listings.py       # Platform Listing CRUD + sync status
 │   │   │   │   ├── inventory.py      # Physical inventory management
-│   │   │   │   ├── images.py         # Product image serving + thumbnail backfill
+│   │   │   │   ├── images.py         # Product image metadata + upload/delete + thumbnail backfill
 │   │   │   │   ├── lookups.py        # Brand, Color, Condition, LCI routers
 │   │   │   │   └── zoho.py           # Zoho sync operations (single/bulk/readiness)
 │   │   │   └── schemas/
@@ -615,19 +615,28 @@ Backend/
 
 ### `images.py` (Path: `app/modules/inventory/routes/images.py`)
 
-* **Purpose:** Product image serving and thumbnail management from the filesystem-based image repository.
+* **Purpose:** Product image metadata/file serving, upload/delete management, and thumbnail backfill from the filesystem-based image repository.
 * **Dependencies & Links:**
   - Internal: `app.models.entities` (ProductVariant, ProductIdentity, ZohoSyncStatus), inventory schemas.
   - Filesystem: `/mnt/product_images/` hierarchical directory.
 * **Mechanism / Core Logic:**
-  - Images are stored on disk under a `{product_id}/{variant_sku}/` directory structure, served directly by Nginx in production.
+  - Images are written by backend routes and stored on disk under `/mnt/product_images/{generated_upis_h}/{full_sku}/listing-{n}/img-{index}.{ext}`.
+  - In production, Nginx serves stored files directly at `/product-images/*`; uploads still go through backend API routes.
   - `_get_variant_context(db, sku)` — Resolves a SKU to variant metadata needed for path resolution.
   - `_find_variant_dir(context)` — Determines the filesystem path for a variant's images.
   - `_get_best_listing(variant_dir)` — Selects the listing folder with the most images.
   - `_sorted_images(listing_path)` — Returns images sorted lexicographically, filtering by supported formats.
   - `_resolve_or_backfill_thumbnail_url(db, sku)` — Computes thumbnail URL and backfills `thumbnail_url` column in DB on first access.
+  - `_ensure_listing_dir(context, listing_index)` — Ensures destination listing folder exists before writes.
+  - `_recompute_thumbnail_url(db, context)` — Recomputes and persists thumbnail URL after image mutations.
   - `GET /images/{sku}` — Returns image metadata (paths, count, thumbnail URL) for a given SKU.
-  - `GET /images/batch` — Batch thumbnail URL resolution for multiple SKUs.
+  - `GET /images/{sku}/thumbnail` — Resolves thumbnail and redirects to direct static `/product-images/...` URL.
+  - `GET /images/{sku}/file/{filename}` — Serves a specific image from the best listing.
+  - `GET /images/batch/thumbnails` — Batch thumbnail URL resolution for multiple SKUs.
+  - `POST /images/{sku}/upload` — Multipart upload (`files[]`, `listing_index`, `replace`) that writes files to disk.
+  - `DELETE /images/{sku}/listing/{listing_index}/file/{filename}` — Deletes one image and recomputes thumbnail.
+  - `POST /images/{sku}/listing/{listing_index}/clear` — Deletes all images in listing and recomputes thumbnail.
+  - `POST /images/debug/backfill-thumbnails` / `GET /images/debug/counters` — Admin/debug maintenance endpoints.
 
 ---
 

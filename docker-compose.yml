@@ -34,7 +34,7 @@ services:
     profiles:
       - prod
     volumes:
-      - /mnt/product_images:/mnt/product_images:ro
+      - /mnt/product_images:/mnt/product_images
     restart: unless-stopped
     environment:
       - DEBUG=${DEBUG:-false}
@@ -84,6 +84,7 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
     volumes:
       - ./Backend:/app
+      - /mnt/product_images:/mnt/product_images
     environment:
       - DEBUG=true
       - ENVIRONMENT=development

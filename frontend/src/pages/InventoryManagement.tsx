@@ -33,6 +33,7 @@ import {
   ViewModule,
   ExpandMore,
   ExpandLess,
+  PhotoLibrary,
 } from '@mui/icons-material'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AxiosError } from 'axios'
@@ -43,6 +44,7 @@ import { useAuth } from '../hooks/useAuth'
 import CreateProductDialog from '../components/inventory/CreateProductDialog'
 import ProductThumbnail from '../components/inventory/ProductThumbnail'
 import ImageGalleryModal from '../components/inventory/ImageGalleryModal'
+import VariantImageDialog from '../components/inventory/VariantImageDialog'
 
 type ViewMode = 'list' | 'grouped'
 
@@ -52,6 +54,7 @@ interface ExpandedRowProps {
   onSyncVariant: (variant: EnhancedVariant) => void
   syncingVariantId: number | null
   syncDisabled: boolean
+  onManageImages: (sku: string) => void
 }
 
 interface EnhancedVariant extends Variant {
@@ -151,7 +154,7 @@ const getSyncStatusChip = (status: string) => {
   return <Chip size="small" color={config.color} label={config.label} />
 }
 
-function ExpandedRow({ familyName, variants, onSyncVariant, syncingVariantId, syncDisabled }: ExpandedRowProps) {
+function ExpandedRow({ familyName, variants, onSyncVariant, syncingVariantId, syncDisabled, onManageImages }: ExpandedRowProps) {
   const [gallerySku, setGallerySku] = useState<string | null>(null)
 
   return (
@@ -205,14 +208,24 @@ function ExpandedRow({ familyName, variants, onSyncVariant, syncingVariantId, sy
                   <TableCell>{variant.condition_code || 'Used'}</TableCell>
                   <TableCell>{getSyncStatusChip(variant.zoho_sync_status)}</TableCell>
                   <TableCell align="right">
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      onClick={() => onSyncVariant(variant)}
-                      disabled={syncDisabled || syncingVariantId === variant.id}
-                    >
-                      {syncingVariantId === variant.id ? 'Syncing...' : 'Sync to Zoho'}
-                    </Button>
+                    <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'flex-end' }}>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<PhotoLibrary fontSize="small" />}
+                        onClick={() => onManageImages(variant.full_sku)}
+                      >
+                        Manage Images
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => onSyncVariant(variant)}
+                        disabled={syncDisabled || syncingVariantId === variant.id}
+                      >
+                        {syncingVariantId === variant.id ? 'Syncing...' : 'Sync to Zoho'}
+                      </Button>
+                    </Box>
                   </TableCell>
                   <TableCell>
                     <Chip
@@ -246,6 +259,7 @@ export default function InventoryManagement() {
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(25)
   const [gallerySku, setGallerySku] = useState<string | null>(null)
+  const [manageImagesSku, setManageImagesSku] = useState<string | null>(null)
   const [snackbarOpen, setSnackbarOpen] = useState(false)
   const [snackbarMessage, setSnackbarMessage] = useState('')
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success')
@@ -659,18 +673,28 @@ export default function InventoryManagement() {
                       <TableCell>{variant.condition_code || 'U'}</TableCell>
                       <TableCell>{getSyncStatusChip(variant.zoho_sync_status)}</TableCell>
                       <TableCell align="right">
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          onClick={() => void handleSyncSingleVariant(variant)}
-                          disabled={
-                            isZohoSyncRunning ||
-                            zohoSingleSyncMutation.isPending ||
-                            syncingVariantId === variant.id
-                          }
-                        >
-                          {syncingVariantId === variant.id ? 'Syncing...' : 'Sync to Zoho'}
-                        </Button>
+                        <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'flex-end' }}>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            startIcon={<PhotoLibrary fontSize="small" />}
+                            onClick={() => setManageImagesSku(variant.full_sku)}
+                          >
+                            Manage Images
+                          </Button>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={() => void handleSyncSingleVariant(variant)}
+                            disabled={
+                              isZohoSyncRunning ||
+                              zohoSingleSyncMutation.isPending ||
+                              syncingVariantId === variant.id
+                            }
+                          >
+                            {syncingVariantId === variant.id ? 'Syncing...' : 'Sync to Zoho'}
+                          </Button>
+                        </Box>
                       </TableCell>
                     </TableRow>
                   ))
@@ -736,6 +760,7 @@ export default function InventoryManagement() {
                           onSyncVariant={(variant) => void handleSyncSingleVariant(variant)}
                           syncingVariantId={syncingVariantId}
                           syncDisabled={isZohoSyncRunning || zohoSingleSyncMutation.isPending}
+                          onManageImages={(sku) => setManageImagesSku(sku)}
                         />
                       )}
                     </>
@@ -760,14 +785,24 @@ export default function InventoryManagement() {
       <CreateProductDialog
         open={createDialogOpen}
         onClose={() => setCreateDialogOpen(false)}
+        onCreated={(sku) => setManageImagesSku(sku)}
       />
 
-      {/* Image Gallery Modal */}
+      {/* Image Gallery Modal (read-only preview) */}
       {gallerySku && (
         <ImageGalleryModal
           open={!!gallerySku}
           onClose={() => setGallerySku(null)}
           sku={gallerySku}
+        />
+      )}
+
+      {/* Image Management Dialog (upload / delete) */}
+      {manageImagesSku && (
+        <VariantImageDialog
+          open={!!manageImagesSku}
+          onClose={() => setManageImagesSku(null)}
+          sku={manageImagesSku}
         />
       )}
 

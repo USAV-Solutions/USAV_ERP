@@ -45,6 +45,7 @@ type CreationMode = 'new' | 'existing'
 interface CreateProductDialogProps {
   open: boolean
   onClose: () => void
+  onCreated?: (fullSku: string) => void
 }
 
 type ItemType = 'Product' | 'P' | 'B' | 'K'
@@ -56,7 +57,7 @@ const typeOptions: { value: ItemType; label: string; description: string }[] = [
   { value: 'K', label: 'Kit', description: 'A kit with included items' },
 ]
 
-export default function CreateProductDialog({ open, onClose }: CreateProductDialogProps) {
+export default function CreateProductDialog({ open, onClose, onCreated }: CreateProductDialogProps) {
   const queryClient = useQueryClient()
   
   // Creation mode: 'new' = create entirely new product, 'existing' = add variant to existing parent
@@ -245,11 +246,12 @@ export default function CreateProductDialog({ open, onClose }: CreateProductDial
       const response = await axiosClient.post(CATALOG.VARIANTS, payload)
       return response.data
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['variants'] })
       queryClient.invalidateQueries({ queryKey: ['families'] })
       queryClient.invalidateQueries({ queryKey: ['identities'] })
       handleClose()
+      if (data?.full_sku) onCreated?.(data.full_sku)
     },
     onError: (error: any) => {
       console.error('Failed to create variant:', error)
@@ -292,7 +294,7 @@ export default function CreateProductDialog({ open, onClose }: CreateProductDial
       if (data.color_code) variantPayload.color_code = data.color_code
       if (data.condition_code) variantPayload.condition_code = data.condition_code
       
-      await axiosClient.post(CATALOG.VARIANTS, variantPayload)
+      const variantResponse = await axiosClient.post(CATALOG.VARIANTS, variantPayload)
       
       // If bundle, add components
       if (data.type === 'B' && data.component_ids?.length > 0) {
@@ -306,13 +308,14 @@ export default function CreateProductDialog({ open, onClose }: CreateProductDial
         }
       }
       
-      return identityResponse.data
+      return variantResponse.data
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['variants'] })
       queryClient.invalidateQueries({ queryKey: ['identities'] })
       queryClient.invalidateQueries({ queryKey: ['families'] })
       handleClose()
+      if (data?.full_sku) onCreated?.(data.full_sku)
     },
     onError: (error: any) => {
       console.error('Failed to create product:', error)
@@ -1074,6 +1077,11 @@ export default function CreateProductDialog({ open, onClose }: CreateProductDial
               }
             </Typography>
           </Paper>
+
+          <Alert severity="info" sx={{ mt: 2 }}>
+            Images are uploaded after the SKU is created. Click <strong>Manage Images</strong> from the inventory row,
+            or create the item and the image manager will open automatically.
+          </Alert>
         </Box>
       </DialogContent>
       <DialogActions>

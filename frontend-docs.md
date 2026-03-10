@@ -92,7 +92,8 @@ frontend/
     │   │   ├── CreateProductDialog.tsx # Multi-step dialog: new product or variant for existing
     │   │   ├── CreateStockDialog.tsx   # Dialog to add an inventory stock item to a variant
     │   │   ├── ImageGalleryModal.tsx   # SKU image gallery with carousel & thumbnail strip
-    │   │   └── ProductThumbnail.tsx    # Lazy-loaded thumbnail with skeleton + error fallback
+    │   │   ├── ProductThumbnail.tsx    # Lazy-loaded thumbnail with skeleton + error fallback
+    │   │   └── VariantImageDialog.tsx  # Upload/delete/manage variant images (drag-drop + preview)
     │   └── orders/
     │       ├── AdminDateRangeSync.tsx  # Admin dialog for historical date-range order sync
     │       ├── OrderItemsPanel.tsx     # Expandable panel showing line items + match workflow
@@ -157,7 +158,7 @@ frontend/
 ### `nginx.conf` (Path: `/frontend/nginx.conf`)
 * **Purpose:** Production Nginx configuration for the frontend container.
 * **Dependencies & Props:** Serves built static files from `/usr/share/nginx/html`. Proxies to `backend:8080`.
-* **Mechanism / Render Logic:** Key behaviors: (1) API requests (`/api/`) are reverse-proxied to the backend with WebSocket upgrade headers. (2) `/health` is proxied to the backend health check. (3) `/product-images/` is served directly from a mounted host path (`/mnt/product_images/`) for high-performance static image delivery. (4) Image API metadata routes (`/api/v1/images/`) are still proxied to the backend. (5) SPA fallback (`try_files $uri /index.html`). (6) Static assets are cached for 1 year with immutable headers. Gzip compression is enabled.
+* **Mechanism / Render Logic:** Key behaviors: (1) API requests (`/api/`) are reverse-proxied to the backend with WebSocket upgrade headers. This includes image upload requests such as `POST /api/v1/images/{sku}/upload`. (2) `client_max_body_size 50m` allows larger multipart image uploads. (3) `/health` is proxied to the backend health check. (4) `/product-images/` is served directly from a mounted host path (`/mnt/product_images/`) for high-performance static image delivery after files are stored. (5) Image API metadata/file endpoints under `/api/v1/images/` are proxied to backend routes. (6) SPA fallback (`try_files $uri /index.html`). (7) Static assets are cached for 1 year with immutable headers. Gzip compression is enabled.
 
 ---
 
@@ -334,7 +335,7 @@ frontend/
 
 ### `CreateProductDialog.tsx` (Path: `/frontend/src/components/inventory/CreateProductDialog.tsx`)
 * **Purpose:** Complex multi-step dialog for creating new products or adding variants to existing products.
-* **Dependencies & Props:** Accepts `open: boolean` and `onClose: () => void`. Uses React Query for data fetching (brands, colors, conditions, identities, families, variants, LCI definitions) and mutations for creating entities.
+* **Dependencies & Props:** Accepts `open: boolean`, `onClose: () => void`, and optional `onCreated?: (fullSku: string) => void`. Uses React Query for data fetching (brands, colors, conditions, identities, families, variants, LCI definitions) and mutations for creating entities.
 * **Mechanism / Render Logic:**
   - **Two creation modes (toggle):**
     1. **"New Product"** – Creates a new product family, identity, and initial variant. Supports all four product types: Product, Part, Bundle, Kit.
@@ -349,6 +350,7 @@ frontend/
   - **SKU preview** calculated live from current selections.
   - **Existing variant info** shown when in "existing" mode to avoid duplicates.
   - **Mutations:** Chains multiple API calls (create family → create identity → create variant → optionally add bundle components).
+  - On successful variant creation, emits `onCreated(full_sku)` so the parent page can immediately open image management for that new SKU.
   - Resets all form state on close.
 
 ---
@@ -373,6 +375,18 @@ frontend/
   - **Thumbnail strip:** Clickable thumbnail grid below the main image, with a blue border highlighting the selected image.
   - **Keyboard navigation:** Left/Right arrow keys cycle through images.
   - Loading state shows a spinner; error/empty state shows a message.
+
+---
+
+### `VariantImageDialog.tsx` (Path: `/frontend/src/components/inventory/VariantImageDialog.tsx`)
+* **Purpose:** Interactive image management modal for a single SKU, supporting upload, preview, and deletion.
+* **Dependencies & Props:** Accepts `open`, `onClose`, `sku`. Uses React Query and mutations against image endpoints.
+* **Mechanism / Render Logic:**
+  - Upload flow uses backend endpoint `POST /images/{sku}/upload` with multipart `files[]` and `listing_index`.
+  - Supports drag-drop and file-picker upload, with client-side validation (JPG/PNG/WEBP, 10 MB max each).
+  - Displays current images in a selectable grid and a full-size preview area with arrow navigation.
+  - Per-image delete uses `DELETE /images/{sku}/listing/{listing_index}/file/{filename}`.
+  - On upload/delete success, invalidates `['sku-images', sku]` and `['variants']` caches so thumbnails refresh.
 
 ---
 
@@ -496,12 +510,13 @@ frontend/
 
 ### `InventoryManagement.tsx` (Path: `/frontend/src/pages/InventoryManagement.tsx`)
 * **Purpose:** The primary inventory catalog page. Lists all product variants with search, view modes, Zoho sync, and product creation.
-* **Dependencies & Props:** Fetches variants, identities, and families via React Query. Uses `CreateProductDialog`, `ProductThumbnail`, and `ImageGalleryModal` components.
+* **Dependencies & Props:** Fetches variants, identities, and families via React Query. Uses `CreateProductDialog`, `ProductThumbnail`, `ImageGalleryModal`, and `VariantImageDialog` components.
 * **Mechanism / Render Logic:**
   - **Header actions (ADMIN only):** "Sync All to Zoho" (triggers readiness check first, then bulk sync), "Backfill Thumbnails" (runs debug endpoint to populate missing thumbnails), "Add New Item" (opens `CreateProductDialog`).
+  - Newly created variants can immediately open `VariantImageDialog` via the `CreateProductDialog` `onCreated` callback.
   - **Search bar + view toggle:** Text search filters by name, SKU, variant name, UPIS-H, or brand. Toggle between **list view** (flat table of all variants) and **grouped view** (rows grouped by product family, expandable).
-  - **List view columns:** Image (thumbnail), Full SKU, Name, Type (chip), Parent UPIS-H, Color, Condition, Zoho Status (chip), Actions ("Sync to Zoho" button per variant).
-  - **Grouped view:** Collapsible rows by product family (name, brand, variant count). Expanded view shows a nested table with all variant details.
+  - **List view columns:** Image (thumbnail), Full SKU, Name, Type (chip), Parent UPIS-H, Color, Condition, Zoho Status (chip), Actions ("Manage Images" + "Sync to Zoho" per variant).
+  - **Grouped view:** Collapsible rows by product family (name, brand, variant count). Expanded view shows a nested table with all variant details and the same image-management action.
   - **Zoho sync features:** Single-variant sync, bulk sync (batch POST), readiness check dialog (shows checked/ready/blocked/warning counts + per-item detail table).
   - **Data enrichment:** Variants are enriched with identity and family data by joining across three parallel queries using `useMemo`.
   - **Pagination:** Client-side with MUI `TablePagination` (10/25/50/100 rows).
