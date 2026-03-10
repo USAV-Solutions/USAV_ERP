@@ -350,6 +350,7 @@ frontend/
   - **SKU preview** calculated live from current selections.
   - **Existing variant info** shown when in "existing" mode to avoid duplicates.
   - **Mutations:** Chains multiple API calls (create family → create identity → create variant → optionally add bundle components).
+  - **Part naming behavior:** For new `Part` items, the entered Name is saved as `variant_name` on the created variant (while still attaching to the parent product family).
   - On successful variant creation, emits `onCreated(full_sku)` so the parent page can immediately open image management for that new SKU.
   - Resets all form state on close.
 
@@ -515,8 +516,11 @@ frontend/
   - **Header actions (ADMIN only):** "Sync All to Zoho" (triggers readiness check first, then bulk sync), "Backfill Thumbnails" (runs debug endpoint to populate missing thumbnails), "Add New Item" (opens `CreateProductDialog`).
   - Newly created variants can immediately open `VariantImageDialog` via the `CreateProductDialog` `onCreated` callback.
   - **Search bar + view toggle:** Text search filters by name, SKU, variant name, UPIS-H, or brand. Toggle between **list view** (flat table of all variants) and **grouped view** (rows grouped by product family, expandable).
-  - **List view columns:** Image (thumbnail), Full SKU, Name, Type (chip), Parent UPIS-H, Color, Condition, Zoho Status (chip), Actions ("Manage Images" + "Sync to Zoho" per variant).
-  - **Grouped view:** Collapsible rows by product family (name, brand, variant count). Expanded view shows a nested table with all variant details and the same image-management action.
+  - **List view columns:** Image (thumbnail), Full SKU, Name, Type (chip), Parent UPIS-H, Color, Condition, Zoho Status (chip), Actions.
+  - **Per-variant actions:** `Manage Images`, `Sync to Zoho`, plus admin-only `Edit` and `Delete` actions.
+  - **Edit action (ADMIN):** Opens a dialog to update all mutable variant fields: `variant_name`, `color_code`, `condition_code`, and `is_active`.
+  - **Delete action (ADMIN):** Soft-delete behavior; the variant is inactivated and archived (SKU moved to `D-{old_sku}`), rather than hard-removed.
+  - **Grouped view:** Collapsible rows by product family (name, brand, variant count). Expanded view shows a nested table with all variant details and the same admin-aware actions.
   - **Zoho sync features:** Single-variant sync, bulk sync (batch POST), readiness check dialog (shows checked/ready/blocked/warning counts + per-item detail table).
   - **Data enrichment:** Variants are enriched with identity and family data by joining across three parallel queries using `useMemo`.
   - **Pagination:** Client-side with MUI `TablePagination` (10/25/50/100 rows).

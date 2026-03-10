@@ -288,9 +288,10 @@ export default function CreateProductDialog({ open, onClose, onCreated }: Create
       })
       
       // Always create a variant (even without color/condition for display purposes)
-      const variantPayload: { identity_id: number; color_code?: string; condition_code?: string } = {
+      const variantPayload: { identity_id: number; variant_name?: string; color_code?: string; condition_code?: string } = {
         identity_id: identityResponse.data.id,
       }
+      if (data.type === 'P' && data.name?.trim()) variantPayload.variant_name = data.name.trim()
       if (data.color_code) variantPayload.color_code = data.color_code
       if (data.condition_code) variantPayload.condition_code = data.condition_code
       

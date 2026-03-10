@@ -25,6 +25,8 @@ import {
   DialogContent,
   DialogActions,
   CircularProgress,
+  FormControlLabel,
+  Switch,
 } from '@mui/material'
 import {
   Add,
@@ -55,6 +57,9 @@ interface ExpandedRowProps {
   syncingVariantId: number | null
   syncDisabled: boolean
   onManageImages: (sku: string) => void
+  canAdmin: boolean
+  onEditVariant: (variant: EnhancedVariant) => void
+  onDeleteVariant: (variant: EnhancedVariant) => void
 }
 
 interface EnhancedVariant extends Variant {
@@ -154,7 +159,17 @@ const getSyncStatusChip = (status: string) => {
   return <Chip size="small" color={config.color} label={config.label} />
 }
 
-function ExpandedRow({ familyName, variants, onSyncVariant, syncingVariantId, syncDisabled, onManageImages }: ExpandedRowProps) {
+function ExpandedRow({
+  familyName,
+  variants,
+  onSyncVariant,
+  syncingVariantId,
+  syncDisabled,
+  onManageImages,
+  canAdmin,
+  onEditVariant,
+  onDeleteVariant,
+}: ExpandedRowProps) {
   const [gallerySku, setGallerySku] = useState<string | null>(null)
 
   return (
@@ -225,6 +240,25 @@ function ExpandedRow({ familyName, variants, onSyncVariant, syncingVariantId, sy
                       >
                         {syncingVariantId === variant.id ? 'Syncing...' : 'Sync to Zoho'}
                       </Button>
+                      {canAdmin && (
+                        <>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={() => onEditVariant(variant)}
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            color="error"
+                            onClick={() => onDeleteVariant(variant)}
+                          >
+                            Delete
+                          </Button>
+                        </>
+                      )}
                     </Box>
                   </TableCell>
                   <TableCell>
@@ -266,8 +300,87 @@ export default function InventoryManagement() {
   const [readinessDialogOpen, setReadinessDialogOpen] = useState(false)
   const [readinessData, setReadinessData] = useState<ZohoReadinessResponse | null>(null)
   const [syncingVariantId, setSyncingVariantId] = useState<number | null>(null)
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [selectedVariant, setSelectedVariant] = useState<EnhancedVariant | null>(null)
+  const [editVariantName, setEditVariantName] = useState('')
+  const [editColorCode, setEditColorCode] = useState('')
+  const [editConditionCode, setEditConditionCode] = useState('')
+  const [editIsActive, setEditIsActive] = useState(true)
   const { hasRole } = useAuth()
   const queryClient = useQueryClient()
+
+  const canAdmin = hasRole(['ADMIN'])
+
+  const openEditDialog = (variant: EnhancedVariant) => {
+    setSelectedVariant(variant)
+    setEditVariantName(variant.variant_name || '')
+    setEditColorCode(variant.color_code || '')
+    setEditConditionCode(variant.condition_code || '')
+    setEditIsActive(variant.is_active)
+    setEditDialogOpen(true)
+  }
+
+  const openDeleteDialog = (variant: EnhancedVariant) => {
+    setSelectedVariant(variant)
+    setDeleteDialogOpen(true)
+  }
+
+  const closeEditDialog = () => {
+    setEditDialogOpen(false)
+    setSelectedVariant(null)
+  }
+
+  const closeDeleteDialog = () => {
+    setDeleteDialogOpen(false)
+    setSelectedVariant(null)
+  }
+
+  const updateVariantMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedVariant) throw new Error('No variant selected')
+      const response = await axiosClient.patch(CATALOG.VARIANT(selectedVariant.id), {
+        variant_name: editVariantName.trim() || null,
+        color_code: editColorCode.trim().toUpperCase() || null,
+        condition_code: editConditionCode.trim().toUpperCase() || null,
+        is_active: editIsActive,
+      })
+      return response.data
+    },
+    onSuccess: async () => {
+      setSnackbarSeverity('success')
+      setSnackbarMessage('Variant updated successfully.')
+      setSnackbarOpen(true)
+      closeEditDialog()
+      await queryClient.invalidateQueries({ queryKey: ['variants'] })
+    },
+    onError: (error: AxiosError<{ detail?: string }>) => {
+      const detail = error.response?.data?.detail || 'Failed to update variant.'
+      setSnackbarSeverity('error')
+      setSnackbarMessage(detail)
+      setSnackbarOpen(true)
+    },
+  })
+
+  const deleteVariantMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedVariant) throw new Error('No variant selected')
+      await axiosClient.delete(CATALOG.VARIANT(selectedVariant.id))
+    },
+    onSuccess: async () => {
+      setSnackbarSeverity('success')
+      setSnackbarMessage('Variant deleted successfully.')
+      setSnackbarOpen(true)
+      closeDeleteDialog()
+      await queryClient.invalidateQueries({ queryKey: ['variants'] })
+    },
+    onError: (error: AxiosError<{ detail?: string }>) => {
+      const detail = error.response?.data?.detail || 'Failed to delete variant.'
+      setSnackbarSeverity('error')
+      setSnackbarMessage(detail)
+      setSnackbarOpen(true)
+    },
+  })
 
   const backfillThumbnailsMutation = useMutation({
     mutationFn: async () => {
@@ -694,6 +807,25 @@ export default function InventoryManagement() {
                           >
                             {syncingVariantId === variant.id ? 'Syncing...' : 'Sync to Zoho'}
                           </Button>
+                          {canAdmin && (
+                            <>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                onClick={() => openEditDialog(variant)}
+                              >
+                                Edit
+                              </Button>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                color="error"
+                                onClick={() => openDeleteDialog(variant)}
+                              >
+                                Delete
+                              </Button>
+                            </>
+                          )}
                         </Box>
                       </TableCell>
                     </TableRow>
@@ -761,6 +893,9 @@ export default function InventoryManagement() {
                           syncingVariantId={syncingVariantId}
                           syncDisabled={isZohoSyncRunning || zohoSingleSyncMutation.isPending}
                           onManageImages={(sku) => setManageImagesSku(sku)}
+                          canAdmin={canAdmin}
+                          onEditVariant={openEditDialog}
+                          onDeleteVariant={openDeleteDialog}
                         />
                       )}
                     </>
@@ -893,6 +1028,76 @@ export default function InventoryManagement() {
             }}
           >
             {zohoBulkSyncMutation.isPending ? 'Syncing...' : 'Sync Anyway'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={editDialogOpen} onClose={closeEditDialog} fullWidth maxWidth="sm">
+        <DialogTitle>Edit Variant</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
+            <TextField
+              label="Display Name"
+              value={editVariantName}
+              onChange={(e) => setEditVariantName(e.target.value)}
+              placeholder="Leave empty to fallback to family name"
+              fullWidth
+            />
+            <TextField
+              label="Color Code"
+              value={editColorCode}
+              onChange={(e) => setEditColorCode(e.target.value.slice(0, 2).toUpperCase())}
+              placeholder="e.g. BK"
+              inputProps={{ maxLength: 2 }}
+              fullWidth
+            />
+            <TextField
+              label="Condition Code"
+              value={editConditionCode}
+              onChange={(e) => setEditConditionCode(e.target.value.slice(0, 1).toUpperCase())}
+              placeholder="e.g. N"
+              inputProps={{ maxLength: 1 }}
+              fullWidth
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={editIsActive}
+                  onChange={(e) => setEditIsActive(e.target.checked)}
+                />
+              }
+              label={editIsActive ? 'Active' : 'Inactive'}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeEditDialog}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={() => updateVariantMutation.mutate()}
+            disabled={updateVariantMutation.isPending || !selectedVariant}
+          >
+            {updateVariantMutation.isPending ? 'Saving...' : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={deleteDialogOpen} onClose={closeDeleteDialog} maxWidth="xs" fullWidth>
+        <DialogTitle>Delete Variant</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Delete variant <strong>{selectedVariant?.full_sku}</strong>? This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeDeleteDialog}>Cancel</Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={() => deleteVariantMutation.mutate()}
+            disabled={deleteVariantMutation.isPending || !selectedVariant}
+          >
+            {deleteVariantMutation.isPending ? 'Deleting...' : 'Delete'}
           </Button>
         </DialogActions>
       </Dialog>

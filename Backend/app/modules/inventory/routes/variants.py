@@ -1,6 +1,7 @@
 """
 Product Variant API endpoints.
 """
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -21,6 +22,28 @@ from app.modules.inventory.schemas import (
 )
 
 router = APIRouter(prefix="/variants", tags=["Product Variants"])
+
+
+async def _build_unique_deleted_sku(
+    repo: ProductVariantRepository,
+    original_sku: str,
+    variant_id: int,
+) -> str:
+    """Build a unique soft-delete SKU with a D- prefix."""
+    base = f"D-{original_sku}"
+    candidate = base
+    existing = await repo.get_by_sku(candidate)
+    if existing is None or existing.id == variant_id:
+        return candidate
+
+    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    candidate = f"{base}-{variant_id}-{timestamp}"
+    existing = await repo.get_by_sku(candidate)
+    if existing is None or existing.id == variant_id:
+        return candidate
+
+    # Final fallback to keep moving even in edge-collision scenarios.
+    return f"{base}-{variant_id}-{datetime.utcnow().microsecond}"
 
 
 @router.get("/search", summary="Search variants by product name or SKU")
@@ -139,6 +162,7 @@ async def get_variant(
 ):
     """Get a product variant by ID with its platform listings."""
     repo = ProductVariantRepository(db)
+    identity_repo = ProductIdentityRepository(db)
     variant = await repo.get_with_listings(variant_id)
     
     if not variant:
@@ -187,6 +211,37 @@ async def update_variant(
     
     update_data = data.model_dump(exclude_unset=True)
     if update_data:
+        target_color = update_data.get("color_code", variant.color_code)
+        target_condition = update_data.get("condition_code", variant.condition_code)
+
+        # If variant combination changes, enforce uniqueness and recompute full SKU.
+        if "color_code" in update_data or "condition_code" in update_data:
+            existing_variants = await repo.get_by_identity(variant.identity_id, include_inactive=True)
+            for other in existing_variants:
+                if other.id == variant.id:
+                    continue
+                if other.color_code == target_color and other.condition_code == target_condition:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=(
+                            "Variant with color "
+                            f"'{target_color}' and condition '{target_condition}' already exists for this identity"
+                        ),
+                    )
+
+            identity = await identity_repo.get(variant.identity_id)
+            if identity is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Product identity {variant.identity_id} not found",
+                )
+
+            update_data["full_sku"] = repo.generate_full_sku(
+                identity.generated_upis_h,
+                target_color,
+                target_condition.value if hasattr(target_condition, "value") else target_condition,
+            )
+
         variant = await repo.update(variant, update_data)
     
     return ProductVariantResponse.model_validate(variant)
@@ -197,15 +252,28 @@ async def delete_variant(
     variant_id: int,
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete a product variant and all related data."""
+    """Soft-delete a variant and free reusable SKU/color-condition space."""
     repo = ProductVariantRepository(db)
-    
-    deleted = await repo.delete(variant_id)
-    if not deleted:
+
+    variant = await repo.get(variant_id)
+    if not variant:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Product variant {variant_id} not found"
         )
+
+    deleted_sku = await _build_unique_deleted_sku(repo, variant.full_sku, variant.id)
+
+    await repo.update(
+        variant,
+        {
+            "is_active": False,
+            "full_sku": deleted_sku,
+            # Clear these to free identity+color+condition uniqueness for replacement variants.
+            "color_code": None,
+            "condition_code": None,
+        },
+    )
 
 
 @router.post("/{variant_id}/deactivate", response_model=ProductVariantResponse)

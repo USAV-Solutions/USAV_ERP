@@ -542,7 +542,7 @@ Backend/
 
 ### `variants.py` (Path: `app/modules/inventory/routes/variants.py`)
 
-* **Purpose:** Product Variant (Layer 2) CRUD with automatic full SKU generation.
+* **Purpose:** Product Variant (Layer 2) CRUD with automatic full SKU generation and soft-delete archival semantics.
 * **Dependencies & Links:**
   - Internal: `app.repositories.product` (ProductIdentityRepository, ProductVariantRepository), `app.models.entities.ZohoSyncStatus`, inventory schemas.
 * **Mechanism / Core Logic:**
@@ -551,8 +551,8 @@ Backend/
   - `POST /variants` — Validates identity exists; auto-generates `full_sku` from identity's UPIS-H + color + condition (e.g. `00845-P-1-WY-N`). Sets `zoho_sync_status=PENDING`.
   - `GET /variants/{id}` — Returns variant with loaded platform listings.
   - `GET /variants/sku/{full_sku}` — SKU-based lookup.
-  - `PUT/PATCH /variants/{id}` — Update pricing, description, etc.
-  - `DELETE /variants/{id}` — Cascade delete.
+  - `PUT/PATCH /variants/{id}` — Updates mutable variant fields (`variant_name`, `color_code`, `condition_code`, `is_active`). If color/condition changes, the API validates identity-level uniqueness and recomputes `full_sku`.
+  - `DELETE /variants/{id}` — Soft-delete archive: sets `is_active=false`, renames SKU to `D-{old_sku}` (collision-safe suffix fallback), and clears `color_code`/`condition_code` to free identity+color+condition reuse.
   - `POST /variants/{id}/deactivate` — Soft-delete (sets `is_active=False`).
   - `GET /variants/pending-sync/zoho` — Returns all variants where `zoho_sync_status != SYNCED`.
 
