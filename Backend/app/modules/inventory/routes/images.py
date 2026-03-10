@@ -9,11 +9,12 @@ For each SKU, the listing folder with the most images is selected as the
 """
 import logging
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select, update
@@ -201,6 +202,37 @@ def _build_public_thumbnail_url(
 ) -> str:
     """Build direct Nginx-served URL for a thumbnail image."""
     return f"/product-images/{context.generated_upis_h}/{context.full_sku}/{listing_name}/{image_filename}"
+async def _recompute_thumbnail_url(
+    db: AsyncSession,
+    context: VariantImageContext,
+) -> Optional[str]:
+    """Recompute and persist thumbnail_url based on current images."""
+    variant_dir = _find_variant_dir(context)
+    thumbnail_url: Optional[str] = None
+
+    if variant_dir:
+        listing_result = _get_best_listing(variant_dir)
+        if listing_result:
+            listing_name, listing_path = listing_result
+            image_files = _sorted_images(listing_path)
+            if image_files:
+                thumbnail_url = _build_public_thumbnail_url(context, listing_name, image_files[0])
+
+    await db.execute(
+        update(ProductVariant)
+        .where(ProductVariant.id == context.variant_id)
+        .values(thumbnail_url=thumbnail_url)
+    )
+    await db.commit()
+    context.thumbnail_url = thumbnail_url
+
+    logger.info(
+        "[THUMB_DEBUG] Recomputed thumbnail_url for sku=%s variant_id=%s -> %s",
+        context.full_sku,
+        context.variant_id,
+        thumbnail_url,
+    )
+    return thumbnail_url
 
 
 async def _resolve_or_backfill_thumbnail_url(
@@ -267,6 +299,55 @@ async def _resolve_or_backfill_thumbnail_url(
     return context, thumbnail_url
 
 
+
+def _extract_image_index(filename: str) -> Optional[int]:
+    match = re.match(r"img-(\d+)\.[a-zA-Z0-9]+$", filename)
+    return int(match.group(1)) if match else None
+
+def _ensure_listing_dir(context: VariantImageContext, listing_index: int) -> Path:
+    if not IMAGES_ROOT.exists():
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Image root directory does not exist: {IMAGES_ROOT}",
+        )
+
+    listing_dir = IMAGES_ROOT / context.generated_upis_h / context.full_sku / f"listing-{listing_index}"
+    listing_dir.mkdir(parents=True, exist_ok=True)
+    return listing_dir
+
+def _build_sku_images_response(
+    context: VariantImageContext,
+) -> SkuImagesResponse:
+    variant_dir = _find_variant_dir(context)
+    if not variant_dir:
+        raise HTTPException(status_code=404, detail=f"No images found for SKU: {context.full_sku}")
+
+    result = _get_best_listing(variant_dir)
+    if not result:
+        raise HTTPException(status_code=404, detail=f"No listing folders found for SKU: {context.full_sku}")
+
+    listing_name, listing_path = result
+    image_files = _sorted_images(listing_path)
+    if not image_files:
+        raise HTTPException(status_code=404, detail=f"No images in best listing for SKU: {context.full_sku}")
+
+    images = [
+        ImageInfo(
+            filename=fname,
+            url=f"/api/v1/images/{context.full_sku}/file/{fname}",
+        )
+        for fname in image_files
+    ]
+
+    thumbnail_url = context.thumbnail_url or f"/api/v1/images/{context.full_sku}/file/{image_files[0]}"
+
+    return SkuImagesResponse(
+        sku=context.full_sku,
+        listing=listing_name,
+        total_images=len(image_files),
+        thumbnail_url=thumbnail_url,
+        images=images,
+    )
 @router.get(
     "/{sku}",
     response_model=SkuImagesResponse,
@@ -289,54 +370,18 @@ async def get_sku_images(
         logger.warning(f"[IMAGE_API] GET /{sku} - Returning 404: No images found")
         raise HTTPException(status_code=404, detail=f"No images found for SKU: {sku}")
 
-    variant_dir = _find_variant_dir(context)
+    if resolved_thumbnail_url:
+        context.thumbnail_url = resolved_thumbnail_url
 
-    if not variant_dir:
-        logger.warning(f"[IMAGE_API] GET /{sku} - Returning 404: No images found")
-        raise HTTPException(status_code=404, detail=f"No images found for SKU: {sku}")
-
-    result = _get_best_listing(variant_dir)
-    if not result:
-        logger.warning(f"[IMAGE_API] GET /{sku} - Returning 404: No listing folders found")
-        raise HTTPException(status_code=404, detail=f"No listing folders found for SKU: {sku}")
-
-    listing_name, listing_path = result
-    logger.info(
-        "[IMAGE_DEBUG] Selected listing for sku=%s -> listing=%s path=%s",
-        sku,
-        listing_name,
-        listing_path,
-    )
-    image_files = _sorted_images(listing_path)
-
-    if not image_files:
-        logger.warning(f"[IMAGE_API] GET /{sku} - Returning 404: No images in best listing")
-        raise HTTPException(status_code=404, detail=f"No images in best listing for SKU: {sku}")
-
-    images = [
-        ImageInfo(
-            filename=fname,
-            url=f"/api/v1/images/{sku}/file/{fname}",
-        )
-        for fname in image_files
-    ]
-
+    response = _build_sku_images_response(context)
     logger.info(
         "[IMAGE_DEBUG] Response URLs for sku=%s -> thumbnail=%s images=%s",
         context.full_sku,
-        resolved_thumbnail_url or f"/api/v1/images/{context.full_sku}/file/{image_files[0]}",
-        [img.url for img in images],
+        response.thumbnail_url,
+        [img.url for img in response.images],
     )
-
-    logger.info(f"[IMAGE_API] GET /{sku} - Returning 200: {len(images)} images from {listing_name}")
-    return SkuImagesResponse(
-        sku=context.full_sku,
-        listing=listing_name,
-        total_images=len(image_files),
-        thumbnail_url=resolved_thumbnail_url or f"/api/v1/images/{context.full_sku}/file/{image_files[0]}",
-        images=images,
-    )
-
+    logger.info(f"[IMAGE_API] GET /{sku} - Returning 200: {len(response.images)} images from {response.listing}")
+    return response
 
 @router.get(
     "/{sku}/thumbnail",
@@ -581,3 +626,139 @@ def _guess_media_type(path: Path) -> str:
         ".gif": "image/gif",
     }
     return mime_map.get(ext, "application/octet-stream")
+
+
+
+
+
+@router.post(
+    "/{sku}/upload",
+    summary="Upload images for a product variant SKU",
+)
+async def upload_sku_images(
+    sku: str,
+    _admin: AdminUser,
+    files: list[UploadFile] = File(...),
+    listing_index: int = Form(0),
+    replace: bool = Form(False),
+    db: AsyncSession = Depends(get_db),
+):
+    if listing_index < 0 or listing_index > 9999:
+        raise HTTPException(status_code=400, detail="Invalid listing_index")
+
+    context = await _get_variant_context(db, sku)
+    if context is None:
+        raise HTTPException(status_code=404, detail=f"SKU not found: {sku}")
+
+    listing_dir = _ensure_listing_dir(context, listing_index)
+
+    if replace:
+        for entry in listing_dir.iterdir():
+            if entry.is_file() and entry.suffix.lower() in IMAGE_EXTENSION:
+                entry.unlink()
+
+    existing_indices = [
+        _extract_image_index(f.name)
+        for f in listing_dir.iterdir()
+        if f.is_file() and f.suffix.lower() in IMAGE_EXTENSION
+    ]
+    next_index = max([i for i in existing_indices if i is not None], default=-1) + 1
+
+    saved_files: list[str] = []
+
+    for upload in files:
+        if not upload.filename:
+            continue
+
+        ext = Path(upload.filename).suffix.lower()
+        if ext not in IMAGE_EXTENSION:
+            raise HTTPException(status_code=400, detail=f"Unsupported image type: {ext}")
+
+        target_name = f"img-{next_index}{ext}"
+        next_index += 1
+
+        target_tmp = listing_dir / f"{target_name}.tmp"
+        target_final = listing_dir / target_name
+
+        with target_tmp.open("wb") as buffer:
+            shutil.copyfileobj(upload.file, buffer)
+
+        target_tmp.replace(target_final)
+        saved_files.append(target_name)
+
+    if not saved_files:
+        raise HTTPException(status_code=400, detail="No valid files uploaded")
+
+    await _recompute_thumbnail_url(db, context)
+    return _build_sku_images_response(context)
+
+
+@router.delete(
+    "/{sku}/listing/{listing_index}/file/{filename}",
+    summary="Delete a single image from a listing",
+)
+async def delete_sku_image(
+    sku: str,
+    listing_index: int,
+    filename: str,
+    _admin: AdminUser,
+    db: AsyncSession = Depends(get_db),
+):
+    if listing_index < 0 or listing_index > 9999:
+        raise HTTPException(status_code=400, detail="Invalid listing_index")
+
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    context = await _get_variant_context(db, sku)
+    if context is None:
+        raise HTTPException(status_code=404, detail=f"SKU not found: {sku}")
+
+    listing_dir = _ensure_listing_dir(context, listing_index)
+    file_path = listing_dir / filename
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Image not found: {filename}")
+
+    file_path.unlink()
+    await _recompute_thumbnail_url(db, context)
+
+    remaining = [
+        f.name for f in listing_dir.iterdir()
+        if f.is_file() and f.suffix.lower() in IMAGE_EXTENSION
+    ]
+    return {
+        "deleted": filename,
+        "remaining": sorted(remaining),
+        "thumbnail_url": context.thumbnail_url,
+    }
+
+
+@router.post(
+    "/{sku}/listing/{listing_index}/clear",
+    summary="Clear all images in a listing",
+)
+async def clear_sku_listing(
+    sku: str,
+    listing_index: int,
+    _admin: AdminUser,
+    db: AsyncSession = Depends(get_db),
+):
+    if listing_index < 0 or listing_index > 9999:
+        raise HTTPException(status_code=400, detail="Invalid listing_index")
+
+    context = await _get_variant_context(db, sku)
+    if context is None:
+        raise HTTPException(status_code=404, detail=f"SKU not found: {sku}")
+
+    listing_dir = _ensure_listing_dir(context, listing_index)
+    deleted = 0
+    for entry in listing_dir.iterdir():
+        if entry.is_file() and entry.suffix.lower() in IMAGE_EXTENSION:
+            entry.unlink()
+            deleted += 1
+
+    await _recompute_thumbnail_url(db, context)
+    return {
+        "cleared": deleted,
+        "thumbnail_url": context.thumbnail_url,
+    }

@@ -17,6 +17,11 @@ from app.repositories.product import (
     ProductIdentityRepository,
     ProductVariantRepository,
 )
+from app.repositories.purchasing import (
+    PurchaseOrderItemRepository,
+    PurchaseOrderRepository,
+    VendorRepository,
+)
 from app.repositories.user import UserRepository
 
 __all__ = [
@@ -30,5 +35,8 @@ __all__ = [
     "ProductFamilyRepository",
     "ProductIdentityRepository",
     "ProductVariantRepository",
+    "VendorRepository",
+    "PurchaseOrderRepository",
+    "PurchaseOrderItemRepository",
     "UserRepository",
 ]

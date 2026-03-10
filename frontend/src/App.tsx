@@ -7,6 +7,7 @@ import WarehouseOps from './pages/WarehouseOps'
 import InventoryManagement from './pages/InventoryManagement'
 import ProductListings from './pages/ProductListings'
 import OrdersManagement from './pages/OrdersManagement'
+import PurchasingManagement from './pages/PurchasingManagement'
 import UserManagement from './pages/UserManagement'
 import Layout from './components/common/Layout'
 import RoleGuard from './components/guards/RoleGuard'
@@ -47,6 +48,7 @@ function App() {
         {/* Orders Routes */}
         <Route element={<RoleGuard allowedRoles={['ADMIN', 'SALES_REP', 'WAREHOUSE_OP']} />}>
           <Route path="/orders" element={<OrdersManagement />} />
+          <Route path="/purchasing" element={<PurchasingManagement />} />
         </Route>
 
         {/* Admin Routes */}

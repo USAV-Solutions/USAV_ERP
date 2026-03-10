@@ -100,6 +100,8 @@ tmp/
 # Backups
 backups/*.sql
 backups/*.dump
+backups/*
+backups/**
 
 # Migrations (generated)
 migrations/versions/__pycache__/

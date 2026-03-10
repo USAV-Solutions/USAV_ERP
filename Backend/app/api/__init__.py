@@ -19,6 +19,7 @@ from app.modules.inventory.routes import (
     condition_router,
     lci_router,
 )
+from app.modules.purchasing.routes import router as purchasing_router
 
 # Create main API router
 api_router = APIRouter()
@@ -40,5 +41,6 @@ api_router.include_router(brand_router)
 api_router.include_router(color_router)
 api_router.include_router(condition_router)
 api_router.include_router(lci_router)
+api_router.include_router(purchasing_router)
 
 __all__ = ["api_router"]

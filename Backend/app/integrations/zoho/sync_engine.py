@@ -26,6 +26,7 @@ from app.core.database import async_session_factory
 from app.integrations.zoho.client import ZohoClient, RateLimitError
 from app.integrations.zoho.security import generate_payload_hash
 from app.models.entities import Customer, ProductVariant, ZohoSyncStatus
+from app.models.purchasing import PurchaseOrder, PurchaseOrderItem, Vendor
 from app.modules.orders.models import Order, OrderItem
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,53 @@ def customer_to_zoho_payload(customer: Customer) -> dict[str, Any]:
         address["country"] = customer.country
     if address:
         payload["billing_address"] = address
+
+    return payload
+
+
+def vendor_to_zoho_payload(vendor: Vendor) -> dict[str, Any]:
+    """Build a Zoho contact payload from a local ``Vendor``."""
+    payload: dict[str, Any] = {
+        "contact_name": vendor.name,
+        "contact_type": "vendor",
+    }
+    if vendor.email:
+        payload["email"] = vendor.email
+    if vendor.phone:
+        payload["phone"] = vendor.phone
+    if vendor.address:
+        payload["billing_address"] = {"address": vendor.address}
+    return payload
+
+
+def purchase_order_to_zoho_payload(po: PurchaseOrder) -> dict[str, Any]:
+    """Build a Zoho purchase-order payload from a local ``PurchaseOrder``."""
+    vendor = getattr(po, "vendor", None)
+    if not (vendor and vendor.zoho_id):
+        raise ValueError("PurchaseOrder is missing vendor.zoho_id; sync vendor first.")
+
+    payload: dict[str, Any] = {
+        "purchaseorder_number": po.po_number,
+        "date": po.order_date.strftime("%Y-%m-%d"),
+        "vendor_id": vendor.zoho_id,
+        "currency_code": po.currency,
+        "notes": po.notes or "",
+    }
+    if po.expected_delivery_date:
+        payload["delivery_date"] = po.expected_delivery_date.strftime("%Y-%m-%d")
+
+    line_items: list[dict[str, Any]] = []
+    for item in po.items or []:
+        li: dict[str, Any] = {
+            "name": item.external_item_name,
+            "quantity": item.quantity,
+            "rate": float(item.unit_price),
+        }
+        variant = getattr(item, "variant", None)
+        if variant and variant.zoho_item_id:
+            li["item_id"] = variant.zoho_item_id
+        line_items.append(li)
+    payload["line_items"] = line_items
 
     return payload
 
@@ -309,6 +357,138 @@ async def sync_customer_outbound(customer_id: int) -> None:
             customer._updated_by_sync = True
             await db.commit()
             logger.exception("sync_customer_outbound: customer %s failed", customer_id)
+
+
+async def sync_vendor_outbound(vendor_id: int) -> None:
+    """Push a single ``Vendor`` to Zoho as a vendor contact."""
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        vendor = (await db.execute(select(Vendor).where(Vendor.id == vendor_id))).scalar_one_or_none()
+        if vendor is None:
+            logger.warning("sync_vendor_outbound: vendor %s not found", vendor_id)
+            return
+
+        payload = vendor_to_zoho_payload(vendor)
+        new_hash = generate_payload_hash(payload)
+
+        if new_hash == vendor.zoho_last_sync_hash:
+            logger.debug("sync_vendor_outbound: vendor %s unchanged (hash match)", vendor_id)
+            return
+
+        try:
+            zoho = ZohoClient()
+
+            if not vendor.zoho_id and vendor.email:
+                existing = await zoho.get_contact_by_email(vendor.email)
+                if existing and str(existing.get("contact_type", "")).lower() == "vendor":
+                    vendor.zoho_id = str(existing.get("contact_id", ""))
+
+            if vendor.zoho_id:
+                contact = await zoho.update_contact(vendor.zoho_id, payload)
+            else:
+                contact = await zoho.create_contact(payload, contact_type="vendor")
+
+            contact_id = str(contact.get("contact_id", ""))
+            if contact_id:
+                vendor.zoho_id = contact_id
+
+            if vendor.zoho_id:
+                if vendor.is_active:
+                    await zoho.mark_contact_active(vendor.zoho_id)
+                else:
+                    await zoho.mark_contact_inactive(vendor.zoho_id)
+
+            vendor.zoho_last_sync_hash = new_hash
+            vendor.zoho_last_synced_at = datetime.now()
+            vendor.zoho_sync_error = None
+            vendor._updated_by_sync = True
+            await db.commit()
+
+            logger.info(
+                "sync_vendor_outbound: vendor %s synced to Zoho (contact_id=%s)",
+                vendor_id,
+                vendor.zoho_id,
+            )
+        except Exception as exc:
+            vendor.zoho_sync_error = str(exc)[:2000]
+            vendor._updated_by_sync = True
+            await db.commit()
+            logger.exception("sync_vendor_outbound: vendor %s failed", vendor_id)
+
+
+async def sync_po_outbound(po_id: int) -> None:
+    """Push a ``PurchaseOrder`` to Zoho Inventory as a purchase order."""
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    async with async_session_factory() as db:
+        stmt = (
+            select(PurchaseOrder)
+            .options(
+                selectinload(PurchaseOrder.vendor),
+                selectinload(PurchaseOrder.items).selectinload(PurchaseOrderItem.variant),
+            )
+            .where(PurchaseOrder.id == po_id)
+        )
+        po = (await db.execute(stmt)).scalar_one_or_none()
+        if po is None:
+            logger.warning("sync_po_outbound: purchase_order %s not found", po_id)
+            return
+
+        vendor = po.vendor
+        if vendor is None:
+            po.zoho_sync_error = "Cannot sync purchase order: no linked vendor"
+            po._updated_by_sync = True
+            await db.commit()
+            return
+
+        if not vendor.zoho_id:
+            await sync_vendor_outbound(vendor.id)
+            await db.refresh(vendor)
+            if not vendor.zoho_id:
+                po.zoho_sync_error = f"Vendor {vendor.id} missing zoho_id; sync vendor first."
+                po._updated_by_sync = True
+                await db.commit()
+                return
+
+        payload = purchase_order_to_zoho_payload(po)
+        new_hash = generate_payload_hash(payload)
+
+        if new_hash == po.zoho_last_sync_hash:
+            logger.debug("sync_po_outbound: purchase_order %s unchanged (hash match)", po_id)
+            po.zoho_sync_error = None
+            po._updated_by_sync = True
+            await db.commit()
+            return
+
+        try:
+            zoho = ZohoClient()
+            if po.zoho_id:
+                zoho_po = await zoho.update_purchase_order(po.zoho_id, payload)
+            else:
+                zoho_po = await zoho.create_purchase_order(payload)
+
+            zoho_po_id = str(zoho_po.get("purchaseorder_id", ""))
+            if zoho_po_id:
+                po.zoho_id = zoho_po_id
+
+            po.zoho_last_sync_hash = new_hash
+            po.zoho_last_synced_at = datetime.now()
+            po.zoho_sync_error = None
+            po._updated_by_sync = True
+            await db.commit()
+
+            logger.info(
+                "sync_po_outbound: purchase_order %s synced to Zoho (purchaseorder_id=%s)",
+                po_id,
+                po.zoho_id,
+            )
+        except Exception as exc:
+            po.zoho_sync_error = str(exc)[:2000]
+            po._updated_by_sync = True
+            await db.commit()
+            logger.exception("sync_po_outbound: purchase_order %s failed", po_id)
 
 
 # =========================================================================
@@ -779,6 +959,24 @@ def _enqueue_order_sync(order_id: int) -> None:
         logger.debug("_enqueue_order_sync: no running event loop, skipping")
 
 
+def _enqueue_vendor_sync(vendor_id: int) -> None:
+    """Fire-and-forget background task for vendor outbound sync."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(sync_vendor_outbound(vendor_id))
+    except RuntimeError:
+        logger.debug("_enqueue_vendor_sync: no running event loop, skipping")
+
+
+def _enqueue_po_sync(po_id: int) -> None:
+    """Fire-and-forget background task for purchase-order outbound sync."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(sync_po_outbound(po_id))
+    except RuntimeError:
+        logger.debug("_enqueue_po_sync: no running event loop, skipping")
+
+
 # =========================================================================
 # SQLALCHEMY EVENT LISTENERS
 # =========================================================================
@@ -804,6 +1002,20 @@ def _on_order_after_write(mapper, connection, target: Order):
     _enqueue_order_sync(target.id)
 
 
+def _on_vendor_after_write(mapper, connection, target: Vendor):
+    """Enqueue vendor outbound sync unless this write came from inbound sync."""
+    if target._updated_by_sync:
+        return
+    _enqueue_vendor_sync(target.id)
+
+
+def _on_purchase_order_after_write(mapper, connection, target: PurchaseOrder):
+    """Enqueue purchase-order outbound sync unless this write came from inbound sync."""
+    if target._updated_by_sync:
+        return
+    _enqueue_po_sync(target.id)
+
+
 def register_sync_listeners() -> None:
     """
     Attach SQLAlchemy ``after_insert`` / ``after_update`` listeners.
@@ -816,4 +1028,8 @@ def register_sync_listeners() -> None:
     event.listen(Customer, "after_update", _on_customer_after_write)
     event.listen(Order, "after_insert", _on_order_after_write)
     event.listen(Order, "after_update", _on_order_after_write)
+    event.listen(Vendor, "after_insert", _on_vendor_after_write)
+    event.listen(Vendor, "after_update", _on_vendor_after_write)
+    event.listen(PurchaseOrder, "after_insert", _on_purchase_order_after_write)
+    event.listen(PurchaseOrder, "after_update", _on_purchase_order_after_write)
     logger.info("Zoho sync event listeners registered")

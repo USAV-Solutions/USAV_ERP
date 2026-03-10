@@ -441,17 +441,42 @@ async def _sync_single_composite_variant(
     component_items = []
     for component in component_rows:
         child_item_id = synced_item_ids_by_identity.get(component.child_identity_id)
+        child_variant = None
         if not child_item_id:
             child_variant_stmt = (
                 select(ProductVariant)
                 .where(ProductVariant.identity_id == component.child_identity_id)
-                .where(ProductVariant.zoho_item_id.is_not(None))
                 .order_by(ProductVariant.id)
                 .limit(1)
             )
             child_variant = (await db.execute(child_variant_stmt)).scalar_one_or_none()
             if child_variant and child_variant.zoho_item_id:
                 child_item_id = child_variant.zoho_item_id
+
+        if not child_item_id and child_variant:
+            existing_item = await zoho_client.get_item_by_sku(child_variant.full_sku)
+            if existing_item:
+                child_item_id = str(existing_item.get("item_id", ""))
+            else:
+                existing_composite = await zoho_client.get_composite_item_by_sku(child_variant.full_sku)
+                if existing_composite:
+                    child_item_id = str(
+                        existing_composite.get("item_id")
+                        or existing_composite.get("composite_item_id")
+                        or ""
+                    )
+
+            if child_item_id:
+                child_variant.zoho_item_id = child_item_id
+                child_variant.zoho_sync_status = ZohoSyncStatus.SYNCED
+                child_variant.zoho_last_synced_at = datetime.now()
+                logger.info(
+                    "Zoho composite dependency resolved via SKU lookup | child_identity_id=%s child_variant_id=%s sku=%s zoho_item_id=%s",
+                    component.child_identity_id,
+                    child_variant.id,
+                    child_variant.full_sku,
+                    child_item_id,
+                )
 
         if child_item_id:
             component_items.append(

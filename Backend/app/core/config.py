@@ -57,6 +57,8 @@ class Settings(BaseSettings):
     zoho_accounts_url: str = "https://accounts.zoho.com"
     zoho_inventory_api_base: str = "https://www.zohoapis.com/inventory/v1"
     zoho_books_api_base: str = "https://www.zohoapis.com/books/v3"
+    zoho_auto_outbound_sync_enabled: bool = False
+    zoho_auto_inbound_sync_enabled: bool = False
     
     # Amazon SP-API Integration
     amazon_refresh_token: str = ""

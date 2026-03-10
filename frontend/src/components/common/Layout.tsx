@@ -27,6 +27,7 @@ import {
   Storefront,
   People,
   ShoppingCart,
+  LocalShipping,
 } from '@mui/icons-material'
 import { useAuth } from '../../hooks/useAuth'
 
@@ -45,6 +46,7 @@ const navItems: NavItem[] = [
   { title: 'Inventory Management', path: '/catalog/inventory', icon: <Inventory />, roles: ['ADMIN', 'SALES_REP'] },
   { title: 'Product Listings', path: '/catalog/listings', icon: <Storefront />, roles: ['ADMIN', 'SALES_REP'] },
   { title: 'Orders', path: '/orders', icon: <ShoppingCart />, roles: ['ADMIN', 'SALES_REP', 'WAREHOUSE_OP'] },
+  { title: 'Purchasing', path: '/purchasing', icon: <LocalShipping />, roles: ['ADMIN', 'SALES_REP', 'WAREHOUSE_OP'] },
   { title: 'User Management', path: '/admin/users', icon: <People />, roles: ['ADMIN'] },
 ]
 

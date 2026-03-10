@@ -53,6 +53,9 @@ export const IMAGES = {
   SKU_IMAGES: (sku: string) => `/images/${sku}`,
   THUMBNAIL: (sku: string) => `/images/${sku}/thumbnail`,
   FILE: (sku: string, filename: string) => `/images/${sku}/file/${filename}`,
+  UPLOAD: (sku: string) => `/images/${sku}/upload`,
+  DELETE_FILE: (sku: string, listing: number, filename: string) => `/images/${sku}/listing/${listing}/file/${filename}`,
+  CLEAR_LISTING: (sku: string, listing: number) => `/images/${sku}/listing/${listing}/clear`,
   BATCH_THUMBNAILS: '/images/batch/thumbnails',
   DEBUG_BACKFILL: '/images/debug/backfill-thumbnails',
   DEBUG_COUNTERS: '/images/debug/counters',
@@ -91,4 +94,14 @@ export const ORDERS = {
   MATCH_ITEM: (itemId: number) => `/orders/items/${itemId}/match`,
   CONFIRM_ITEM: (itemId: number) => `/orders/items/${itemId}/confirm`,
   REJECT_ITEM: (itemId: number) => `/orders/items/${itemId}/reject`,
+}
+
+// Purchasing endpoints
+export const PURCHASING = {
+  VENDORS: '/vendors',
+  VENDOR: (id: number) => `/vendors/${id}`,
+  PURCHASES: '/purchases',
+  PURCHASE: (id: number) => `/purchases/${id}`,
+  MATCH_ITEM: (itemId: number) => `/purchases/items/${itemId}/match`,
+  MARK_DELIVERED: (id: number) => `/purchases/${id}/mark-delivered`,
 }

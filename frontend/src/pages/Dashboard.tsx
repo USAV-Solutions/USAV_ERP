@@ -5,6 +5,7 @@ import {
   Storefront,
   People,
   TrendingUp,
+  LocalShipping,
 } from '@mui/icons-material'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
@@ -42,6 +43,14 @@ const quickActions: QuickAction[] = [
     icon: <Storefront sx={{ fontSize: 40 }} />,
     color: '#9c27b0',
     roles: ['ADMIN', 'SALES_REP'],
+  },
+  {
+    title: 'Purchasing',
+    description: 'Manage vendors, purchase orders and receiving',
+    path: '/purchasing',
+    icon: <LocalShipping sx={{ fontSize: 40 }} />,
+    color: '#2e7d32',
+    roles: ['ADMIN', 'SALES_REP', 'WAREHOUSE_OP'],
   },
   {
     title: 'User Management',

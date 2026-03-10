@@ -47,14 +47,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     print(f"📊 Environment: {settings.environment}")
     print(f"🔗 Database: {settings.db_host}:{settings.db_port}/{settings.db_name}")
 
-    # Register Zoho sync event listeners & webhook handlers
-    register_sync_listeners()
-    register_webhook_handler("item.created", process_item_inbound)
-    register_webhook_handler("item.updated", process_item_inbound)
-    register_webhook_handler("contact.created", process_contact_inbound)
-    register_webhook_handler("contact.updated", process_contact_inbound)
-    register_webhook_handler("salesorder.created", process_order_inbound)
-    register_webhook_handler("salesorder.updated", process_order_inbound)
+    # Register Zoho sync event listeners only when auto outbound sync is enabled.
+    if settings.zoho_auto_outbound_sync_enabled:
+        register_sync_listeners()
+        logger = logging.getLogger(__name__)
+        logger.info("Zoho auto outbound sync is ENABLED")
+    else:
+        logger = logging.getLogger(__name__)
+        logger.info("Zoho auto outbound sync is DISABLED")
+
+    # Register Zoho webhook handlers only when auto inbound sync is enabled.
+    if settings.zoho_auto_inbound_sync_enabled:
+        register_webhook_handler("item.created", process_item_inbound)
+        register_webhook_handler("item.updated", process_item_inbound)
+        register_webhook_handler("contact.created", process_contact_inbound)
+        register_webhook_handler("contact.updated", process_contact_inbound)
+        register_webhook_handler("salesorder.created", process_order_inbound)
+        register_webhook_handler("salesorder.updated", process_order_inbound)
+        logger.info("Zoho auto inbound sync is ENABLED")
+    else:
+        logger.info("Zoho auto inbound sync is DISABLED")
 
     yield
     

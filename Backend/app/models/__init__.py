@@ -47,6 +47,18 @@ except ImportError as e:
     print(f"Failed to import from orders: {e}")
     raise
 
+try:
+    from app.models.purchasing import (
+        PurchaseDeliverStatus,
+        PurchaseOrder,
+        PurchaseOrderItem,
+        PurchaseOrderItemStatus,
+        Vendor,
+    )
+except ImportError as e:
+    print(f"Failed to import from purchasing: {e}")
+    raise
+
 __all__ = [
     # Base
     "Base",
@@ -84,4 +96,10 @@ __all__ = [
     "OrderPlatform",
     "OrderStatus",
     "OrderItemStatus",
+    # Purchasing Models
+    "PurchaseDeliverStatus",
+    "PurchaseOrderItemStatus",
+    "Vendor",
+    "PurchaseOrder",
+    "PurchaseOrderItem",
 ]

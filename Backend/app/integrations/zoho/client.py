@@ -403,7 +403,34 @@ class ZohoClient:
         existing = await self.get_composite_item_by_sku(sku)
         if existing:
             return await self.update_composite_item(existing["composite_item_id"], composite_data)
-        return await self.create_composite_item(composite_data)
+
+        # If the SKU already exists as a standard Zoho item, do not try to create
+        # another record; reuse it to avoid duplicate/create loops.
+        existing_standard = await self.get_item_by_sku(sku)
+        if existing_standard:
+            logger.info(
+                "Zoho sync_composite_item: found existing standard item, reusing by sku | sku=%s item_id=%s",
+                sku,
+                existing_standard.get("item_id"),
+            )
+            return existing_standard
+
+        try:
+            return await self.create_composite_item(composite_data)
+        except Exception as exc:
+            message = str(exc)
+            if "already exists" in message or "code\":1001" in message:
+                logger.info(
+                    "Zoho sync_composite_item: duplicate on create, resolving existing by sku | sku=%s",
+                    sku,
+                )
+                existing = await self.get_composite_item_by_sku(sku)
+                if existing:
+                    return existing
+                existing_standard = await self.get_item_by_sku(sku)
+                if existing_standard:
+                    return existing_standard
+            raise
     
     # =========================================================================
     # STOCK SYNC
@@ -520,19 +547,50 @@ class ZohoClient:
     # CONTACTS (Customers)
     # =========================================================================
 
-    async def create_contact(self, contact_data: dict) -> dict:
-        """Create a contact (customer) in Zoho Inventory."""
+    async def create_contact(self, contact_data: dict, contact_type: Optional[str] = None) -> dict:
+        """Create a contact in Zoho Inventory (customer or vendor)."""
+        payload = dict(contact_data)
+        if contact_type:
+            payload["contact_type"] = contact_type
         logger.info(
-            "Zoho create_contact payload | email=%s name=%s",
-            contact_data.get("email"),
-            contact_data.get("contact_name"),
+            "Zoho create_contact payload | type=%s email=%s name=%s",
+            payload.get("contact_type", "customer"),
+            payload.get("email"),
+            payload.get("contact_name"),
         )
         result = await self._request(
             "POST",
             "/contacts",
-            data={"JSONString": json.dumps(contact_data)},
+            data={"JSONString": json.dumps(payload)},
         )
         return result.get("contact", {})
+
+    # =========================================================================
+    # PURCHASE ORDERS
+    # =========================================================================
+
+    async def create_purchase_order(self, purchase_order_data: dict) -> dict:
+        """Create a purchase order in Zoho Inventory."""
+        result = await self._request(
+            "POST",
+            "/purchaseorders",
+            data={"JSONString": json.dumps(purchase_order_data)},
+        )
+        return result.get("purchaseorder", {})
+
+    async def update_purchase_order(self, purchase_order_id: str, purchase_order_data: dict) -> dict:
+        """Update an existing purchase order in Zoho Inventory."""
+        result = await self._request(
+            "PUT",
+            f"/purchaseorders/{purchase_order_id}",
+            data={"JSONString": json.dumps(purchase_order_data)},
+        )
+        return result.get("purchaseorder", {})
+
+    async def get_purchase_order(self, purchase_order_id: str) -> dict:
+        """Fetch a single purchase order by ID."""
+        result = await self._request("GET", f"/purchaseorders/{purchase_order_id}")
+        return result.get("purchaseorder", {})
 
     async def update_contact(self, contact_id: str, contact_data: dict) -> dict:
         """Update an existing contact in Zoho Inventory."""

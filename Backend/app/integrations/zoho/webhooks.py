@@ -14,6 +14,8 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 
+from app.core.config import settings
+
 router = APIRouter(tags=["Zoho Webhooks"])
 logger = logging.getLogger(__name__)
 
@@ -73,6 +75,10 @@ async def receive_zoho_webhook(
         event_type,
         list(payload.keys()),
     )
+
+    if not settings.zoho_auto_inbound_sync_enabled:
+        logger.info("Zoho webhook ignored because auto inbound sync is disabled")
+        return JSONResponse(status_code=200, content={"status": "ignored", "reason": "auto_inbound_disabled"})
 
     background_tasks.add_task(_dispatch_webhook, event_type, payload)
 
