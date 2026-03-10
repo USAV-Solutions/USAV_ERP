@@ -9,6 +9,7 @@ import type {
   PurchaseOrderReceiveResponse,
   Vendor,
   VendorCreate,
+  ZohoPurchaseImportResponse,
 } from '../types/purchasing'
 
 export async function listVendors(): Promise<Vendor[]> {
@@ -57,5 +58,10 @@ export async function markPurchaseDelivered(
     PURCHASING.MARK_DELIVERED(poId),
     body,
   )
+  return data
+}
+
+export async function importPurchasesFromZoho(): Promise<ZohoPurchaseImportResponse> {
+  const { data } = await axiosClient.post<ZohoPurchaseImportResponse>(PURCHASING.IMPORT_ZOHO)
   return data
 }

@@ -14,6 +14,7 @@ from app.modules.purchasing.schemas.purchasing import (
     VendorCreate,
     VendorResponse,
     VendorUpdate,
+    ZohoPurchaseImportResponse,
 )
 
 __all__ = [
@@ -30,4 +31,5 @@ __all__ = [
     "ItemReceipt",
     "PurchaseOrderReceiveRequest",
     "PurchaseOrderReceiveResponse",
+    "ZohoPurchaseImportResponse",
 ]

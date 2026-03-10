@@ -344,6 +344,7 @@ async def _sync_single_standard_variant(
     variant: ProductVariant,
     synced_item_ids_by_identity: dict[int, str],
 ) -> ZohoBulkSyncItemResult:
+    previous_zoho_item_id = variant.zoho_item_id
     payload = _build_item_payload(variant)
     _debug_sync_context(variant=variant, payload=payload, include_images=data.include_images)
     item_name = payload.get("name", variant.full_sku)
@@ -360,6 +361,7 @@ async def _sync_single_standard_variant(
         name=item_name,
         rate=float(payload.get("rate", 0) or 0),
         description=payload.get("description", ""),
+        preferred_item_id=previous_zoho_item_id,
         **{k: v for k, v in payload.items() if k not in {"name", "sku", "rate", "description"}},
     )
 
@@ -406,6 +408,24 @@ async def _sync_single_standard_variant(
     variant.zoho_sync_status = ZohoSyncStatus.SYNCED
     variant.zoho_last_synced_at = datetime.now()
 
+    # If sync moved the link to a different Zoho item, retire the old one to prevent duplicates.
+    if previous_zoho_item_id and previous_zoho_item_id != zoho_item_id:
+        try:
+            await zoho_client.mark_item_inactive(previous_zoho_item_id)
+            logger.info(
+                "Zoho standard item cleanup: previous item marked inactive | variant_id=%s old_zoho_item_id=%s new_zoho_item_id=%s",
+                variant.id,
+                previous_zoho_item_id,
+                zoho_item_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Zoho standard item cleanup failed | variant_id=%s old_zoho_item_id=%s error=%s",
+                variant.id,
+                previous_zoho_item_id,
+                exc,
+            )
+
     if variant.identity_id:
         synced_item_ids_by_identity[variant.identity_id] = zoho_item_id
 
@@ -430,6 +450,7 @@ async def _sync_single_composite_variant(
     variant: ProductVariant,
     synced_item_ids_by_identity: dict[int, str],
 ) -> ZohoBulkSyncItemResult:
+    previous_zoho_item_id = variant.zoho_item_id
     component_rows = (
         await db.execute(
             select(BundleComponent)
@@ -509,6 +530,7 @@ async def _sync_single_composite_variant(
         rate=float(payload.get("rate", 0) or 0),
         description=payload.get("description", ""),
         component_items=component_items,
+        preferred_item_id=previous_zoho_item_id,
         **{k: v for k, v in payload.items() if k not in {"name", "sku", "rate", "description", "component_items"}},
     )
 
@@ -556,6 +578,24 @@ async def _sync_single_composite_variant(
     variant.zoho_item_id = composite_item_id
     variant.zoho_sync_status = ZohoSyncStatus.SYNCED
     variant.zoho_last_synced_at = datetime.now()
+
+    # If sync moved the link to a different Zoho item, retire the old one to prevent duplicates.
+    if previous_zoho_item_id and previous_zoho_item_id != composite_item_id:
+        try:
+            await zoho_client.mark_item_inactive(previous_zoho_item_id)
+            logger.info(
+                "Zoho composite cleanup: previous item marked inactive | variant_id=%s old_zoho_item_id=%s new_zoho_item_id=%s",
+                variant.id,
+                previous_zoho_item_id,
+                composite_item_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Zoho composite cleanup failed | variant_id=%s old_zoho_item_id=%s error=%s",
+                variant.id,
+                previous_zoho_item_id,
+                exc,
+            )
 
     await db.commit()
 

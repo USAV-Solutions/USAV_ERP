@@ -102,6 +102,7 @@ export const PURCHASING = {
   VENDOR: (id: number) => `/vendors/${id}`,
   PURCHASES: '/purchases',
   PURCHASE: (id: number) => `/purchases/${id}`,
+  IMPORT_ZOHO: '/purchases/import/zoho',
   MATCH_ITEM: (itemId: number) => `/purchases/items/${itemId}/match`,
   MARK_DELIVERED: (id: number) => `/purchases/${id}/mark-delivered`,
 }

@@ -124,3 +124,13 @@ class PurchaseOrderReceiveResponse(BaseModel):
     purchase_order_id: int
     created_inventory_item_ids: list[int] = Field(default_factory=list)
     deliver_status: PurchaseDeliverStatus
+
+
+class ZohoPurchaseImportResponse(BaseModel):
+    vendors_created: int = 0
+    vendors_updated: int = 0
+    purchase_orders_created: int = 0
+    purchase_orders_updated: int = 0
+    purchase_order_items_replaced: int = 0
+    source_vendors_seen: int = 0
+    source_purchase_orders_seen: int = 0

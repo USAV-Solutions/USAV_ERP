@@ -29,6 +29,7 @@ import {
   createPurchaseOrder,
   createVendor,
   getPurchaseOrder,
+  importPurchasesFromZoho,
   listPurchaseOrders,
   listVendors,
   markPurchaseDelivered,
@@ -159,6 +160,27 @@ export default function PurchasingManagement() {
     onError: () => setSnackbar({ open: true, msg: 'Failed to mark PO delivered.', severity: 'error' }),
   })
 
+  const importZohoMutation = useMutation({
+    mutationFn: importPurchasesFromZoho,
+    onSuccess: async (res) => {
+      await queryClient.invalidateQueries({ queryKey: ['vendors'] })
+      await queryClient.invalidateQueries({ queryKey: ['purchases'] })
+      if (selectedPoId) {
+        await queryClient.invalidateQueries({ queryKey: ['purchase', selectedPoId] })
+      }
+      setSnackbar({
+        open: true,
+        severity: 'success',
+        msg:
+          `Zoho import done: ${res.purchase_orders_created} PO created, ${res.purchase_orders_updated} PO updated, ` +
+          `${res.vendors_created} vendor created, ${res.vendors_updated} vendor updated.`,
+      })
+    },
+    onError: () => {
+      setSnackbar({ open: true, msg: 'Failed to import purchasing list from Zoho.', severity: 'error' })
+    },
+  })
+
   const activeReceipts = useMemo(() => {
     if (!selectedOrder) return []
     return selectedOrder.items.map((item) => {
@@ -199,6 +221,13 @@ export default function PurchasingManagement() {
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4">Purchasing</Typography>
         <Stack direction="row" spacing={1}>
+          <Button
+            variant="outlined"
+            onClick={() => importZohoMutation.mutate()}
+            disabled={importZohoMutation.isPending}
+          >
+            {importZohoMutation.isPending ? 'Importing...' : 'Import from Zoho'}
+          </Button>
           <Button startIcon={<Add />} variant="outlined" onClick={() => setCreateVendorOpen(true)}>
             Add Vendor
           </Button>

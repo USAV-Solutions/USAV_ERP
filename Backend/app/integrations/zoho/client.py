@@ -277,6 +277,7 @@ class ZohoClient:
         rate: float,
         description: Optional[str] = None,
         image_path: Optional[Path] = None,
+        preferred_item_id: Optional[str] = None,
         **extra_fields
     ) -> dict:
         """
@@ -292,6 +293,28 @@ class ZohoClient:
             "description": description or "",
             **extra_fields
         }
+
+        # Prefer updating the previously-linked Zoho item to avoid SKU-change duplicates.
+        if preferred_item_id:
+            try:
+                zoho_item = await self.update_item(preferred_item_id, item_data)
+                zoho_item_id = zoho_item.get("item_id")
+                if image_path and zoho_item_id:
+                    logger.info(
+                        "Zoho sync_item image upload | sku=%s zoho_item_id=%s image_path=%s",
+                        sku,
+                        zoho_item_id,
+                        image_path,
+                    )
+                    await self.upload_item_image(zoho_item_id, image_path)
+                return zoho_item
+            except Exception as exc:
+                logger.warning(
+                    "Zoho sync_item preferred update failed, falling back to SKU upsert | sku=%s preferred_item_id=%s error=%s",
+                    sku,
+                    preferred_item_id,
+                    exc,
+                )
         
         # Check if item exists
         existing = await self.get_item_by_sku(sku)
@@ -388,6 +411,7 @@ class ZohoClient:
         rate: float,
         component_items: list[dict[str, Any]],
         description: Optional[str] = None,
+        preferred_item_id: Optional[str] = None,
         **extra_fields,
     ) -> dict:
         """Create or update a composite item in Zoho by SKU."""
@@ -399,6 +423,18 @@ class ZohoClient:
             "component_items": component_items,
             **extra_fields,
         }
+
+        # Prefer updating the previously-linked Zoho composite record first.
+        if preferred_item_id:
+            try:
+                return await self.update_composite_item(preferred_item_id, composite_data)
+            except Exception as exc:
+                logger.warning(
+                    "Zoho sync_composite_item preferred update failed, falling back to SKU upsert | sku=%s preferred_item_id=%s error=%s",
+                    sku,
+                    preferred_item_id,
+                    exc,
+                )
 
         existing = await self.get_composite_item_by_sku(sku)
         if existing:
@@ -591,6 +627,20 @@ class ZohoClient:
         """Fetch a single purchase order by ID."""
         result = await self._request("GET", f"/purchaseorders/{purchase_order_id}")
         return result.get("purchaseorder", {})
+
+    async def list_purchase_orders(
+        self,
+        *,
+        page: int = 1,
+        per_page: int = 200,
+    ) -> List[dict]:
+        """List purchase orders with pagination."""
+        result = await self._request(
+            "GET",
+            "/purchaseorders",
+            params={"page": page, "per_page": per_page},
+        )
+        return result.get("purchaseorders", [])
 
     async def update_contact(self, contact_id: str, contact_data: dict) -> dict:
         """Update an existing contact in Zoho Inventory."""

@@ -90,3 +90,13 @@ export interface PurchaseOrderReceiveResponse {
   created_inventory_item_ids: number[]
   deliver_status: PurchaseDeliverStatus
 }
+
+export interface ZohoPurchaseImportResponse {
+  vendors_created: number
+  vendors_updated: number
+  purchase_orders_created: number
+  purchase_orders_updated: number
+  purchase_order_items_replaced: number
+  source_vendors_seen: number
+  source_purchase_orders_seen: number
+}

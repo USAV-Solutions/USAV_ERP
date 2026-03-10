@@ -1,11 +1,17 @@
 """API routes for purchasing module."""
+from datetime import date
+from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import AdminOrWarehouseUser
+from app.api.deps import AdminOrWarehouseUser, CurrentUser
 from app.core.database import get_db
+from app.integrations.zoho.client import ZohoClient
+from app.models import PurchaseDeliverStatus
+from app.models.purchasing import PurchaseOrderItem
 from app.modules.purchasing.dependencies import (
     get_purchase_order_item_repo,
     get_purchase_order_repo,
@@ -22,6 +28,7 @@ from app.modules.purchasing.schemas import (
     VendorCreate,
     VendorResponse,
     VendorUpdate,
+    ZohoPurchaseImportResponse,
 )
 from app.modules.purchasing.service import PurchasingService
 from app.repositories.purchasing import (
@@ -31,6 +38,33 @@ from app.repositories.purchasing import (
 )
 
 router = APIRouter(tags=["Purchasing"])
+
+
+def _to_decimal(value: object, default: str = "0") -> Decimal:
+    try:
+        return Decimal(str(value if value is not None else default))
+    except Exception:
+        return Decimal(default)
+
+
+def _to_date(value: object) -> date:
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            return date.fromisoformat(value[:10])
+        except ValueError:
+            pass
+    return date.today()
+
+
+def _map_zoho_po_status(status_raw: object) -> PurchaseDeliverStatus:
+    status_text = str(status_raw or "").strip().lower()
+    if status_text in {"billed", "partially_billed"}:
+        return PurchaseDeliverStatus.BILLED
+    if status_text in {"closed", "received"}:
+        return PurchaseDeliverStatus.DELIVERED
+    return PurchaseDeliverStatus.CREATED
 
 
 @router.get("/vendors", response_model=list[VendorResponse])
@@ -183,3 +217,146 @@ async def mark_purchase_order_delivered(
         created_inventory_item_ids=[row.id for row in created_rows],
         deliver_status=po.deliver_status,
     )
+
+
+@router.post("/purchases/import/zoho", response_model=ZohoPurchaseImportResponse)
+async def import_purchasing_from_zoho(
+    _current_user: CurrentUser,
+    max_pages: Annotated[int, Query(ge=1, le=50)] = 10,
+    per_page: Annotated[int, Query(ge=1, le=200)] = 200,
+    vendor_repo: VendorRepository = Depends(get_vendor_repo),
+    po_repo: PurchaseOrderRepository = Depends(get_purchase_order_repo),
+    po_item_repo: PurchaseOrderItemRepository = Depends(get_purchase_order_item_repo),
+    db: AsyncSession = Depends(get_db),
+):
+    """Import vendors and purchase orders from Zoho into local purchasing tables."""
+    zoho = ZohoClient()
+    result = ZohoPurchaseImportResponse()
+
+    vendors_by_zoho_id: dict[str, int] = {}
+    page = 1
+    while page <= max_pages:
+        contacts = await zoho.list_contacts(page=page, per_page=per_page)
+        if not contacts:
+            break
+
+        vendor_contacts = [
+            c for c in contacts if str(c.get("contact_type", "")).strip().lower() == "vendor"
+        ]
+        result.source_vendors_seen += len(vendor_contacts)
+
+        for contact in vendor_contacts:
+            zoho_id = str(contact.get("contact_id") or "").strip()
+            name = str(contact.get("contact_name") or "").strip()
+            if not zoho_id and not name:
+                continue
+
+            existing = await vendor_repo.get_by_field("zoho_id", zoho_id) if zoho_id else None
+            if existing is None and name:
+                existing = await vendor_repo.get_by_field("name", name)
+
+            payload = {
+                "name": name or f"Zoho Vendor {zoho_id}",
+                "email": contact.get("email"),
+                "phone": contact.get("phone") or contact.get("mobile"),
+                "address": contact.get("billing_address") and str(contact.get("billing_address")),
+                "is_active": True,
+                "zoho_id": zoho_id or None,
+            }
+
+            if existing is None:
+                created = await vendor_repo.create(payload)
+                await db.flush()
+                result.vendors_created += 1
+                if created.zoho_id:
+                    vendors_by_zoho_id[created.zoho_id] = created.id
+            else:
+                await vendor_repo.update(existing, payload)
+                await db.flush()
+                result.vendors_updated += 1
+                if existing.zoho_id:
+                    vendors_by_zoho_id[existing.zoho_id] = existing.id
+
+        if len(contacts) < per_page:
+            break
+        page += 1
+
+    page = 1
+    while page <= max_pages:
+        purchase_orders = await zoho.list_purchase_orders(page=page, per_page=per_page)
+        if not purchase_orders:
+            break
+
+        result.source_purchase_orders_seen += len(purchase_orders)
+
+        for zoho_po in purchase_orders:
+            zoho_po_id = str(zoho_po.get("purchaseorder_id") or "").strip()
+            po_number = str(zoho_po.get("purchaseorder_number") or "").strip()
+            vendor_zoho_id = str(zoho_po.get("vendor_id") or "").strip()
+
+            if not po_number:
+                continue
+
+            vendor_id = vendors_by_zoho_id.get(vendor_zoho_id)
+            if vendor_id is None and vendor_zoho_id:
+                vendor_obj = await vendor_repo.get_by_field("zoho_id", vendor_zoho_id)
+                if vendor_obj is not None:
+                    vendor_id = vendor_obj.id
+            if vendor_id is None:
+                continue
+
+            existing_po = await po_repo.get_by_field("zoho_id", zoho_po_id) if zoho_po_id else None
+            if existing_po is None:
+                existing_po = await po_repo.get_by_field("po_number", po_number)
+
+            po_payload = {
+                "po_number": po_number,
+                "vendor_id": vendor_id,
+                "deliver_status": _map_zoho_po_status(zoho_po.get("status") or zoho_po.get("purchaseorder_status")),
+                "order_date": _to_date(zoho_po.get("date") or zoho_po.get("purchaseorder_date")),
+                "expected_delivery_date": _to_date(zoho_po.get("expected_delivery_date")) if zoho_po.get("expected_delivery_date") else None,
+                "total_amount": _to_decimal(zoho_po.get("total") or zoho_po.get("total_amount") or 0),
+                "currency": str(zoho_po.get("currency_code") or "USD")[:3],
+                "notes": zoho_po.get("notes") or zoho_po.get("terms"),
+                "zoho_id": zoho_po_id or None,
+            }
+
+            if existing_po is None:
+                local_po = await po_repo.create(po_payload)
+                await db.flush()
+                result.purchase_orders_created += 1
+            else:
+                local_po = await po_repo.update(existing_po, po_payload)
+                await db.flush()
+                result.purchase_orders_updated += 1
+
+            # Replace all local line-items with Zoho line-items for deterministic import.
+            await db.execute(
+                delete(PurchaseOrderItem).where(PurchaseOrderItem.purchase_order_id == local_po.id)
+            )
+
+            for line in zoho_po.get("line_items", []) or []:
+                qty = int(line.get("quantity") or 0)
+                unit_price = _to_decimal(line.get("rate") or line.get("item_total") or 0)
+                total_price = _to_decimal(line.get("item_total") or (unit_price * qty))
+                if qty <= 0:
+                    continue
+
+                await po_item_repo.create(
+                    {
+                        "purchase_order_id": local_po.id,
+                        "variant_id": None,
+                        "external_item_name": str(line.get("name") or line.get("item_name") or "Unknown item")[:255],
+                        "quantity": qty,
+                        "unit_price": unit_price,
+                        "total_price": total_price,
+                    }
+                )
+                result.purchase_order_items_replaced += 1
+
+        if len(purchase_orders) < per_page:
+            break
+        page += 1
+
+    await db.commit()
+    return result

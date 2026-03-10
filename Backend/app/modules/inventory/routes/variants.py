@@ -201,6 +201,7 @@ async def update_variant(
 ):
     """Update a product variant (supports both PUT and PATCH)."""
     repo = ProductVariantRepository(db)
+    identity_repo = ProductIdentityRepository(db)
     variant = await repo.get(variant_id)
     
     if not variant:
@@ -241,6 +242,15 @@ async def update_variant(
                 target_color,
                 target_condition.value if hasattr(target_condition, "value") else target_condition,
             )
+
+        # Any local edit means Zoho copy is stale unless this is still a first-time pending item.
+        keep_pending = (
+            variant.zoho_sync_status == ZohoSyncStatus.PENDING
+            and not variant.zoho_item_id
+        )
+        if not keep_pending:
+            update_data["zoho_sync_status"] = ZohoSyncStatus.DIRTY
+            update_data["zoho_sync_error"] = None
 
         variant = await repo.update(variant, update_data)
     

@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import AdminUser
 from app.core.config import settings
 from app.core.database import get_db
-from app.models.entities import ProductIdentity, ProductVariant
+from app.models.entities import ProductIdentity, ProductVariant, ZohoSyncStatus
 
 logger = logging.getLogger(__name__)
 
@@ -205,6 +205,7 @@ def _build_public_thumbnail_url(
 async def _recompute_thumbnail_url(
     db: AsyncSession,
     context: VariantImageContext,
+    mark_sync_dirty: bool = False,
 ) -> Optional[str]:
     """Recompute and persist thumbnail_url based on current images."""
     variant_dir = _find_variant_dir(context)
@@ -223,6 +224,18 @@ async def _recompute_thumbnail_url(
         .where(ProductVariant.id == context.variant_id)
         .values(thumbnail_url=thumbnail_url)
     )
+
+    if mark_sync_dirty:
+        variant = await db.get(ProductVariant, context.variant_id)
+        if variant is not None:
+            keep_pending = (
+                variant.zoho_sync_status == ZohoSyncStatus.PENDING
+                and not variant.zoho_item_id
+            )
+            if not keep_pending:
+                variant.zoho_sync_status = ZohoSyncStatus.DIRTY
+                variant.zoho_sync_error = None
+
     await db.commit()
     context.thumbnail_url = thumbnail_url
 
@@ -689,7 +702,7 @@ async def upload_sku_images(
     if not saved_files:
         raise HTTPException(status_code=400, detail="No valid files uploaded")
 
-    await _recompute_thumbnail_url(db, context)
+    await _recompute_thumbnail_url(db, context, mark_sync_dirty=True)
     return _build_sku_images_response(context)
 
 
@@ -720,7 +733,7 @@ async def delete_sku_image(
         raise HTTPException(status_code=404, detail=f"Image not found: {filename}")
 
     file_path.unlink()
-    await _recompute_thumbnail_url(db, context)
+    await _recompute_thumbnail_url(db, context, mark_sync_dirty=True)
 
     remaining = [
         f.name for f in listing_dir.iterdir()
@@ -757,7 +770,7 @@ async def clear_sku_listing(
             entry.unlink()
             deleted += 1
 
-    await _recompute_thumbnail_url(db, context)
+    await _recompute_thumbnail_url(db, context, mark_sync_dirty=True)
     return {
         "cleared": deleted,
         "thumbnail_url": context.thumbnail_url,
