@@ -15,8 +15,6 @@ import {
   Grid,
   Card,
   CardContent,
-  TextField,
-  InputAdornment,
   Chip,
   Table,
   TableBody,
@@ -44,7 +42,6 @@ import {
   LinearProgress,
 } from '@mui/material'
 import {
-  Search,
   Refresh,
   Warning,
   KeyboardArrowDown,
@@ -71,6 +68,8 @@ import OrderSyncButton from '../components/orders/OrderSyncButton'
 import AdminDateRangeSync from '../components/orders/AdminDateRangeSync'
 import OrderItemsPanel from '../components/orders/OrderItemsPanel'
 import { useAuth } from '../hooks/useAuth'
+import SearchField from '../components/common/SearchField'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
 
 // ── Label maps ───────────────────────────────────────────────────────
 
@@ -143,7 +142,8 @@ export default function OrdersManagement() {
   const [platformFilter, setPlatformFilter] = useState<OrderPlatform | ''>('')
   const [statusFilter, setStatusFilter] = useState<OrderStatus | ''>('')
   const [itemStatusFilter, setItemStatusFilter] = useState<OrderItemStatus | ''>('')
-  const [search, setSearch] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+  const debouncedSearch = useDebouncedValue(searchInput, 250)
 
   // Expanded order rows
   const [expandedOrderId, setExpandedOrderId] = useState<number | null>(null)
@@ -179,7 +179,7 @@ export default function OrdersManagement() {
     data: ordersData,
     isLoading: ordersLoading,
   } = useQuery<OrderListResponse>({
-    queryKey: ['orders', page, rowsPerPage, platformFilter, statusFilter, itemStatusFilter, search],
+    queryKey: ['orders', page, rowsPerPage, platformFilter, statusFilter, itemStatusFilter, debouncedSearch],
     queryFn: () =>
       listOrders({
         skip: page * rowsPerPage,
@@ -187,7 +187,7 @@ export default function OrdersManagement() {
         platform: platformFilter || undefined,
         status: statusFilter || undefined,
         item_status: itemStatusFilter || undefined,
-        search: search || undefined,
+        search: debouncedSearch || undefined,
       }),
   })
 
@@ -318,7 +318,7 @@ export default function OrdersManagement() {
     setPlatformFilter('')
     setStatusFilter('')
     setItemStatusFilter('')
-    setSearch('')
+    setSearchInput('')
     setPage(0)
   }
 
@@ -457,21 +457,14 @@ export default function OrdersManagement() {
       <Paper sx={{ p: 2, mb: 2 }}>
         <Grid container spacing={2} alignItems="center">
           <Grid item xs={12} md={3}>
-            <TextField
+            <SearchField
               fullWidth
               size="small"
               placeholder="Search order ID or customer..."
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value)
+              value={searchInput}
+              onChange={(value) => {
+                setSearchInput(value)
                 setPage(0)
-              }}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <Search fontSize="small" />
-                  </InputAdornment>
-                ),
               }}
             />
           </Grid>

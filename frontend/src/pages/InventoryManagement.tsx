@@ -7,7 +7,6 @@ import {
   Snackbar,
   Paper,
   TextField,
-  InputAdornment,
   ToggleButton,
   ToggleButtonGroup,
   Chip,
@@ -30,7 +29,6 @@ import {
 } from '@mui/material'
 import {
   Add,
-  Search,
   ViewList,
   ViewModule,
   ExpandMore,
@@ -47,6 +45,9 @@ import CreateProductDialog from '../components/inventory/CreateProductDialog'
 import ProductThumbnail from '../components/inventory/ProductThumbnail'
 import ImageGalleryModal from '../components/inventory/ImageGalleryModal'
 import VariantImageDialog from '../components/inventory/VariantImageDialog'
+import SearchField from '../components/common/SearchField'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
+import { compileSearchMatcher } from '../utils/search'
 
 type ViewMode = 'list' | 'grouped'
 
@@ -287,7 +288,8 @@ function ExpandedRow({
 
 export default function InventoryManagement() {
   const [viewMode, setViewMode] = useState<ViewMode>('list')
-  const [searchQuery, setSearchQuery] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+  const debouncedSearch = useDebouncedValue(searchInput, 200)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
   const [page, setPage] = useState(0)
@@ -563,23 +565,17 @@ export default function InventoryManagement() {
 
   // Filter by search query
   const filteredVariants = useMemo(() => {
-    if (!searchQuery.trim()) return enhancedVariants
-    
-    const query = searchQuery.toLowerCase()
+    const matchesSearch = compileSearchMatcher(debouncedSearch)
     return enhancedVariants.filter((variant) => {
-      const name = variant.identity?.family?.base_name?.toLowerCase() || ''
-          const variantName = variant.variant_name?.toLowerCase() || ''
-      const sku = variant.full_sku?.toLowerCase() || ''
-      const upisH = variant.identity?.generated_upis_h?.toLowerCase() || ''
-      const brand = variant.identity?.family?.brand?.name?.toLowerCase() || ''
-      
-      return name.includes(query) || 
-            variantName.includes(query) ||
-             sku.includes(query) || 
-             upisH.includes(query) ||
-             brand.includes(query)
+      return matchesSearch([
+        variant.identity?.family?.base_name,
+        variant.variant_name,
+        variant.full_sku,
+        variant.identity?.generated_upis_h,
+        variant.identity?.family?.brand?.name,
+      ])
     })
-  }, [enhancedVariants, searchQuery])
+  }, [enhancedVariants, debouncedSearch])
 
   // Group variants by Product Family
   const groupedData: GroupedItem[] = useMemo(() => {
@@ -687,19 +683,12 @@ export default function InventoryManagement() {
 
       <Paper sx={{ p: 2, mb: 3 }}>
         <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-          <TextField
+          <SearchField
             placeholder="Search by name, SKU, or brand..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            value={searchInput}
+            onChange={setSearchInput}
             size="small"
             sx={{ flexGrow: 1, minWidth: 300 }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Search />
-                </InputAdornment>
-              ),
-            }}
           />
           <ToggleButtonGroup
             value={viewMode}

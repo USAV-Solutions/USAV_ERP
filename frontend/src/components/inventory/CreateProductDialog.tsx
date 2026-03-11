@@ -39,6 +39,7 @@ import {
   ProductFamily,
   Variant,
 } from '../../types/inventory'
+import { compileSearchMatcher } from '../../utils/search'
 
 type CreationMode = 'new' | 'existing'
 
@@ -440,10 +441,14 @@ export default function CreateProductDialog({ open, onClose, onCreated }: Create
   }
 
   // Filter identities for component search
+  const componentSearchMatcher = useMemo(() => compileSearchMatcher(componentSearchQuery), [componentSearchQuery])
   const filteredIdentities = (identitiesData || []).filter((identity: ProductIdentity) => {
     if (!componentSearchQuery.trim()) return false
-    const query = componentSearchQuery.toLowerCase()
-    return identity.generated_upis_h?.toLowerCase().includes(query)
+    return componentSearchMatcher([
+      identity.generated_upis_h,
+      identity.type,
+      identity.id,
+    ])
   })
 
   // Filter parent products (only Products, not Parts or Bundles) - use enhanced identities with family data

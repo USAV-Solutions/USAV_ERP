@@ -40,6 +40,7 @@ import {
   rejectItem,
   searchVariants,
 } from '../../api/orders'
+import { useDebouncedValue } from '../../hooks/useDebouncedValue'
 import StatusBadge from './StatusBadge'
 import type {
   OrderDetail,
@@ -133,13 +134,14 @@ export default function OrderItemsPanel({ orderId }: OrderItemsPanelProps) {
 function ItemRow({ item, onAction }: { item: OrderItemDetail; onAction: () => void }) {
   const [selectedVariant, setSelectedVariant] = useState<VariantSearchResult | null>(null)
   const [searchInput, setSearchInput] = useState('')
+  const debouncedSearchInput = useDebouncedValue(searchInput, 200)
   const [showMatch, setShowMatch] = useState(false)
 
   // Variant search query
   const { data: variantOptions = [], isFetching: searchLoading } = useQuery<VariantSearchResult[]>({
-    queryKey: ['variantSearch', searchInput],
-    queryFn: () => searchVariants(searchInput),
-    enabled: searchInput.length >= 1,
+    queryKey: ['variantSearch', debouncedSearchInput],
+    queryFn: () => searchVariants(debouncedSearchInput),
+    enabled: debouncedSearchInput.length >= 1,
     staleTime: 30_000,
   })
 

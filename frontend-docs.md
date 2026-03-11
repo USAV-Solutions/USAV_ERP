@@ -212,23 +212,23 @@ frontend/
   - `LISTINGS` – list, CRUD, platform-ref lookups, pending/error filters, sync-status marking.
   - `IMAGES` – per-SKU images, thumbnails, batch thumbnails, debug backfill/counters.
   - `ZOHO` – item sync, readiness check, progress/start/stop for background sync job.
-  - `SYNC` – force-sync endpoints for items, orders, customers (two-way Zoho engine).
-  - `ORDERS` – CRUD, sync/sync-range/sync-status/reset, SKU resolution (match/confirm/reject).
-  - `PURCHASING` – vendors, purchases, item matching, and mark-delivered endpoints.
+  - `SYNC` – force-sync endpoints for items, orders, purchases, and customers (two-way Zoho engine).
+  - `ORDERS` – CRUD, shipping-status update endpoint (`/orders/{id}/shipping`), sync/sync-range/sync-status/reset, SKU resolution (match/confirm/reject).
+  - `PURCHASING` – vendors, purchases, add PO line items (`/purchases/{id}/items`), Zoho import (`/purchases/import/zoho`), item matching, and mark-delivered endpoints.
 
 ---
 
 ### `purchasing.ts` (Path: `/frontend/src/api/purchasing.ts`)
 * **Purpose:** Typed API service functions for Vendor and Purchase Order workflows.
 * **Dependencies & Props:** Imports `axiosClient`, `PURCHASING` endpoints, and purchasing types from `types/purchasing.ts`.
-* **Mechanism / Render Logic:** Exports async functions for listing/creating/updating vendors, listing/creating/getting purchase orders, matching PO items to variants, and marking POs delivered with receipt payloads.
+* **Mechanism / Render Logic:** Exports async functions for listing/creating/updating vendors, listing/creating/getting purchase orders (including paged listing), adding PO line items, matching PO items to variants, marking POs delivered with receipt payloads, and importing purchasing data from Zoho.
 
 ---
 
 ### `purchasing.ts` (Path: `/frontend/src/types/purchasing.ts`)
 * **Purpose:** TypeScript interfaces mirroring backend purchasing schemas.
 * **Dependencies & Props:** None – pure type declarations.
-* **Mechanism / Render Logic:** Defines vendor, purchase order, purchase order item, delivery status enums, item-match request, receipt payload, and mark-delivered response types.
+* **Mechanism / Render Logic:** Defines vendor, purchase order, purchase order item (including optional `variant_sku` display field), delivery status enums, reusable PO item create payload, item-match request, receipt payload, mark-delivered response types, and Zoho purchasing import response types.
 
 ---
 
@@ -236,7 +236,7 @@ frontend/
 * **Purpose:** Typed API service functions for the Orders module.
 * **Dependencies & Props:** Imports `axiosClient`, `ORDERS` and `CATALOG` endpoints, and order/variant types from `types/orders.ts`.
 * **Mechanism / Render Logic:** Exports async functions organized into three groups:
-  1. **Order CRUD** – `listOrders` (with query-string filters for skip, limit, platform, status, item_status, search), `getOrder`, `updateOrderStatus`.
+  1. **Order CRUD** – `listOrders` (with query-string filters for skip, limit, platform, status, item_status, search), `getOrder`, `updateOrderStatus`, `updateShippingStatus`.
   2. **Sync** – `syncOrders` (incremental), `syncOrdersRange` (admin date-range), `getSyncStatus`, `resetSyncState`.
   3. **SKU Resolution** – `matchItem`, `confirmItem`, `rejectItem` (POST to items endpoints).
   4. **Variant Search** – `searchVariants` calls `GET /variants/search?q=...` for the resolution autocomplete.
@@ -246,7 +246,7 @@ frontend/
 ### `sync.ts` (Path: `/frontend/src/api/sync.ts`)
 * **Purpose:** API wrappers for the two-way Zoho force-sync engine.
 * **Dependencies & Props:** Imports `axiosClient` and `SYNC` endpoints.
-* **Mechanism / Render Logic:** Three functions (`forceSyncItem`, `forceSyncOrder`, `forceSyncCustomer`) each POST to the corresponding endpoint and return a `ForceSyncResponse` with `{ status: 'queued', entity, id }`.
+* **Mechanism / Render Logic:** Four functions (`forceSyncItem`, `forceSyncOrder`, `forceSyncPurchase`, `forceSyncCustomer`) each POST to the corresponding endpoint and return a `ForceSyncResponse` with `{ status: 'queued', entity, id }`.
 
 ---
 
@@ -275,9 +275,9 @@ frontend/
 * **Purpose:** TypeScript interfaces mirroring the backend Pydantic schemas for orders and sync.
 * **Dependencies & Props:** None – pure type declarations.
 * **Mechanism / Render Logic:** Defines:
-  - **Enums:** `OrderPlatform` (7 values including ZOHO, MANUAL), `OrderStatus` (9 states), `OrderItemStatus` (5 states), `IntegrationSyncStatus`, `ZohoSyncStatus`.
+  - **Enums:** `OrderPlatform` (7 values including ZOHO, MANUAL), `OrderStatus` (9 states), `ShippingStatus` (6 fulfilment states), `OrderItemStatus` (5 states), `IntegrationSyncStatus`, `ZohoSyncStatus`.
   - **Order items:** `OrderItemBrief`, `OrderItemDetail`, `VariantSearchResult`, `OrderItemMatchRequest`, `OrderItemConfirmRequest`.
-  - **Order headers:** `OrderBrief` (list row), `OrderDetail` (full record with address, financials, items), `OrderListResponse` (paginated), `OrderStatusUpdate`.
+  - **Order headers:** `OrderBrief` (list row, includes `shipping_status`), `OrderDetail` (full record with address, financials, items, and `shipping_status`), `OrderListResponse` (paginated), `OrderStatusUpdate`, `ShippingStatusUpdate`.
   - **Sync:** `IntegrationStateResponse`, `SyncRequest`, `SyncRangeRequest`, `SyncResponse`, `SyncStatusResponse`.
 
 ---
@@ -542,7 +542,7 @@ frontend/
 
 ### `OrdersManagement.tsx` (Path: `/frontend/src/pages/OrdersManagement.tsx`)
 * **Purpose:** The main orders management page. Displays sync status, filterable order list, expandable order items, and Zoho sync capabilities.
-* **Dependencies & Props:** Uses `listOrders`, `getSyncStatus`, `updateOrderStatus` from `api/orders.ts`, `forceSyncOrder` from `api/sync.ts`. Composes `OrderSyncButton`, `AdminDateRangeSync`, and `OrderItemsPanel` components. Sync status auto-refreshes every 15 seconds.
+* **Dependencies & Props:** Uses `listOrders`, `getSyncStatus`, `updateOrderStatus`, `updateShippingStatus` from `api/orders.ts`, `forceSyncOrder` from `api/sync.ts`. Composes `OrderSyncButton`, `AdminDateRangeSync`, and `OrderItemsPanel` components. Sync status auto-refreshes every 15 seconds.
 * **Mechanism / Render Logic:**
   - **Header actions:** Refresh button, Admin Date-Range Sync (ADMIN), "Sync matched to Zoho" bulk button (ADMIN), Order Sync Button.
   - **Summary cards:** Total Orders, Unmatched Items (red), Matched Items (blue), Platforms (chip list with status-based coloring).
@@ -551,7 +551,7 @@ frontend/
   - **Orders table** (server-paginated):
     - Columns: Expand toggle, Order # (external number), Platform (chip), Customer, Unmatched count (red chip if > 0), Total amount, Shipping Status (inline dropdown for direct status updates), Zoho Sync status (chip), Ordered date, Zoho sync button (ADMIN, triggers `forceSyncOrder`).
     - **Expandable rows:** Clicking a row expands to show `OrderItemsPanel` with full line-item details and match/confirm/reject actions.
-  - **Inline status update:** Each row has a `<Select>` for the shipping status that immediately patches the order.
+  - **Inline status update:** Shipping status updates use a dedicated mutation (`PATCH /orders/{id}/shipping`) with its own loading state and feedback message that indicates Zoho sync is queued.
   - **Bulk Zoho sync dialog:** Fetches all orders (up to 2000), filters to those with 0 unmatched items, and sequentially queues each for Zoho sync. Shows a progress bar, success/fail counts, and error messages.
   - **Feedback:** Snackbar notifications for force-sync success/failure.
 
@@ -563,7 +563,9 @@ frontend/
 * **Mechanism / Render Logic:**
   - **Vendor actions:** Create vendor dialog (name/email/phone/address).
   - **PO actions:** Create PO dialog (PO number, vendor, dates, total, notes).
-  - **PO list/detail:** Split layout with selectable PO table and detail panel.
+  - **PO list/detail:** Supports paged loading and expanded/collapsible table rows for line-item visibility.
+  - **Zoho import:** Includes bulk import trigger for vendors + purchase orders from Zoho with progress and result feedback.
+  - **PO force-sync:** Supports per-purchase force-sync to Zoho via `forceSyncPurchase`.
   - **Item matching:** Per-line-item `variant_id` input and match action for `UNMATCHED` rows.
   - **Mark delivered:** Admin/Warehouse action opens a receive dialog where each PO item receives quantity, optional serial numbers, and location code. Submitting calls `/purchases/{id}/mark-delivered`.
   - **Feedback:** Mutation results shown via Snackbar and query invalidation refreshes PO/vendor data.
@@ -591,3 +593,7 @@ frontend/
   - **Toggle active:** Calls activate/deactivate endpoints; changes icon color between green check and grey cancel.
   - **Mutations:** Separate mutations for create, update, change password, delete, and toggle active, all invalidating the `['users']` cache.
   - **Notifications:** Success/error Snackbar for all operations.
+
+---
+
+*Document generated: 2026-03-11*

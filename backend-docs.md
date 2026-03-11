@@ -62,6 +62,7 @@ Request → FastAPI Route → Depends(get_db) → AsyncSession
 - Sessions are managed via `async_session_factory` and `get_db()` dependency.
 - Connection pooling: configurable `pool_size` (default 5) + `max_overflow` (default 10), with `pool_pre_ping` and 1-hour recycle.
 - The `BaseRepository` generic class provides CRUD, pagination, count, and multi-delete operations inherited by all domain repositories.
+- Docker Compose defaults in this project currently disable automatic Zoho inbound/outbound sync loops via `ZOHO_AUTO_OUTBOUND_SYNC_ENABLED=false` and `ZOHO_AUTO_INBOUND_SYNC_ENABLED=false`.
 
 ---
 
@@ -196,7 +197,9 @@ Backend/
 │       ├── 20260225_..._0008_add_variant_name.py
 │       ├── 20260226_..._0009_add_customer_and_zoho_sync.py
 │       ├── 20260303_..._0010_rename_order_table.py
-│       └── 20260307_..._0011_add_order_zoho_sync_status.py
+│       ├── 20260307_..._0011_add_order_zoho_sync_status.py
+│       ├── 20260310_..._0012_add_purchasing_module.py
+│       └── 20260311_..._0013_add_shipping_status.py
 │
 ├── scripts/
 │   ├── backfill_variant_name_from_listings.py   # Populate variant_name from listings
@@ -552,6 +555,7 @@ Backend/
   - `GET /variants/{id}` — Returns variant with loaded platform listings.
   - `GET /variants/sku/{full_sku}` — SKU-based lookup.
   - `PUT/PATCH /variants/{id}` — Updates mutable variant fields (`variant_name`, `color_code`, `condition_code`, `is_active`). If color/condition changes, the API validates identity-level uniqueness and recomputes `full_sku`.
+  - Local variant edits mark `zoho_sync_status=DIRTY` (except initial pending variants without a Zoho item), so Zoho outbound sync can reconcile edits.
   - `DELETE /variants/{id}` — Soft-delete archive: sets `is_active=false`, renames SKU to `D-{old_sku}` (collision-safe suffix fallback), and clears `color_code`/`condition_code` to free identity+color+condition reuse.
   - `POST /variants/{id}/deactivate` — Soft-delete (sets `is_active=False`).
   - `GET /variants/pending-sync/zoho` — Returns all variants where `zoho_sync_status != SYNCED`.
@@ -628,14 +632,14 @@ Backend/
   - `_sorted_images(listing_path)` — Returns images sorted lexicographically, filtering by supported formats.
   - `_resolve_or_backfill_thumbnail_url(db, sku)` — Computes thumbnail URL and backfills `thumbnail_url` column in DB on first access.
   - `_ensure_listing_dir(context, listing_index)` — Ensures destination listing folder exists before writes.
-  - `_recompute_thumbnail_url(db, context)` — Recomputes and persists thumbnail URL after image mutations.
+  - `_recompute_thumbnail_url(db, context, mark_sync_dirty=False)` — Recomputes and persists thumbnail URL after image mutations; can also mark variant Zoho sync as DIRTY.
   - `GET /images/{sku}` — Returns image metadata (paths, count, thumbnail URL) for a given SKU.
   - `GET /images/{sku}/thumbnail` — Resolves thumbnail and redirects to direct static `/product-images/...` URL.
   - `GET /images/{sku}/file/{filename}` — Serves a specific image from the best listing.
   - `GET /images/batch/thumbnails` — Batch thumbnail URL resolution for multiple SKUs.
-  - `POST /images/{sku}/upload` — Multipart upload (`files[]`, `listing_index`, `replace`) that writes files to disk.
-  - `DELETE /images/{sku}/listing/{listing_index}/file/{filename}` — Deletes one image and recomputes thumbnail.
-  - `POST /images/{sku}/listing/{listing_index}/clear` — Deletes all images in listing and recomputes thumbnail.
+  - `POST /images/{sku}/upload` — Multipart upload (`files[]`, `listing_index`, `replace`) that writes files to disk; thumbnail recompute marks variant Zoho sync DIRTY.
+  - `DELETE /images/{sku}/listing/{listing_index}/file/{filename}` — Deletes one image and recomputes thumbnail (marks Zoho sync DIRTY).
+  - `POST /images/{sku}/listing/{listing_index}/clear` — Deletes all images in listing and recomputes thumbnail (marks Zoho sync DIRTY).
   - `POST /images/debug/backfill-thumbnails` / `GET /images/debug/counters` — Admin/debug maintenance endpoints.
 
 ---
@@ -666,6 +670,7 @@ Backend/
   - `_load_target_variants(db, data)` — Loads variants for sync (optionally filtered, force-resync, or unsynced-only).
   - `_resolve_sync_image_paths(variant)` — Determines which image files exist on disk for a variant.
   - `_build_item_payload(variant)` — Constructs Zoho Inventory item payload from variant data.
+  - Standard/composite sync paths prefer updating existing linked Zoho IDs first (`preferred_item_id`) and attempt to inactivate old Zoho records when linkage changes.
   - **Endpoints:**
     - `POST /zoho/sync-single` — Synchronises a single variant to Zoho (create/update) with optional image upload and composite item handling.
     - `POST /zoho/sync-bulk` — Queues async bulk sync as a background task. Returns `job_id` for polling.
@@ -821,15 +826,16 @@ Backend/
   - Referenced by: order routes, service, repositories, sync engine.
 * **Mechanism / Core Logic:**
 
-  **Enums (4):**
+  **Enums (5):**
   - `OrderPlatform` — AMAZON, EBAY_MEKONG, EBAY_USAV, EBAY_DRAGON, ECWID, ZOHO, MANUAL.
   - `OrderStatus` — PENDING, PROCESSING, READY_TO_SHIP, SHIPPED, DELIVERED, CANCELLED, REFUNDED, ON_HOLD, ERROR.
+  - `ShippingStatus` — PENDING, ON_HOLD, CANCELLED, PACKED, SHIPPING, DELIVERED.
   - `OrderItemStatus` — UNMATCHED, MATCHED, ALLOCATED, SHIPPED, CANCELLED.
   - `IntegrationSyncStatus` — IDLE, SYNCING, ERROR.
 
   **IntegrationState** — Table `integration_state`. One row per platform. Fields: `platform_name` (unique), `last_successful_sync`, `current_status` (IDLE/SYNCING/ERROR), `last_error_message`. Used as the sync lock for the Safe Sync algorithm.
 
-  **Order** — Table `orders`. Uses `ZohoSyncMixin`. Fields: `platform`, `external_order_id` (unique per platform), `external_order_number`, `status`, `zoho_sync_status`, `customer_id` (FK→Customer), denormalised `customer_name/email`, full shipping address, financials (`subtotal_amount`, `tax_amount`, `shipping_amount`, `total_amount`, `currency`), timestamps (`ordered_at`, `shipped_at`), tracking (`tracking_number`, `carrier`), `platform_data` (JSONB raw data), `processing_notes`, `error_message`. Relationships: `customer`, `items`.
+  **Order** — Table `orders`. Uses `ZohoSyncMixin`. Fields: `platform`, `external_order_id` (unique per platform), `external_order_number`, `status`, `shipping_status`, `zoho_sync_status`, `customer_id` (FK→Customer), denormalised `customer_name/email`, full shipping address, financials (`subtotal_amount`, `tax_amount`, `shipping_amount`, `total_amount`, `currency`), timestamps (`ordered_at`, `shipped_at`), tracking (`tracking_number`, `carrier`), `platform_data` (JSONB raw data), `processing_notes`, `error_message`. Relationships: `customer`, `items`.
 
   **OrderItem** — Table `order_item`. Fields: `order_id` (FK→Order), `external_item_id`, `external_sku`, `external_asin`, `variant_id` (FK→ProductVariant, nullable = SKU matching workspace), `allocated_inventory_id` (FK→InventoryItem), `status` (UNMATCHED→MATCHED→ALLOCATED→SHIPPED), `item_name`, `quantity`, `unit_price`, `total_price`, `item_metadata` (JSONB), `matching_notes`. Relationships: `order`, `variant`, `allocated_inventory`.
 
@@ -856,6 +862,7 @@ Backend/
   - `GET /orders` — Paginated dashboard with filters: platform, status, item_status (e.g. UNMATCHED), free-text search.
   - `GET /orders/{order_id}` — Full order detail with all line items.
   - `PATCH /orders/{order_id}` — Update order status and/or processing notes.
+  - `PATCH /orders/{order_id}/shipping` — Update shipping/fulfilment status (with optional tracking/carrier/notes) and mark Zoho sync dirty when shipping status changes.
 
   **SKU Resolution:**
   - `POST /orders/items/{item_id}/match` — Manual "Match & Learn": links order item → product variant. If `learn=True` (default), also creates a `PlatformListing` row for future auto-matching.
@@ -950,13 +957,14 @@ Backend/
 
 * **Purpose:** Manual "Force Sync" endpoints for on-demand Zoho synchronisation.
 * **Dependencies & Links:**
-  - Internal: `app.api.deps.AdminUser`, `app.core.database.get_db`, `app.integrations.zoho.sync_engine` (sync_variant_outbound, sync_order_outbound, sync_customer_outbound), `app.models.entities` (Customer, ProductVariant), `app.modules.orders.models.Order`.
+  - Internal: `app.api.deps.AdminUser`, `app.core.database.get_db`, `app.integrations.zoho.sync_engine` (sync_variant_outbound, sync_order_outbound, sync_po_outbound, sync_customer_outbound), `app.models.entities` (Customer, ProductVariant), `app.models.purchasing.PurchaseOrder`, `app.modules.orders.models.Order`.
   - External: `fastapi.BackgroundTasks`.
 * **Mechanism / Core Logic:**
   - All endpoints require ADMIN role.
   - All return `202 Accepted` immediately; actual work runs as FastAPI background tasks.
   - `POST /sync/items/{variant_id}` — Queues outbound Zoho sync for a ProductVariant. Validates variant exists and is active.
   - `POST /sync/orders/{order_id}` — Queues outbound Zoho sync for an Order. Background worker handles dependency checks (Customer/Variant Zoho IDs).
+  - `POST /sync/purchases/{po_id}` — Queues outbound Zoho sync for a PurchaseOrder. Validates PO exists, has items, and all line items are matched before queueing.
   - `POST /sync/customers/{customer_id}` — Queues outbound Zoho sync for a Customer.
 
 ---
@@ -1054,11 +1062,13 @@ Backend/
   - `ZohoClient` — Constructor: optional credentials (defaults from settings).
   - **Authentication:** `_ensure_access_token()` / `_refresh_access_token()` — Shared class-level token cache with asyncio lock for thread safety.
   - **Generic request:** `_request(method, url, **kwargs)` — Authenticated requests with automatic token refresh and rate-limit error detection (`RateLimitError` custom exception).
-  - **Item operations:** `create_item()`, `update_item()`, `get_item_by_sku()`, `sync_item()` (upsert by SKU), `upload_item_image()`, `mark_item_inactive/active()`, `list_items()`.
-  - **Composite items:** `create_composite_item()`, `update_composite_item()`, `get_composite_item_by_sku()`, `sync_composite_item()`.
+  - **Item operations:** `create_item()`, `update_item()`, `get_item_by_sku()`, `sync_item()` (upsert by SKU with optional `preferred_item_id` update-first behavior), `upload_item_image()`, `mark_item_inactive/active()`, `list_items()`.
+  - **Composite items:** `create_composite_item()`, `update_composite_item()`, `get_composite_item_by_sku()`, `sync_composite_item()` (supports `preferred_item_id`).
   - **Stock:** `update_stock()`, `get_stock_level()`.
-  - **Sales orders:** `create_sales_order()`, `update_salesorder()`, `get_salesorder()`, `list_salesorders()`.
+  - **Sales orders:** `create_sales_order()`, `update_salesorder()`, `get_salesorder()`, `list_salesorders()`, `confirm_salesorder()`.
+  - **Sales order fulfilment:** `create_package()`, `list_packages()`, `create_shipment_order()`, `list_shipment_orders()`, `mark_shipment_delivered()`.
   - **Contacts:** `create_contact()`, `update_contact()`, `get_contact()`, `get_contact_by_email()`, `list_contacts()`, `mark_contact_inactive/active()`.
+  - **Purchase orders:** `create_purchase_order()`, `update_purchase_order()`, `get_purchase_order()`, `list_purchase_orders()`.
   - **Health:** `health_check()`.
 
 ---
@@ -1377,4 +1387,4 @@ Backend/
 
 ---
 
-*Document generated: 2026-03-06*
+*Document generated: 2026-03-11*

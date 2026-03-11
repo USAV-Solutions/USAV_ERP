@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models import ZohoSyncStatus
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.models.entities import ProductFamily, ProductIdentity, ProductVariant
 from app.repositories import ProductIdentityRepository, ProductVariantRepository
@@ -57,7 +57,16 @@ async def search_variants(
 
     Returns compact results suitable for autocomplete / typeahead UIs.
     """
-    pattern = f"%{q}%"
+    ts_query = func.websearch_to_tsquery("simple", q)
+    family_vector = func.to_tsvector("simple", func.coalesce(ProductFamily.base_name, ""))
+    sku_vector = func.to_tsvector("simple", func.coalesce(ProductVariant.full_sku, ""))
+    variant_name_vector = func.to_tsvector("simple", func.coalesce(ProductVariant.variant_name, ""))
+    rank = func.greatest(
+        func.ts_rank_cd(family_vector, ts_query),
+        func.ts_rank_cd(sku_vector, ts_query),
+        func.ts_rank_cd(variant_name_vector, ts_query),
+    ).label("rank")
+
     stmt = (
         select(
             ProductVariant.id,
@@ -65,15 +74,17 @@ async def search_variants(
             ProductVariant.color_code,
             ProductVariant.condition_code,
             ProductFamily.base_name.label("product_name"),
+            rank,
         )
         .join(ProductIdentity, ProductVariant.identity_id == ProductIdentity.id)
         .join(ProductFamily, ProductIdentity.product_id == ProductFamily.product_id)
         .where(
-            (ProductFamily.base_name.ilike(pattern))
-            | (ProductVariant.full_sku.ilike(pattern))
+            family_vector.op("@@")(ts_query)
+            | sku_vector.op("@@")(ts_query)
+            | variant_name_vector.op("@@")(ts_query)
         )
         .where(ProductVariant.is_active == True)
-        .order_by(ProductVariant.full_sku)
+        .order_by(rank.desc(), ProductVariant.full_sku)
         .limit(limit)
     )
     rows = (await db.execute(stmt)).all()

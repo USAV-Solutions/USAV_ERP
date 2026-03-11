@@ -54,6 +54,9 @@ import {
   PlatformListingCreate,
 } from '../types/inventory'
 import { useAuth } from '../hooks/useAuth'
+import SearchField from '../components/common/SearchField'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
+import { compileSearchMatcher } from '../utils/search'
 
 const PLATFORMS: { value: Platform; label: string }[] = [
   { value: 'AMAZON', label: 'Amazon' },
@@ -260,7 +263,8 @@ function CreateListingDialog({ open, onClose, variants }: CreateListingDialogPro
 }
 
 export default function ProductListings() {
-  const [searchQuery, setSearchQuery] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+  const debouncedSearch = useDebouncedValue(searchInput, 200)
   const [platformFilter, setPlatformFilter] = useState<Platform | ''>('')
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
@@ -353,17 +357,15 @@ export default function ProductListings() {
 
   // Filter by search query
   const filteredListings = useMemo(() => {
-    if (!searchQuery.trim()) return enhancedListings
-    
-    const query = searchQuery.toLowerCase()
+    const matchesSearch = compileSearchMatcher(debouncedSearch)
     return enhancedListings.filter((listing) => {
-      const sku = listing.variant?.full_sku?.toLowerCase() || ''
-      const name = listing.variant?.identity?.family?.base_name?.toLowerCase() || ''
-      const refId = listing.external_ref_id?.toLowerCase() || ''
-      
-      return sku.includes(query) || name.includes(query) || refId.includes(query)
+      return matchesSearch([
+        listing.variant?.full_sku,
+        listing.variant?.identity?.family?.base_name,
+        listing.external_ref_id,
+      ])
     })
-  }, [enhancedListings, searchQuery])
+  }, [enhancedListings, debouncedSearch])
 
   // Paginated data
   const paginatedData = filteredListings.slice(
@@ -446,19 +448,12 @@ export default function ProductListings() {
       {/* Filters */}
       <Paper sx={{ p: 2, mb: 3 }}>
         <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-          <TextField
+          <SearchField
             placeholder="Search by SKU, name, or external ID..."
-            value={searchQuery}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
+            value={searchInput}
+            onChange={setSearchInput}
             size="small"
             sx={{ flexGrow: 1, minWidth: 250 }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Search />
-                </InputAdornment>
-              ),
-            }}
           />
           
           <FormControl size="small" sx={{ minWidth: 150 }}>
