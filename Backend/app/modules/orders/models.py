@@ -84,6 +84,16 @@ class OrderItemStatus(str, enum.Enum):
     CANCELLED = "CANCELLED"
 
 
+class ShippingStatus(str, enum.Enum):
+    """Shipping / fulfilment status for an order."""
+    PENDING = "PENDING"
+    ON_HOLD = "ON_HOLD"
+    CANCELLED = "CANCELLED"
+    PACKED = "PACKED"
+    SHIPPING = "SHIPPING"
+    DELIVERED = "DELIVERED"
+
+
 class IntegrationSyncStatus(str, enum.Enum):
     """Current sync-engine state for a platform."""
     IDLE = "IDLE"
@@ -184,6 +194,13 @@ class Order(Base, ZohoSyncMixin, TimestampMixin):
         nullable=False,
         default=ZohoSyncStatus.PENDING,
         comment="Outbound Zoho sync status.",
+    )
+    shipping_status: Mapped[ShippingStatus] = mapped_column(
+        Enum(ShippingStatus, name="shipping_status_enum", create_constraint=False),
+        nullable=False,
+        default=ShippingStatus.PENDING,
+        server_default="PENDING",
+        comment="Shipping / fulfilment status (PENDING → PACKED → SHIPPING → DELIVERED).",
     )
 
     # ---- Customer (normalised) ----
@@ -289,6 +306,7 @@ class Order(Base, ZohoSyncMixin, TimestampMixin):
         Index("ix_order_customer_id", "customer_id"),
         Index("ix_order_zoho_id", "zoho_id"),
         Index("ix_orders_zoho_sync_status", "zoho_sync_status"),
+        Index("ix_orders_shipping_status", "shipping_status"),
     )
 
     def __repr__(self) -> str:

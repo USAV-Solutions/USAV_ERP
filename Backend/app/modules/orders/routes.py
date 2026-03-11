@@ -36,7 +36,7 @@ from app.modules.orders.dependencies import (
     get_order_sync_service,
     get_sync_repo,
 )
-from app.modules.orders.models import OrderItemStatus, OrderPlatform
+from app.modules.orders.models import OrderItemStatus, OrderPlatform, ShippingStatus
 from app.modules.orders.schemas.orders import (
     OrderBrief,
     OrderDetail,
@@ -46,6 +46,7 @@ from app.modules.orders.schemas.orders import (
     OrderItemMatchRequest,
     OrderListResponse,
     OrderStatusUpdate,
+    ShippingStatusUpdate,
 )
 from app.modules.orders.schemas.sync import (
     IntegrationStateResponse,
@@ -314,6 +315,7 @@ async def list_orders(
                 external_order_id=o.external_order_id,
                 external_order_number=o.external_order_number,
                 status=o.status,
+                shipping_status=o.shipping_status,
                 zoho_sync_status=o.zoho_sync_status,
                 customer_name=o.customer_name,
                 total_amount=o.total_amount,
@@ -363,6 +365,53 @@ async def update_order_status(
     update_data: dict = {"status": body.status}
     if body.notes is not None:
         update_data["processing_notes"] = body.notes
+
+    updated = await order_repo.update(order, update_data)
+    await db.commit()
+    await db.refresh(updated)
+    return OrderDetail.model_validate(updated)
+
+
+@router.patch("/{order_id}/shipping", response_model=OrderDetail)
+async def update_shipping_status(
+    order_id: int,
+    body: ShippingStatusUpdate,
+    order_repo: OrderRepository = Depends(get_order_repo),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Update an order's shipping / fulfilment status.
+
+    Side-effects:
+    - Marks ``zoho_sync_status`` as DIRTY so the next outbound sync
+      pushes package / shipment changes to Zoho.
+    - When status is PACKED or SHIPPING, the Zoho sync will create a
+      package (marking the sales order as packed).
+    - When status is DELIVERED, the Zoho sync will mark the shipment
+      as delivered / fulfilled.
+    """
+    from app.models.entities import ZohoSyncStatus
+
+    order = await order_repo.get_with_items(order_id)
+    if order is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Order {order_id} not found.",
+        )
+
+    update_data: dict = {"shipping_status": body.shipping_status}
+
+    # Persist optional tracking info
+    if body.tracking_number is not None:
+        update_data["tracking_number"] = body.tracking_number
+    if body.carrier is not None:
+        update_data["carrier"] = body.carrier
+    if body.notes is not None:
+        update_data["processing_notes"] = body.notes
+
+    # Mark Zoho sync as dirty so the outbound sync picks up the change
+    if order.shipping_status != body.shipping_status:
+        update_data["zoho_sync_status"] = ZohoSyncStatus.DIRTY
 
     updated = await order_repo.update(order, update_data)
     await db.commit()

@@ -42,6 +42,7 @@ try:
         OrderPlatform,
         OrderStatus,
         OrderItemStatus,
+        ShippingStatus,
     )
 except ImportError as e:
     print(f"Failed to import from orders: {e}")

@@ -74,6 +74,7 @@ export const ZOHO = {
 export const SYNC = {
   ITEM: (variantId: number) => `/sync/items/${variantId}`,
   ORDER: (orderId: number) => `/sync/orders/${orderId}`,
+  PURCHASE: (poId: number) => `/sync/purchases/${poId}`,
   CUSTOMER: (customerId: number) => `/sync/customers/${customerId}`,
 }
 
@@ -83,6 +84,7 @@ export const ORDERS = {
   LIST: '/orders',
   ORDER: (id: number) => `/orders/${id}`,
   UPDATE_STATUS: (id: number) => `/orders/${id}`,
+  UPDATE_SHIPPING: (id: number) => `/orders/${id}/shipping`,
 
   // Sync
   SYNC: '/orders/sync',
@@ -102,6 +104,7 @@ export const PURCHASING = {
   VENDOR: (id: number) => `/vendors/${id}`,
   PURCHASES: '/purchases',
   PURCHASE: (id: number) => `/purchases/${id}`,
+  PURCHASE_ITEMS: (id: number) => `/purchases/${id}/items`,
   IMPORT_ZOHO: '/purchases/import/zoho',
   MATCH_ITEM: (itemId: number) => `/purchases/items/${itemId}/match`,
   MARK_DELIVERED: (id: number) => `/purchases/${id}/mark-delivered`,

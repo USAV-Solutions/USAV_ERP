@@ -25,6 +25,7 @@ export interface PurchaseOrderItem {
   id: number
   purchase_order_id: number
   variant_id?: number | null
+  variant_sku?: string | null
   external_item_name: string
   quantity: number
   unit_price: number
@@ -32,6 +33,15 @@ export interface PurchaseOrderItem {
   status: PurchaseOrderItemStatus
   created_at: string
   updated_at: string
+}
+
+export interface PurchaseOrderItemCreate {
+  variant_id?: number
+  external_item_name: string
+  quantity: number
+  unit_price: number
+  total_price: number
+  status?: PurchaseOrderItemStatus
 }
 
 export interface PurchaseOrder {
@@ -60,14 +70,7 @@ export interface PurchaseOrderCreate {
   total_amount: number
   currency?: string
   notes?: string
-  items?: Array<{
-    variant_id?: number
-    external_item_name: string
-    quantity: number
-    unit_price: number
-    total_price: number
-    status?: PurchaseOrderItemStatus
-  }>
+  items?: PurchaseOrderItemCreate[]
 }
 
 export interface PurchaseOrderItemMatchRequest {

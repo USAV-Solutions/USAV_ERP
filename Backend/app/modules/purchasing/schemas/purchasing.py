@@ -62,6 +62,7 @@ class PurchaseOrderItemUpdate(BaseModel):
 class PurchaseOrderItemResponse(PurchaseOrderItemBase):
     id: int
     purchase_order_id: int
+    variant_sku: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

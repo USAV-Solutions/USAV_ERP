@@ -11,6 +11,7 @@ from app.modules.orders.schemas.orders import (
     OrderItemConfirmRequest,
     OrderListResponse,
     OrderStatusUpdate,
+    ShippingStatusUpdate,
 )
 from app.modules.orders.schemas.sync import (
     IntegrationStateResponse,
@@ -30,6 +31,7 @@ __all__ = [
     "OrderItemConfirmRequest",
     "OrderListResponse",
     "OrderStatusUpdate",
+    "ShippingStatusUpdate",
     # Sync
     "IntegrationStateResponse",
     "SyncRequest",

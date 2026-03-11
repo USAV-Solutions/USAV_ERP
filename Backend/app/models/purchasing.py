@@ -184,3 +184,10 @@ class PurchaseOrderItem(Base, TimestampMixin):
         Index("ix_purchase_order_item_variant_id", "variant_id"),
         Index("ix_purchase_order_item_status", "status"),
     )
+
+    @property
+    def variant_sku(self) -> Optional[str]:
+        """Convenience field for API responses/UI tables."""
+        if self.variant is None:
+            return None
+        return self.variant.full_sku

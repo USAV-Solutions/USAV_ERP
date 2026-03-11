@@ -10,6 +10,7 @@ import type {
   OrderDetail,
   OrderListResponse,
   OrderStatusUpdate,
+  ShippingStatusUpdate,
   OrderItemDetail,
   OrderItemMatchRequest,
   OrderItemConfirmRequest,
@@ -60,6 +61,14 @@ export async function updateOrderStatus(
   body: OrderStatusUpdate,
 ): Promise<OrderDetail> {
   const { data } = await axiosClient.patch<OrderDetail>(ORDERS.UPDATE_STATUS(orderId), body)
+  return data
+}
+
+export async function updateShippingStatus(
+  orderId: number,
+  body: ShippingStatusUpdate,
+): Promise<OrderDetail> {
+  const { data } = await axiosClient.patch<OrderDetail>(ORDERS.UPDATE_SHIPPING(orderId), body)
   return data
 }
 

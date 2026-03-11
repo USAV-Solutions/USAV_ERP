@@ -8,7 +8,7 @@ import { SYNC } from './endpoints'
 
 export interface ForceSyncResponse {
   status: 'queued'
-  entity: 'item' | 'order' | 'customer'
+  entity: 'item' | 'order' | 'purchase' | 'customer'
   id: number
 }
 
@@ -19,6 +19,11 @@ export async function forceSyncItem(variantId: number): Promise<ForceSyncRespons
 
 export async function forceSyncOrder(orderId: number): Promise<ForceSyncResponse> {
   const { data } = await axiosClient.post<ForceSyncResponse>(SYNC.ORDER(orderId))
+  return data
+}
+
+export async function forceSyncPurchase(poId: number): Promise<ForceSyncResponse> {
+  const { data } = await axiosClient.post<ForceSyncResponse>(SYNC.PURCHASE(poId))
   return data
 }
 

@@ -34,6 +34,14 @@ export type OrderItemStatus =
   | 'SHIPPED'
   | 'CANCELLED'
 
+export type ShippingStatus =
+  | 'PENDING'
+  | 'ON_HOLD'
+  | 'CANCELLED'
+  | 'PACKED'
+  | 'SHIPPING'
+  | 'DELIVERED'
+
 export type IntegrationSyncStatus = 'IDLE' | 'SYNCING' | 'ERROR'
 export type ZohoSyncStatus = 'PENDING' | 'SYNCED' | 'ERROR' | 'DIRTY'
 
@@ -87,6 +95,7 @@ export interface OrderBrief {
   external_order_id: string
   external_order_number: string | null
   status: OrderStatus
+  shipping_status: ShippingStatus
   zoho_sync_status: ZohoSyncStatus
   customer_name: string | null
   total_amount: string
@@ -103,6 +112,7 @@ export interface OrderDetail {
   external_order_id: string
   external_order_number: string | null
   status: OrderStatus
+  shipping_status: ShippingStatus
   zoho_sync_status: ZohoSyncStatus
 
   customer_name: string | null
@@ -144,6 +154,13 @@ export interface OrderListResponse {
 
 export interface OrderStatusUpdate {
   status: OrderStatus
+  notes?: string
+}
+
+export interface ShippingStatusUpdate {
+  shipping_status: ShippingStatus
+  tracking_number?: string
+  carrier?: string
   notes?: string
 }
 

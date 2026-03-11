@@ -849,6 +849,21 @@ async def sync_order_outbound(order_id: int) -> None:
                 "sync_order_outbound: order %s synced to Zoho (salesorder_id=%s)",
                 order_id, so_id,
             )
+
+            # After the sales order is synced, apply shipping-specific actions
+            from app.modules.orders.models import ShippingStatus
+            if order.shipping_status in (
+                ShippingStatus.PACKED,
+                ShippingStatus.SHIPPING,
+                ShippingStatus.DELIVERED,
+            ):
+                try:
+                    await sync_shipping_status_to_zoho(order_id)
+                except Exception as ship_exc:
+                    logger.warning(
+                        "sync_order_outbound: shipping status sync failed for order %s: %s",
+                        order_id, ship_exc,
+                    )
         except RateLimitError as exc:
             order.zoho_sync_error = (
                 f"Zoho rate limit hit; retry after {getattr(exc, 'retry_after', 60)}s."
@@ -869,6 +884,123 @@ async def sync_order_outbound(order_id: int) -> None:
             order._updated_by_sync = True
             await db.commit()
             logger.exception("sync_order_outbound: order %s failed", order_id)
+
+
+# =========================================================================
+# SHIPPING STATUS SYNC  (Package / Shipment / Delivered)
+# =========================================================================
+
+async def sync_shipping_status_to_zoho(order_id: int) -> None:
+    """
+    Push the local shipping status to Zoho as package / shipment actions.
+
+    - PACKED or SHIPPING → ensure a package exists (marks SO as "packed").
+    - SHIPPING → also create a shipment order if none exists.
+    - DELIVERED → ensure a shipment exists and mark it as delivered.
+    """
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+    from app.modules.orders.models import ShippingStatus
+
+    async with async_session_factory() as db:
+        stmt = (
+            select(Order)
+            .options(
+                selectinload(Order.customer),
+                selectinload(Order.items).selectinload(OrderItem.variant),
+            )
+            .where(Order.id == order_id)
+        )
+        order = (await db.execute(stmt)).scalar_one_or_none()
+        if order is None:
+            logger.warning("sync_shipping_status: order %s not found", order_id)
+            return
+
+        if not order.zoho_id:
+            logger.info("sync_shipping_status: order %s has no zoho_id — sync order first", order_id)
+            return
+
+        zoho = ZohoClient()
+
+        try:
+            if order.shipping_status in (
+                ShippingStatus.PACKED,
+                ShippingStatus.SHIPPING,
+                ShippingStatus.DELIVERED,
+            ):
+                # Ensure a package exists (idempotent — skip if already present)
+                existing_packages = await zoho.list_packages(order.zoho_id)
+                if not existing_packages:
+                    # Fetch the full SO to get line_item IDs
+                    so = await zoho.get_salesorder(order.zoho_id)
+                    so_line_items = so.get("line_items", [])
+                    pkg_lines = [
+                        {
+                            "so_line_item_id": li["line_item_id"],
+                            "quantity": li.get("quantity", 1),
+                        }
+                        for li in so_line_items
+                        if li.get("line_item_id")
+                    ]
+                    if pkg_lines:
+                        await zoho.create_package(order.zoho_id, pkg_lines)
+                        logger.info("sync_shipping_status: created package for order %s", order_id)
+                    else:
+                        logger.warning(
+                            "sync_shipping_status: order %s SO has no line items for packaging",
+                            order_id,
+                        )
+
+            if order.shipping_status in (ShippingStatus.SHIPPING, ShippingStatus.DELIVERED):
+                # Ensure a shipment order exists
+                existing_shipments = await zoho.list_shipment_orders(order.zoho_id)
+                if not existing_shipments:
+                    packages = await zoho.list_packages(order.zoho_id)
+                    pkg_ids = [str(p.get("package_id", "")) for p in packages if p.get("package_id")]
+                    if pkg_ids:
+                        await zoho.create_shipment_order(
+                            order.zoho_id,
+                            pkg_ids,
+                            tracking_number=order.tracking_number,
+                            delivery_method=order.carrier,
+                        )
+                        logger.info("sync_shipping_status: created shipment for order %s", order_id)
+
+            if order.shipping_status == ShippingStatus.DELIVERED:
+                shipments = await zoho.list_shipment_orders(order.zoho_id)
+                for shipment in shipments:
+                    so_status = str(shipment.get("status", "")).lower()
+                    if so_status != "delivered":
+                        shipment_id = str(shipment.get("shipment_id", ""))
+                        if shipment_id:
+                            await zoho.mark_shipment_delivered(shipment_id)
+                            logger.info(
+                                "sync_shipping_status: marked shipment %s delivered for order %s",
+                                shipment_id, order_id,
+                            )
+
+            # Mark order as synced
+            order.zoho_sync_status = ZohoSyncStatus.SYNCED
+            order.zoho_sync_error = None
+            order.zoho_last_synced_at = datetime.now()
+            order._updated_by_sync = True
+            await db.commit()
+            order._updated_by_sync = False
+
+        except RateLimitError as exc:
+            order.zoho_sync_error = (
+                f"Zoho rate limit during shipping sync; retry after {getattr(exc, 'retry_after', 60)}s."
+            )[:2000]
+            order.zoho_sync_status = ZohoSyncStatus.ERROR
+            order._updated_by_sync = True
+            await db.commit()
+            logger.warning("sync_shipping_status: order %s rate-limited", order_id)
+        except Exception as exc:
+            order.zoho_sync_error = str(exc)[:2000]
+            order.zoho_sync_status = ZohoSyncStatus.ERROR
+            order._updated_by_sync = True
+            await db.commit()
+            logger.exception("sync_shipping_status: order %s failed", order_id)
 
 
 # =========================================================================
@@ -917,6 +1049,17 @@ async def process_order_inbound(payload: dict) -> None:
         if zoho_status in _ZOHO_STATUS_MAP:
             from app.modules.orders.models import OrderStatus
             order.status = OrderStatus(_ZOHO_STATUS_MAP[zoho_status])
+
+        # Map Zoho status → local shipping status
+        _ZOHO_SHIPPING_MAP = {
+            "packed": "PACKED",
+            "shipped": "SHIPPING",
+            "delivered": "DELIVERED",
+            "void": "CANCELLED",
+        }
+        if zoho_status in _ZOHO_SHIPPING_MAP:
+            from app.modules.orders.models import ShippingStatus
+            order.shipping_status = ShippingStatus(_ZOHO_SHIPPING_MAP[zoho_status])
 
         order.zoho_last_sync_hash = new_hash
         order.zoho_last_synced_at = datetime.now()

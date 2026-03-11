@@ -53,7 +53,7 @@ import {
 } from '@mui/icons-material'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 
-import { listOrders, getOrder, getSyncStatus, updateOrderStatus } from '../api/orders'
+import { listOrders, getOrder, getSyncStatus, updateOrderStatus, updateShippingStatus } from '../api/orders'
 import { forceSyncOrder } from '../api/sync'
 import type {
   OrderBrief,
@@ -62,6 +62,7 @@ import type {
   OrderPlatform,
   OrderStatus,
   OrderItemStatus,
+  ShippingStatus,
   SyncStatusResponse,
   ZohoSyncStatus,
 } from '../types/orders'
@@ -103,6 +104,24 @@ const ITEM_STATUS_OPTIONS: OrderItemStatus[] = [
   'CANCELLED',
 ]
 
+const SHIPPING_STATUS_OPTIONS: ShippingStatus[] = [
+  'PENDING',
+  'ON_HOLD',
+  'CANCELLED',
+  'PACKED',
+  'SHIPPING',
+  'DELIVERED',
+]
+
+const SHIPPING_STATUS_COLOR: Record<ShippingStatus, 'default' | 'warning' | 'error' | 'info' | 'primary' | 'success'> = {
+  PENDING: 'default',
+  ON_HOLD: 'warning',
+  CANCELLED: 'error',
+  PACKED: 'info',
+  SHIPPING: 'primary',
+  DELIVERED: 'success',
+}
+
 const ZOHO_SYNC_COLOR: Record<ZohoSyncStatus, 'default' | 'success' | 'error' | 'warning'> = {
   PENDING: 'warning',
   DIRTY: 'warning',
@@ -135,6 +154,7 @@ export default function OrdersManagement() {
   const [snackbarMessage, setSnackbarMessage] = useState('')
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success')
   const [statusUpdatingId, setStatusUpdatingId] = useState<number | null>(null)
+  const [shippingUpdatingId, setShippingUpdatingId] = useState<number | null>(null)
 
   // Bulk Zoho sync (matched orders only)
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false)
@@ -197,7 +217,7 @@ export default function OrdersManagement() {
     onMutate: ({ orderId }) => setStatusUpdatingId(orderId),
     onSuccess: () => {
       setSnackbarSeverity('success')
-      setSnackbarMessage('Shipping status updated.')
+      setSnackbarMessage('Order status updated.')
       setSnackbarOpen(true)
       queryClient.invalidateQueries({ queryKey: ['orders'] })
     },
@@ -208,6 +228,25 @@ export default function OrdersManagement() {
       setSnackbarOpen(true)
     },
     onSettled: () => setStatusUpdatingId(null),
+  })
+
+  const updateShippingMutation = useMutation({
+    mutationFn: ({ orderId, shipping_status }: { orderId: number; shipping_status: ShippingStatus }) =>
+      updateShippingStatus(orderId, { shipping_status }),
+    onMutate: ({ orderId }) => setShippingUpdatingId(orderId),
+    onSuccess: () => {
+      setSnackbarSeverity('success')
+      setSnackbarMessage('Shipping status updated — Zoho sync queued.')
+      setSnackbarOpen(true)
+      queryClient.invalidateQueries({ queryKey: ['orders'] })
+    },
+    onError: (error: { response?: { data?: { detail?: string } }; message?: string }) => {
+      const detail = error.response?.data?.detail || error.message || 'Update failed.'
+      setSnackbarSeverity('error')
+      setSnackbarMessage(detail)
+      setSnackbarOpen(true)
+    },
+    onSettled: () => setShippingUpdatingId(null),
   })
 
   const handleForceSync = (orderId: number, e: React.MouseEvent) => {
@@ -289,6 +328,11 @@ export default function OrdersManagement() {
   const handleStatusChange = (orderId: number, status: OrderStatus, e: SyntheticEvent) => {
     e.stopPropagation()
     updateStatusMutation.mutate({ orderId, status })
+  }
+
+  const handleShippingStatusChange = (orderId: number, shipping_status: ShippingStatus, e: SyntheticEvent) => {
+    e.stopPropagation()
+    updateShippingMutation.mutate({ orderId, shipping_status })
   }
 
   // ── Render ───────────────────────────────────────────────────────
@@ -584,13 +628,13 @@ export default function OrdersManagement() {
                         <TableCell>
                           <FormControl size="small" fullWidth>
                             <Select
-                              value={order.status}
+                              value={order.shipping_status}
                               size="small"
                               onClick={(e) => e.stopPropagation()}
-                              onChange={(e) => handleStatusChange(order.id, e.target.value as OrderStatus, e)}
-                              disabled={statusUpdatingId === order.id}
+                              onChange={(e) => handleShippingStatusChange(order.id, e.target.value as ShippingStatus, e)}
+                              disabled={shippingUpdatingId === order.id}
                             >
-                              {ORDER_STATUS_OPTIONS.map((s) => (
+                              {SHIPPING_STATUS_OPTIONS.map((s) => (
                                 <MenuItem key={s} value={s}>
                                   {s.replaceAll('_', ' ')}
                                 </MenuItem>

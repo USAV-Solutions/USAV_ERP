@@ -8,7 +8,7 @@ from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.entities import ZohoSyncStatus
-from app.modules.orders.models import OrderItemStatus, OrderPlatform, OrderStatus
+from app.modules.orders.models import OrderItemStatus, OrderPlatform, OrderStatus, ShippingStatus
 
 
 # ============================================================================
@@ -99,6 +99,7 @@ class OrderBrief(BaseModel):
     external_order_id: str
     external_order_number: Optional[str] = None
     status: OrderStatus
+    shipping_status: ShippingStatus
     zoho_sync_status: ZohoSyncStatus
     customer_name: Optional[str] = None
     customer: Optional[CustomerBrief] = None
@@ -119,6 +120,7 @@ class OrderDetail(BaseModel):
     external_order_id: str
     external_order_number: Optional[str] = None
     status: OrderStatus
+    shipping_status: ShippingStatus
     zoho_sync_status: ZohoSyncStatus
 
     customer_name: Optional[str] = None
@@ -181,6 +183,14 @@ class OrderCreate(BaseModel):
 class OrderStatusUpdate(BaseModel):
     """Update the processing status of an order."""
     status: OrderStatus
+    notes: Optional[str] = None
+
+
+class ShippingStatusUpdate(BaseModel):
+    """Update the shipping / fulfilment status of an order."""
+    shipping_status: ShippingStatus
+    tracking_number: Optional[str] = Field(None, max_length=100)
+    carrier: Optional[str] = Field(None, max_length=50)
     notes: Optional[str] = None
 
 

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import AdminOrWarehouseUser, CurrentUser
 from app.core.database import get_db
 from app.integrations.zoho.client import ZohoClient
-from app.models import PurchaseDeliverStatus
+from app.models import PurchaseDeliverStatus, PurchaseOrderItemStatus
 from app.models.purchasing import PurchaseOrderItem
 from app.modules.purchasing.dependencies import (
     get_purchase_order_item_repo,
@@ -20,6 +20,7 @@ from app.modules.purchasing.dependencies import (
 )
 from app.modules.purchasing.schemas import (
     PurchaseOrderCreate,
+    PurchaseOrderItemCreate,
     PurchaseOrderItemMatchRequest,
     PurchaseOrderItemResponse,
     PurchaseOrderReceiveRequest,
@@ -36,6 +37,7 @@ from app.repositories.purchasing import (
     PurchaseOrderRepository,
     VendorRepository,
 )
+from app.repositories.product import ProductVariantRepository
 
 router = APIRouter(tags=["Purchasing"])
 
@@ -176,6 +178,31 @@ async def get_purchase_order(
     return PurchaseOrderResponse.model_validate(po)
 
 
+@router.post(
+    "/purchases/{po_id}/items",
+    response_model=PurchaseOrderItemResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_purchase_order_item(
+    po_id: int,
+    body: PurchaseOrderItemCreate,
+    po_repo: PurchaseOrderRepository = Depends(get_purchase_order_repo),
+    po_item_repo: PurchaseOrderItemRepository = Depends(get_purchase_order_item_repo),
+    db: AsyncSession = Depends(get_db),
+):
+    po = await po_repo.get(po_id)
+    if po is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchase order not found")
+
+    payload = body.model_dump()
+    payload["purchase_order_id"] = po_id
+
+    created = await po_item_repo.create(payload)
+    await db.commit()
+    await db.refresh(created)
+    return PurchaseOrderItemResponse.model_validate(created)
+
+
 @router.post("/purchases/items/{item_id}/match", response_model=PurchaseOrderItemResponse)
 async def match_purchase_order_item(
     item_id: int,
@@ -231,6 +258,7 @@ async def import_purchasing_from_zoho(
 ):
     """Import vendors and purchase orders from Zoho into local purchasing tables."""
     zoho = ZohoClient()
+    variant_repo = ProductVariantRepository(db)
     result = ZohoPurchaseImportResponse()
 
     vendors_by_zoho_id: dict[str, int] = {}
@@ -294,6 +322,17 @@ async def import_purchasing_from_zoho(
             po_number = str(zoho_po.get("purchaseorder_number") or "").strip()
             vendor_zoho_id = str(zoho_po.get("vendor_id") or "").strip()
 
+            # Zoho list endpoint often omits line_items; fetch full PO details when possible.
+            zoho_po_detail = zoho_po
+            if zoho_po_id:
+                try:
+                    detail = await zoho.get_purchase_order(zoho_po_id)
+                    if isinstance(detail, dict) and detail:
+                        zoho_po_detail = detail
+                except Exception:
+                    # Keep import resilient; fall back to list payload if detail call fails.
+                    zoho_po_detail = zoho_po
+
             if not po_number:
                 continue
 
@@ -312,12 +351,34 @@ async def import_purchasing_from_zoho(
             po_payload = {
                 "po_number": po_number,
                 "vendor_id": vendor_id,
-                "deliver_status": _map_zoho_po_status(zoho_po.get("status") or zoho_po.get("purchaseorder_status")),
-                "order_date": _to_date(zoho_po.get("date") or zoho_po.get("purchaseorder_date")),
-                "expected_delivery_date": _to_date(zoho_po.get("expected_delivery_date")) if zoho_po.get("expected_delivery_date") else None,
-                "total_amount": _to_decimal(zoho_po.get("total") or zoho_po.get("total_amount") or 0),
-                "currency": str(zoho_po.get("currency_code") or "USD")[:3],
-                "notes": zoho_po.get("notes") or zoho_po.get("terms"),
+                "deliver_status": _map_zoho_po_status(
+                    zoho_po_detail.get("status")
+                    or zoho_po_detail.get("purchaseorder_status")
+                    or zoho_po.get("status")
+                    or zoho_po.get("purchaseorder_status")
+                ),
+                "order_date": _to_date(
+                    zoho_po_detail.get("date")
+                    or zoho_po_detail.get("purchaseorder_date")
+                    or zoho_po.get("date")
+                    or zoho_po.get("purchaseorder_date")
+                ),
+                "expected_delivery_date": _to_date(zoho_po_detail.get("expected_delivery_date"))
+                if zoho_po_detail.get("expected_delivery_date")
+                else None,
+                "total_amount": _to_decimal(
+                    zoho_po_detail.get("total")
+                    or zoho_po_detail.get("total_amount")
+                    or zoho_po.get("total")
+                    or zoho_po.get("total_amount")
+                    or 0
+                ),
+                "currency": str(
+                    zoho_po_detail.get("currency_code")
+                    or zoho_po.get("currency_code")
+                    or "USD"
+                )[:3],
+                "notes": zoho_po_detail.get("notes") or zoho_po_detail.get("terms") or zoho_po.get("notes") or zoho_po.get("terms"),
                 "zoho_id": zoho_po_id or None,
             }
 
@@ -335,21 +396,42 @@ async def import_purchasing_from_zoho(
                 delete(PurchaseOrderItem).where(PurchaseOrderItem.purchase_order_id == local_po.id)
             )
 
-            for line in zoho_po.get("line_items", []) or []:
+            line_items = zoho_po_detail.get("line_items", []) or zoho_po.get("line_items", []) or []
+            for line in line_items:
                 qty = int(line.get("quantity") or 0)
                 unit_price = _to_decimal(line.get("rate") or line.get("item_total") or 0)
                 total_price = _to_decimal(line.get("item_total") or (unit_price * qty))
                 if qty <= 0:
                     continue
 
+                # Zoho may provide different SKU keys depending on payload shape.
+                line_sku = str(
+                    line.get("sku")
+                    or line.get("item_sku")
+                    or line.get("product_sku")
+                    or ""
+                ).strip()
+                matched_variant = None
+                if line_sku:
+                    matched_variant = await variant_repo.get_by_sku(line_sku.upper())
+                if matched_variant is None:
+                    zoho_item_id = str(line.get("item_id") or "").strip()
+                    if zoho_item_id:
+                        matched_variant = await variant_repo.get_by_zoho_id(zoho_item_id)
+
                 await po_item_repo.create(
                     {
                         "purchase_order_id": local_po.id,
-                        "variant_id": None,
+                        "variant_id": matched_variant.id if matched_variant else None,
                         "external_item_name": str(line.get("name") or line.get("item_name") or "Unknown item")[:255],
                         "quantity": qty,
                         "unit_price": unit_price,
                         "total_price": total_price,
+                        "status": (
+                            PurchaseOrderItemStatus.MATCHED
+                            if matched_variant
+                            else PurchaseOrderItemStatus.UNMATCHED
+                        ),
                     }
                 )
                 result.purchase_order_items_replaced += 1

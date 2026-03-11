@@ -579,6 +579,95 @@ class ZohoClient:
         result = await self._request("GET", "/salesorders", params=params)
         return result.get("salesorders", [])
 
+    async def confirm_salesorder(self, salesorder_id: str) -> dict:
+        """Mark a sales order as *confirmed* in Zoho."""
+        return await self._request("POST", f"/salesorders/{salesorder_id}/status/confirmed")
+
+    # =========================================================================
+    # PACKAGES (marks a sales order as "packed" in Zoho)
+    # =========================================================================
+
+    async def create_package(self, salesorder_id: str, line_items: List[dict]) -> dict:
+        """
+        Create a package for a sales order in Zoho Inventory.
+
+        This transitions the sales order status to "packed" in Zoho.
+
+        Args:
+            salesorder_id: The Zoho sales order ID.
+            line_items: List of dicts with ``so_line_item_id`` and ``quantity``.
+        """
+        payload = {"line_items": line_items}
+        result = await self._request(
+            "POST",
+            f"/packages",
+            params={"salesorder_id": salesorder_id},
+            data={"JSONString": json.dumps(payload)},
+        )
+        return result.get("package", {})
+
+    async def list_packages(self, salesorder_id: str) -> List[dict]:
+        """List all packages for a given sales order."""
+        result = await self._request(
+            "GET",
+            "/packages",
+            params={"salesorder_id": salesorder_id},
+        )
+        return result.get("packages", [])
+
+    # =========================================================================
+    # SHIPMENT ORDERS (marks a sales order as "shipped" / "delivered")
+    # =========================================================================
+
+    async def create_shipment_order(
+        self,
+        salesorder_id: str,
+        package_ids: List[str],
+        *,
+        tracking_number: Optional[str] = None,
+        delivery_method: Optional[str] = None,
+    ) -> dict:
+        """
+        Create a shipment order for one or more packages.
+
+        Args:
+            salesorder_id: The Zoho sales order ID.
+            package_ids: List of package IDs to include.
+            tracking_number: Optional carrier tracking number.
+            delivery_method: Optional delivery method name.
+        """
+        payload: dict[str, Any] = {
+            "salesorder_id": salesorder_id,
+            "package_ids": package_ids,
+        }
+        if tracking_number:
+            payload["tracking_number"] = tracking_number
+        if delivery_method:
+            payload["delivery_method"] = delivery_method
+
+        result = await self._request(
+            "POST",
+            "/shipmentorders",
+            data={"JSONString": json.dumps(payload)},
+        )
+        return result.get("shipmentorder", {})
+
+    async def mark_shipment_delivered(self, shipment_order_id: str) -> dict:
+        """Mark a shipment order as delivered in Zoho."""
+        return await self._request(
+            "POST",
+            f"/shipmentorders/{shipment_order_id}/status/delivered",
+        )
+
+    async def list_shipment_orders(self, salesorder_id: str) -> List[dict]:
+        """List all shipment orders for a given sales order."""
+        result = await self._request(
+            "GET",
+            "/shipmentorders",
+            params={"salesorder_id": salesorder_id},
+        )
+        return result.get("shipmentorders", [])
+
     # =========================================================================
     # CONTACTS (Customers)
     # =========================================================================
