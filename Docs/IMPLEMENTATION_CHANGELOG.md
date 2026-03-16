@@ -139,6 +139,14 @@ This migration:
 
 ## Frontend UI Changes
 
+### Update 2026-03-16: Purchasing Line-Item Matching + Delete Actions
+
+- Added visible per-line-item actions in Purchasing expanded rows (instead of relying only on long-press).
+- Added a Match action for `UNMATCHED` purchase items that opens an inline search/match row.
+- Reused `VariantSearchAutocomplete` so Purchasing item matching behavior is consistent with Order item matching.
+- Added a visible Delete action with confirmation dialog for purchase items (`RECEIVED` items remain protected).
+- Kept long-press edit flow in place for full item field editing.
+
 ### Removed Pages
 
 The following pages were removed in favor of a unified inventory management approach:

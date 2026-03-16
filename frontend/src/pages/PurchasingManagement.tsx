@@ -26,7 +26,14 @@ import {
   Typography,
   LinearProgress,
 } from '@mui/material'
-import { Add, CloudSync, KeyboardArrowDown, KeyboardArrowUp } from '@mui/icons-material'
+import {
+  Add,
+  CloudSync,
+  DeleteOutline,
+  KeyboardArrowDown,
+  KeyboardArrowUp,
+  Link as LinkIcon,
+} from '@mui/icons-material'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
@@ -38,6 +45,7 @@ import {
   listPurchaseOrders,
   listPurchaseOrdersPaged,
   listVendors,
+  matchPurchaseItem,
   updatePurchaseItem,
 } from '../api/purchasing'
 import { forceSyncPurchase } from '../api/sync'
@@ -73,6 +81,8 @@ interface PurchaseOrderItemRowProps {
 
 function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRowProps) {
   const [promptOpen, setPromptOpen] = useState(false)
+  const [showMatch, setShowMatch] = useState(false)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [selectedVariant, setSelectedVariant] = useState<VariantSearchResult | null>(null)
   const [externalItemId, setExternalItemId] = useState(item.external_item_id || '')
   const [externalItemName, setExternalItemName] = useState(item.external_item_name)
@@ -100,6 +110,22 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
     },
   })
 
+  const matchMutation = useMutation({
+    mutationFn: () =>
+      matchPurchaseItem(item.id, {
+        variant_id: selectedVariant!.id,
+      }),
+    onSuccess: async () => {
+      setShowMatch(false)
+      setSelectedVariant(null)
+      await onChanged()
+      onNotify('Item matched successfully.', 'success')
+    },
+    onError: (error: { response?: { data?: { detail?: string } }; message?: string }) => {
+      onNotify(error.response?.data?.detail || error.message || 'Failed to match item.', 'error')
+    },
+  })
+
   const deleteMutation = useMutation({
     mutationFn: () => deletePurchaseItem(item.id),
     onSuccess: async () => {
@@ -111,7 +137,7 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
     },
   })
 
-  const anyPending = saveMutation.isPending || deleteMutation.isPending
+  const anyPending = saveMutation.isPending || deleteMutation.isPending || matchMutation.isPending
 
   const openPrompt = () => {
     setExternalItemId(item.external_item_id || '')
@@ -134,7 +160,57 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
         <TableCell align="center">
           <Chip size="small" color={itemStatusColor[item.status]} label={item.status} />
         </TableCell>
+        <TableCell align="center">
+          <Stack direction="row" spacing={0.5} justifyContent="center">
+            {item.status === 'UNMATCHED' && (
+              <IconButton
+                size="small"
+                color="primary"
+                disabled={anyPending}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  setShowMatch((prev) => !prev)
+                }}
+              >
+                <LinkIcon fontSize="small" />
+              </IconButton>
+            )}
+            <IconButton
+              size="small"
+              color="error"
+              disabled={item.status === 'RECEIVED' || anyPending}
+              onClick={(event) => {
+                event.stopPropagation()
+                setDeleteConfirmOpen(true)
+              }}
+            >
+              <DeleteOutline fontSize="small" />
+            </IconButton>
+          </Stack>
+        </TableCell>
       </LongPressTableRow>
+
+      {showMatch && (
+        <TableRow>
+          <TableCell colSpan={7} sx={{ py: 1, backgroundColor: 'background.paper' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, pl: 1 }}>
+              <VariantSearchAutocomplete value={selectedVariant} onChange={setSelectedVariant} />
+              <Button
+                size="small"
+                variant="contained"
+                onClick={() => matchMutation.mutate()}
+                disabled={!selectedVariant || matchMutation.isPending}
+                startIcon={matchMutation.isPending ? <CircularProgress size={14} /> : <LinkIcon />}
+              >
+                Match
+              </Button>
+              <Button size="small" onClick={() => setShowMatch(false)}>
+                Cancel
+              </Button>
+            </Box>
+          </TableCell>
+        </TableRow>
+      )}
 
       <HoldActionPromptDialog
         open={promptOpen}
@@ -165,6 +241,34 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
           </Typography>
         </Stack>
       </HoldActionPromptDialog>
+
+      <Dialog open={deleteConfirmOpen} onClose={() => setDeleteConfirmOpen(false)} fullWidth maxWidth="xs">
+        <DialogTitle>Delete Purchase Item</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Delete item <strong>{item.external_item_name}</strong>? This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteConfirmOpen(false)} disabled={deleteMutation.isPending}>
+            Cancel
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            disabled={deleteMutation.isPending}
+            onClick={() => {
+              deleteMutation.mutate(undefined, {
+                onSuccess: () => {
+                  setDeleteConfirmOpen(false)
+                },
+              })
+            }}
+          >
+            {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </>
   )
 }
@@ -500,6 +604,7 @@ export default function PurchasingManagement() {
                                         <TableCell align="center">Qty</TableCell>
                                         <TableCell align="right">Price</TableCell>
                                         <TableCell align="center">Status</TableCell>
+                                        <TableCell align="center">Actions</TableCell>
                                       </TableRow>
                                     </TableHead>
                                     <TableBody>
@@ -513,7 +618,7 @@ export default function PurchasingManagement() {
                                       ))}
                                       {!po.items?.length && (
                                         <TableRow>
-                                          <TableCell colSpan={6} align="center">
+                                          <TableCell colSpan={7} align="center">
                                             No line items.
                                           </TableCell>
                                         </TableRow>

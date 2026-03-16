@@ -572,10 +572,12 @@ frontend/
   - **Vendor actions:** Create vendor dialog (name/email/phone/address).
   - **PO actions:** Create PO dialog (PO number, vendor, dates, total, notes).
   - **PO list/detail:** Supports paged loading and expanded/collapsible table rows for line-item visibility.
+  - **Line-item actions column:** Expanded PO line-item table exposes visible per-row actions to avoid relying on hidden gestures.
   - **Zoho import:** Includes bulk import trigger for vendors + purchase orders from Zoho with progress and result feedback.
   - **PO force-sync:** Supports per-purchase force-sync to Zoho via `forceSyncPurchase`.
-  - **Item matching:** Per-line-item Match action on `UNMATCHED` rows opens the same `VariantSearchAutocomplete` used by Order resolution, allowing SKU/name search and one-click match.
-  - **Item delete:** Per-line-item Delete action calls `DELETE /purchases/items/{item_id}` (disabled for `RECEIVED` rows).
+  - **Item matching:** Per-line-item Match action on `UNMATCHED` rows opens an inline search bar (same `VariantSearchAutocomplete` used by Order resolution), allowing SKU/name search and one-click match.
+  - **Item delete:** Per-line-item Delete icon opens a confirmation dialog and calls `DELETE /purchases/items/{item_id}` (disabled for `RECEIVED` rows).
+  - **Long-press edit:** Existing long-press edit prompt remains available for updating item fields and manual SKU correction.
   - **Mark delivered:** Admin/Warehouse action opens a receive dialog where each PO item receives quantity, optional serial numbers, and location code. Submitting calls `/purchases/{id}/mark-delivered`.
   - **Feedback:** Mutation results shown via Snackbar and query invalidation refreshes PO/vendor data.
 
@@ -605,4 +607,4 @@ frontend/
 
 ---
 
-*Document generated: 2026-03-11*
+*Document generated: 2026-03-16*
