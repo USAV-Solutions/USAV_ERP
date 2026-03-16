@@ -569,11 +569,15 @@ frontend/
 * **Purpose:** Main purchasing workspace for vendors and purchase orders.
 * **Dependencies & Props:** Uses React Query + `api/purchasing.ts` and role checks from `useAuth`.
 * **Mechanism / Render Logic:**
-  - **Vendor actions:** Create vendor dialog (name/email/phone/address).
-  - **PO actions:** Create PO dialog (PO number, vendor, dates, total, notes).
+  - **Vendor actions in Create PO:** Vendor is selected via searchable autocomplete; users can create a new vendor directly from typed input using a Create Vendor action beside the search bar.
+  - **PO actions:** Create PO dialog includes PO number, vendor search/create, dates, total, tax, shipping, handling, currency, and notes.
   - **PO list/detail:** Supports paged loading and expanded/collapsible table rows for line-item visibility.
   - **Line-item actions column:** Expanded PO line-item table exposes visible per-row actions to avoid relying on hidden gestures.
+  - **Line-item creation:** Expanded PO section uses an Add New Item toggle; the inline Add Line form appears only when requested for that PO. Quantity and unit price are entered, and total price is auto-calculated as quantity × unit price.
+  - **Immutable line-item total:** Edit and create flows treat total price as derived/read-only to keep totals consistent.
+  - **Line-item total row:** Expanded line-items table displays a summary row showing the summed line-item total.
   - **Zoho import:** Includes bulk import trigger for vendors + purchase orders from Zoho with progress and result feedback.
+  - **Random Zoho import test:** Header action **Import 1 Random PO** imports exactly one random purchase order from Zoho for quick import validation and displays selected PO metadata in feedback.
   - **PO force-sync:** Supports per-purchase force-sync to Zoho via `forceSyncPurchase`.
   - **Item matching:** Per-line-item Match action on `UNMATCHED` rows opens an inline search bar (same `VariantSearchAutocomplete` used by Order resolution), allowing SKU/name search and one-click match.
   - **Item delete:** Per-line-item Delete icon opens a confirmation dialog and calls `DELETE /purchases/items/{item_id}` (disabled for `RECEIVED` rows).

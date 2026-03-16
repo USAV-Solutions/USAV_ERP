@@ -4,7 +4,7 @@ Implements the Repository pattern for database access.
 """
 from typing import Any, Generic, Optional, Sequence, Type, TypeVar
 
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func, delete, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import Base
@@ -52,9 +52,13 @@ class BaseRepository(Generic[ModelType]):
                 if hasattr(self.model, field_name) and value is not None:
                     stmt = stmt.where(getattr(self.model, field_name) == value)
         
-        # Apply ordering
-        if order_by and hasattr(self.model, order_by):
-            stmt = stmt.order_by(getattr(self.model, order_by))
+        # Apply ordering. Prefix with '-' for descending (e.g. '-created_at').
+        if order_by:
+            descending = order_by.startswith("-")
+            field_name = order_by[1:] if descending else order_by
+            if hasattr(self.model, field_name):
+                column = getattr(self.model, field_name)
+                stmt = stmt.order_by(desc(column) if descending else column)
         
         # Apply pagination
         stmt = stmt.offset(skip).limit(limit)

@@ -1,6 +1,7 @@
 """API routes for purchasing module."""
 import csv
 import io
+import random
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated
@@ -31,6 +32,7 @@ from app.modules.purchasing.schemas import (
     PurchaseOrderReceiveRequest,
     PurchaseOrderReceiveResponse,
     PurchaseOrderResponse,
+    ZohoSinglePurchaseImportResponse,
     VendorCreate,
     VendorResponse,
     VendorUpdate,
@@ -91,6 +93,68 @@ def _map_zoho_po_status(status_raw: object) -> PurchaseDeliverStatus:
     if status_text in {"closed", "received"}:
         return PurchaseDeliverStatus.DELIVERED
     return PurchaseDeliverStatus.CREATED
+
+
+def _extract_custom_field_decimal(po_payload: dict, api_name: str) -> Decimal:
+    custom_hash = po_payload.get("custom_field_hash") or {}
+    if isinstance(custom_hash, dict):
+        unformatted_key = f"{api_name}_unformatted"
+        if unformatted_key in custom_hash:
+            return _to_decimal(custom_hash.get(unformatted_key), default="0")
+        if api_name in custom_hash:
+            return _to_decimal(custom_hash.get(api_name), default="0")
+
+    custom_fields = po_payload.get("custom_fields") or []
+    if isinstance(custom_fields, list):
+        for field in custom_fields:
+            if not isinstance(field, dict):
+                continue
+            if str(field.get("api_name") or "").strip().lower() != api_name.lower():
+                continue
+            if "value" in field:
+                return _to_decimal(field.get("value"), default="0")
+            if "value_formatted" in field:
+                return _to_decimal(field.get("value_formatted"), default="0")
+
+    return Decimal("0")
+
+
+def _sum_line_item_tax_amounts(po_payload: dict) -> Decimal:
+    tax_total = Decimal("0")
+    line_items = po_payload.get("line_items") or []
+    if not isinstance(line_items, list):
+        return tax_total
+
+    for line in line_items:
+        if not isinstance(line, dict):
+            continue
+        for line_tax in line.get("line_item_taxes") or []:
+            if not isinstance(line_tax, dict):
+                continue
+            tax_total += _to_decimal(line_tax.get("tax_amount"), default="0")
+    return tax_total
+
+
+def _extract_zoho_po_charges(po_payload: dict) -> tuple[Decimal, Decimal, Decimal]:
+    # Sandbox/custom-field setup
+    tax_amount = _extract_custom_field_decimal(po_payload, "cf_tax")
+    shipping_amount = _extract_custom_field_decimal(po_payload, "cf_shipping_fee")
+    handling_amount = _extract_custom_field_decimal(po_payload, "cf_handling_fee")
+
+    # Standard totals fallback
+    if tax_amount == 0:
+        tax_amount = _to_decimal(po_payload.get("tax_total"), default="0")
+
+    # Old-main fallback: tax can only be present per-line in line_item_taxes
+    if tax_amount == 0:
+        tax_amount = _sum_line_item_tax_amounts(po_payload)
+
+    # Old-main fallback: shipping+handling packed into adjustment (S&H)
+    adjustment_amount = _to_decimal(po_payload.get("adjustment"), default="0")
+    if shipping_amount == 0 and handling_amount == 0 and adjustment_amount > 0:
+        shipping_amount = adjustment_amount
+
+    return tax_amount, shipping_amount, handling_amount
 
 
 @router.get("/vendors", response_model=list[VendorResponse])
@@ -155,7 +219,7 @@ async def list_purchase_orders(
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     repo: PurchaseOrderRepository = Depends(get_purchase_order_repo),
 ):
-    rows = await repo.get_multi(skip=skip, limit=limit, order_by="created_at")
+    rows = await repo.get_multi(skip=skip, limit=limit, order_by="-created_at")
     return [PurchaseOrderResponse.model_validate(r) for r in rows]
 
 
@@ -430,6 +494,8 @@ async def import_purchasing_from_zoho(
             if existing_po is None:
                 existing_po = await po_repo.get_by_field("po_number", po_number)
 
+            tax_amount, shipping_amount, handling_amount = _extract_zoho_po_charges(zoho_po_detail)
+
             po_payload = {
                 "po_number": po_number,
                 "vendor_id": vendor_id,
@@ -460,6 +526,9 @@ async def import_purchasing_from_zoho(
                     or zoho_po.get("currency_code")
                     or "USD"
                 )[:3],
+                "tax_amount": tax_amount,
+                "shipping_amount": shipping_amount,
+                "handling_amount": handling_amount,
                 "notes": zoho_po_detail.get("notes") or zoho_po_detail.get("terms") or zoho_po.get("notes") or zoho_po.get("terms"),
                 "zoho_id": zoho_po_id or None,
             }
@@ -524,6 +593,221 @@ async def import_purchasing_from_zoho(
 
     await db.commit()
     return result
+
+
+@router.post("/purchases/import/zoho/random-one", response_model=ZohoSinglePurchaseImportResponse)
+async def import_single_random_purchase_from_zoho(
+    _current_user: CurrentUser,
+    source_page: Annotated[int, Query(ge=1, le=50)] = 1,
+    per_page: Annotated[int, Query(ge=1, le=200)] = 200,
+    max_pages: Annotated[int, Query(ge=1, le=50)] = 50,
+    vendor_repo: VendorRepository = Depends(get_vendor_repo),
+    po_repo: PurchaseOrderRepository = Depends(get_purchase_order_repo),
+    po_item_repo: PurchaseOrderItemRepository = Depends(get_purchase_order_item_repo),
+    db: AsyncSession = Depends(get_db),
+):
+    """Import exactly one random Zoho purchase order from a source page for test runs."""
+    zoho = ZohoClient()
+    variant_repo = ProductVariantRepository(db)
+
+    purchase_orders = await zoho.list_purchase_orders(page=source_page, per_page=per_page)
+    selected_page = source_page
+
+    # If requested page is empty, probe other pages to keep one-click test import reliable.
+    if not purchase_orders:
+        for page in range(1, max_pages + 1):
+            if page == source_page:
+                continue
+            candidate = await zoho.list_purchase_orders(page=page, per_page=per_page)
+            if candidate:
+                purchase_orders = candidate
+                selected_page = page
+                break
+
+    if not purchase_orders:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No Zoho purchase orders found in searched pages")
+
+    zoho_po = random.choice(purchase_orders)
+    zoho_po_id = str(zoho_po.get("purchaseorder_id") or "").strip()
+    po_number = str(zoho_po.get("purchaseorder_number") or "").strip()
+    vendor_zoho_id = str(zoho_po.get("vendor_id") or "").strip()
+
+    if not po_number:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected Zoho purchase order has no purchaseorder_number")
+
+    zoho_po_detail = zoho_po
+    if zoho_po_id:
+        try:
+            detail = await zoho.get_purchase_order(zoho_po_id)
+            if isinstance(detail, dict) and detail:
+                zoho_po_detail = detail
+        except Exception:
+            zoho_po_detail = zoho_po
+
+    vendor_id = None
+    if vendor_zoho_id:
+        vendor_obj = await vendor_repo.get_by_field("zoho_id", vendor_zoho_id)
+        if vendor_obj is not None:
+            vendor_id = vendor_obj.id
+
+    if vendor_id is None:
+        vendor_name = str(
+            zoho_po_detail.get("vendor_name")
+            or zoho_po.get("vendor_name")
+            or ""
+        ).strip()
+
+        if vendor_zoho_id:
+            try:
+                contact = await zoho.get_contact(vendor_zoho_id)
+                if isinstance(contact, dict) and contact:
+                    vendor_name = str(contact.get("contact_name") or vendor_name).strip()
+                    vendor_email = contact.get("email")
+                    vendor_phone = contact.get("phone") or contact.get("mobile")
+                    vendor_address = contact.get("billing_address") and str(contact.get("billing_address"))
+                else:
+                    vendor_email = None
+                    vendor_phone = None
+                    vendor_address = None
+            except Exception:
+                vendor_email = None
+                vendor_phone = None
+                vendor_address = None
+        else:
+            vendor_email = None
+            vendor_phone = None
+            vendor_address = None
+
+        if not vendor_name:
+            vendor_name = f"Zoho Vendor {vendor_zoho_id}" if vendor_zoho_id else "Zoho Vendor"
+
+        existing_vendor = await vendor_repo.get_by_field("name", vendor_name)
+        vendor_payload = {
+            "name": vendor_name,
+            "email": vendor_email,
+            "phone": vendor_phone,
+            "address": vendor_address,
+            "is_active": True,
+            "zoho_id": vendor_zoho_id or None,
+        }
+
+        if existing_vendor is None:
+            local_vendor = await vendor_repo.create(vendor_payload)
+            await db.flush()
+            vendors_created = 1
+            vendors_updated = 0
+        else:
+            local_vendor = await vendor_repo.update(existing_vendor, vendor_payload)
+            await db.flush()
+            vendors_created = 0
+            vendors_updated = 1
+
+        vendor_id = local_vendor.id
+    else:
+        vendors_created = 0
+        vendors_updated = 0
+
+    existing_po = await po_repo.get_by_field("zoho_id", zoho_po_id) if zoho_po_id else None
+    if existing_po is None:
+        existing_po = await po_repo.get_by_field("po_number", po_number)
+
+    tax_amount, shipping_amount, handling_amount = _extract_zoho_po_charges(zoho_po_detail)
+
+    po_payload = {
+        "po_number": po_number,
+        "vendor_id": vendor_id,
+        "deliver_status": _map_zoho_po_status(
+            zoho_po_detail.get("status")
+            or zoho_po_detail.get("purchaseorder_status")
+            or zoho_po.get("status")
+            or zoho_po.get("purchaseorder_status")
+        ),
+        "order_date": _to_date(
+            zoho_po_detail.get("date")
+            or zoho_po_detail.get("purchaseorder_date")
+            or zoho_po.get("date")
+            or zoho_po.get("purchaseorder_date")
+        ),
+        "expected_delivery_date": _to_date(zoho_po_detail.get("expected_delivery_date"))
+        if zoho_po_detail.get("expected_delivery_date")
+        else None,
+        "total_amount": _to_decimal(
+            zoho_po_detail.get("total")
+            or zoho_po_detail.get("total_amount")
+            or zoho_po.get("total")
+            or zoho_po.get("total_amount")
+            or 0
+        ),
+        "currency": str(
+            zoho_po_detail.get("currency_code")
+            or zoho_po.get("currency_code")
+            or "USD"
+        )[:3],
+        "tax_amount": tax_amount,
+        "shipping_amount": shipping_amount,
+        "handling_amount": handling_amount,
+        "notes": zoho_po_detail.get("notes") or zoho_po_detail.get("terms") or zoho_po.get("notes") or zoho_po.get("terms"),
+        "zoho_id": zoho_po_id or None,
+    }
+
+    if existing_po is None:
+        local_po = await po_repo.create(po_payload)
+        await db.flush()
+        purchase_orders_created = 1
+        purchase_orders_updated = 0
+    else:
+        local_po = await po_repo.update(existing_po, po_payload)
+        await db.flush()
+        purchase_orders_created = 0
+        purchase_orders_updated = 1
+
+    await db.execute(delete(PurchaseOrderItem).where(PurchaseOrderItem.purchase_order_id == local_po.id))
+
+    line_items = zoho_po_detail.get("line_items", []) or zoho_po.get("line_items", []) or []
+    items_replaced = 0
+    for line in line_items:
+        qty = int(line.get("quantity") or 0)
+        unit_price = _to_decimal(line.get("rate") or line.get("item_total") or 0)
+        total_price = _to_decimal(line.get("item_total") or (unit_price * qty))
+        if qty <= 0:
+            continue
+
+        line_sku = str(line.get("sku") or line.get("item_sku") or line.get("product_sku") or "").strip()
+        matched_variant = None
+        if line_sku:
+            matched_variant = await variant_repo.get_by_sku(line_sku.upper())
+        if matched_variant is None:
+            zoho_item_id = str(line.get("item_id") or "").strip()
+            if zoho_item_id:
+                matched_variant = await variant_repo.get_by_zoho_id(zoho_item_id)
+
+        await po_item_repo.create(
+            {
+                "purchase_order_id": local_po.id,
+                "variant_id": matched_variant.id if matched_variant else None,
+                "external_item_name": str(line.get("name") or line.get("item_name") or "Unknown item")[:255],
+                "quantity": qty,
+                "unit_price": unit_price,
+                "total_price": total_price,
+                "status": PurchaseOrderItemStatus.MATCHED if matched_variant else PurchaseOrderItemStatus.UNMATCHED,
+            }
+        )
+        items_replaced += 1
+
+    await db.commit()
+
+    return ZohoSinglePurchaseImportResponse(
+        vendors_created=vendors_created,
+        vendors_updated=vendors_updated,
+        purchase_orders_created=purchase_orders_created,
+        purchase_orders_updated=purchase_orders_updated,
+        purchase_order_items_replaced=items_replaced,
+        source_vendors_seen=1 if vendor_zoho_id else 0,
+        source_purchase_orders_seen=1,
+        selected_source_page=selected_page,
+        selected_zoho_purchase_order_id=zoho_po_id,
+        selected_po_number=po_number,
+    )
 
 
 @router.post("/purchases/import/goodwill-csv", response_model=GoodwillCsvImportResponse)

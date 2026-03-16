@@ -149,6 +149,12 @@ class ZohoPurchaseImportResponse(BaseModel):
     source_purchase_orders_seen: int = 0
 
 
+class ZohoSinglePurchaseImportResponse(ZohoPurchaseImportResponse):
+    selected_source_page: int
+    selected_zoho_purchase_order_id: str
+    selected_po_number: str
+
+
 class GoodwillCsvImportResponse(BaseModel):
     purchase_orders_created: int = 0
     purchase_orders_updated: int = 0

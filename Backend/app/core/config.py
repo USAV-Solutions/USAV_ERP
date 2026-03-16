@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     zoho_books_api_base: str = "https://www.zohoapis.com/books/v3"
     zoho_auto_outbound_sync_enabled: bool = False
     zoho_auto_inbound_sync_enabled: bool = False
+    zoho_po_cf_tax_id: str = ""
+    zoho_po_cf_shipping_fee_id: str = ""
+    zoho_po_cf_handling_fee_id: str = ""
     
     # Amazon SP-API Integration
     amazon_refresh_token: str = ""

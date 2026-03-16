@@ -13,6 +13,7 @@ import type {
   Vendor,
   VendorCreate,
   ZohoPurchaseImportResponse,
+  ZohoSinglePurchaseImportResponse,
 } from '../types/purchasing'
 
 export async function listVendors(): Promise<Vendor[]> {
@@ -100,6 +101,23 @@ export async function markPurchaseDelivered(
 
 export async function importPurchasesFromZoho(): Promise<ZohoPurchaseImportResponse> {
   const { data } = await axiosClient.post<ZohoPurchaseImportResponse>(PURCHASING.IMPORT_ZOHO)
+  return data
+}
+
+export async function importOneRandomPurchaseFromZoho(params?: {
+  sourcePage?: number
+  perPage?: number
+}): Promise<ZohoSinglePurchaseImportResponse> {
+  const query = new URLSearchParams()
+  if (params?.sourcePage !== undefined) query.set('source_page', String(params.sourcePage))
+  if (params?.perPage !== undefined) query.set('per_page', String(params.perPage))
+
+  const qs = query.toString()
+  const url = qs
+    ? `${PURCHASING.IMPORT_ZOHO_RANDOM_ONE}?${qs}`
+    : PURCHASING.IMPORT_ZOHO_RANDOM_ONE
+
+  const { data } = await axiosClient.post<ZohoSinglePurchaseImportResponse>(url)
   return data
 }
 

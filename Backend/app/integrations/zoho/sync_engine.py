@@ -22,6 +22,7 @@ from typing import Any, Optional
 
 from sqlalchemy import event
 
+from app.core.config import settings
 from app.core.database import async_session_factory
 from app.integrations.zoho.client import ZohoClient, RateLimitError
 from app.integrations.zoho.security import generate_payload_hash
@@ -142,6 +143,44 @@ def purchase_order_to_zoho_payload(po: PurchaseOrder) -> dict[str, Any]:
     }
     if po.expected_delivery_date:
         payload["delivery_date"] = po.expected_delivery_date.strftime("%Y-%m-%d")
+
+    def _to_float(value: Any) -> float:
+        try:
+            return float(value or 0)
+        except Exception:
+            return 0.0
+
+    tax_amount = _to_float(getattr(po, "tax_amount", 0))
+    shipping_amount = _to_float(getattr(po, "shipping_amount", 0))
+    handling_amount = _to_float(getattr(po, "handling_amount", 0))
+
+    custom_fields: list[dict[str, Any]] = []
+    tax_field: dict[str, Any] = {"api_name": "cf_tax", "value": f"{tax_amount:.2f}"}
+    if settings.zoho_po_cf_tax_id:
+        tax_field["customfield_id"] = settings.zoho_po_cf_tax_id
+    custom_fields.append(tax_field)
+
+    shipping_field: dict[str, Any] = {
+        "api_name": "cf_shipping_fee",
+        "value": f"{shipping_amount:.2f}",
+    }
+    if settings.zoho_po_cf_shipping_fee_id:
+        shipping_field["customfield_id"] = settings.zoho_po_cf_shipping_fee_id
+    custom_fields.append(shipping_field)
+
+    handling_field: dict[str, Any] = {
+        "api_name": "cf_handling_fee",
+        "value": f"{handling_amount:.2f}",
+    }
+    if settings.zoho_po_cf_handling_fee_id:
+        handling_field["customfield_id"] = settings.zoho_po_cf_handling_fee_id
+    custom_fields.append(handling_field)
+
+    payload["custom_fields"] = custom_fields
+
+    # Legacy/main org still relies on adjustment for S&H rollup.
+    payload["adjustment"] = tax_amount + shipping_amount + handling_amount
+    payload["adjustment_description"] = "Shipping Fee + Tax + Handling Fee"
 
     line_items: list[dict[str, Any]] = []
     for item in po.items or []:

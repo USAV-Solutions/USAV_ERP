@@ -78,6 +78,27 @@ This migration:
 
 ## Backend API Changes
 
+### Update 2026-03-16: Zoho Purchase Order Charge Mapping (Import + Export)
+
+- Enhanced Zoho Purchase Order import mapping to persist PO-level charges into local fields:
+	- `tax_amount`
+	- `shipping_amount`
+	- `handling_amount`
+- Import parsing now supports both legacy and sandbox style payloads with fallbacks:
+	- Tax from `cf_tax` custom field, then `tax_total`, then summed line-item tax values.
+	- Shipping from `cf_shipping_fee` custom field.
+	- Handling from `cf_handling_fee` custom field.
+	- Legacy fallback: when shipping/handling custom fields are missing, `adjustment` is treated as shipping.
+- Outbound PO sync payload now includes:
+	- `custom_fields` for `cf_tax`, `cf_shipping_fee`, and `cf_handling_fee`.
+	- `adjustment` set to `tax + shipping + handling`.
+	- `adjustment_description` set to `Shipping Fee + Tax + Handling Fee`.
+- Added optional configuration keys for explicit Zoho custom field IDs:
+	- `zoho_po_cf_tax_id`
+	- `zoho_po_cf_shipping_fee_id`
+	- `zoho_po_cf_handling_fee_id`
+- Added test-focused import endpoint `POST /api/v1/purchases/import/zoho/random-one` to import a single random Zoho Purchase Order from a chosen source page.
+
 ### New Lookup Endpoints
 
 **Base Path**: `/api/v1`
@@ -138,6 +159,17 @@ This migration:
 ---
 
 ## Frontend UI Changes
+
+### Update 2026-03-16: Purchasing PO Creation + Line Item Entry Improvements
+
+- Added inline purchase-order line item creation in expanded PO rows.
+- New line-item total is auto-calculated (`quantity * unit_price`) and treated as read-only in both create and edit flows.
+- Added line-item summary row that shows the summed line-item total per PO.
+- Removed separate Add Vendor header action; vendor creation is now integrated into Create PO using searchable vendor input with one-click create from typed value.
+- Moved the Create Vendor action to the right side of the vendor search field for faster access while creating a PO.
+- Extended Create PO form with `tax_amount`, `shipping_amount`, and `handling_amount` inputs.
+- Added per-PO **Add New Item** toggles so inline line-item create forms stay hidden until requested.
+- Added Purchasing header action **Import 1 Random PO** that triggers test-focused import of a single random Zoho purchase order.
 
 ### Update 2026-03-16: Purchasing Line-Item Matching + Delete Actions
 

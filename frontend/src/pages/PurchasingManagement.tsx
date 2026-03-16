@@ -1,6 +1,7 @@
 import { ChangeEvent, Fragment, useRef, useState } from 'react'
 import {
   Alert,
+  Autocomplete,
   Box,
   Button,
   CircularProgress,
@@ -11,7 +12,6 @@ import {
   DialogContent,
   DialogTitle,
   Grid,
-  MenuItem,
   Paper,
   Snackbar,
   Stack,
@@ -37,10 +37,12 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
+  addPurchaseOrderItem,
   createPurchaseOrder,
   createVendor,
   deletePurchaseItem,
   importPurchasesFromGoodwillCsv,
+  importOneRandomPurchaseFromZoho,
   importPurchasesFromZoho,
   listPurchaseOrders,
   listPurchaseOrdersPaged,
@@ -79,6 +81,128 @@ interface PurchaseOrderItemRowProps {
   onNotify: (msg: string, severity: 'success' | 'error') => void
 }
 
+interface AddPurchaseOrderItemRowProps {
+  poId: number
+  onChanged: () => Promise<void>
+  onNotify: (msg: string, severity: 'success' | 'error') => void
+  onDone: () => void
+}
+
+function AddPurchaseOrderItemRow({ poId, onChanged, onNotify, onDone }: AddPurchaseOrderItemRowProps) {
+  const [externalItemId, setExternalItemId] = useState('')
+  const [externalItemName, setExternalItemName] = useState('')
+  const [quantity, setQuantity] = useState('1')
+  const [unitPrice, setUnitPrice] = useState('0')
+  const [selectedVariant, setSelectedVariant] = useState<VariantSearchResult | null>(null)
+
+  const parsedQuantity = Number(quantity) || 0
+  const parsedUnitPrice = Number(unitPrice) || 0
+  const computedTotal = Math.max(parsedQuantity, 0) * Math.max(parsedUnitPrice, 0)
+
+  const addItemMutation = useMutation({
+    mutationFn: () =>
+      addPurchaseOrderItem(poId, {
+        external_item_id: externalItemId.trim() || undefined,
+        external_item_name: externalItemName.trim(),
+        quantity: parsedQuantity,
+        unit_price: parsedUnitPrice,
+        total_price: computedTotal,
+        variant_id: selectedVariant?.id,
+      }),
+    onSuccess: async () => {
+      setExternalItemId('')
+      setExternalItemName('')
+      setQuantity('1')
+      setUnitPrice('0')
+      setSelectedVariant(null)
+      await onChanged()
+      onNotify('Line item created.', 'success')
+      onDone()
+    },
+    onError: (error: { response?: { data?: { detail?: string } }; message?: string }) => {
+      onNotify(error.response?.data?.detail || error.message || 'Failed to create line item.', 'error')
+    },
+  })
+
+  const createDisabled =
+    addItemMutation.isPending || !externalItemName.trim() || parsedQuantity <= 0 || parsedUnitPrice < 0
+
+  return (
+    <>
+      <TableRow sx={{ backgroundColor: 'background.paper' }}>
+        <TableCell>
+          <TextField
+            size="small"
+            value={externalItemId}
+            onChange={(e) => setExternalItemId(e.target.value)}
+            placeholder="Optional"
+            fullWidth
+          />
+        </TableCell>
+        <TableCell>
+          <TextField
+            size="small"
+            value={externalItemName}
+            onChange={(e) => setExternalItemName(e.target.value)}
+            placeholder="New line item name"
+            fullWidth
+            required
+          />
+        </TableCell>
+        <TableCell>{selectedVariant?.full_sku || '-'}</TableCell>
+        <TableCell align="center">
+          <TextField
+            size="small"
+            type="number"
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+            inputProps={{ min: 1, step: 1 }}
+            sx={{ width: 90 }}
+          />
+        </TableCell>
+        <TableCell align="right">
+          <TextField
+            size="small"
+            type="number"
+            value={unitPrice}
+            onChange={(e) => setUnitPrice(e.target.value)}
+            inputProps={{ min: 0, step: 0.01 }}
+            sx={{ width: 120 }}
+          />
+        </TableCell>
+        <TableCell align="center">
+          <Chip size="small" color="default" label="NEW" />
+        </TableCell>
+        <TableCell align="center">
+          <Stack direction="row" spacing={1} justifyContent="center">
+            <Button
+              size="small"
+              variant="contained"
+              onClick={() => addItemMutation.mutate()}
+              disabled={createDisabled}
+            >
+              {addItemMutation.isPending ? 'Adding...' : 'Add Line'}
+            </Button>
+            <Button size="small" onClick={onDone} disabled={addItemMutation.isPending}>
+              Cancel
+            </Button>
+          </Stack>
+        </TableCell>
+      </TableRow>
+      <TableRow sx={{ backgroundColor: 'background.paper' }}>
+        <TableCell colSpan={7}>
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', md: 'center' }}>
+            <VariantSearchAutocomplete value={selectedVariant} onChange={setSelectedVariant} />
+            <Typography variant="body2" color="text.secondary">
+              Total Price (auto): {computedTotal.toFixed(2)}
+            </Typography>
+          </Stack>
+        </TableCell>
+      </TableRow>
+    </>
+  )
+}
+
 function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRowProps) {
   const [promptOpen, setPromptOpen] = useState(false)
   const [showMatch, setShowMatch] = useState(false)
@@ -88,16 +212,19 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
   const [externalItemName, setExternalItemName] = useState(item.external_item_name)
   const [quantity, setQuantity] = useState(String(item.quantity))
   const [unitPrice, setUnitPrice] = useState(String(item.unit_price))
-  const [totalPrice, setTotalPrice] = useState(String(item.total_price))
+
+  const parsedQuantity = Number(quantity) || 0
+  const parsedUnitPrice = Number(unitPrice) || 0
+  const computedTotalPrice = Math.max(parsedQuantity, 0) * Math.max(parsedUnitPrice, 0)
 
   const saveMutation = useMutation({
     mutationFn: () =>
       updatePurchaseItem(item.id, {
         external_item_id: externalItemId.trim() || null,
         external_item_name: externalItemName.trim(),
-        quantity: Number(quantity),
-        unit_price: Number(unitPrice),
-        total_price: Number(totalPrice),
+        quantity: parsedQuantity,
+        unit_price: parsedUnitPrice,
+        total_price: computedTotalPrice,
         variant_id: selectedVariant ? selectedVariant.id : item.variant_id ?? undefined,
       }),
     onSuccess: async () => {
@@ -144,7 +271,6 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
     setExternalItemName(item.external_item_name)
     setQuantity(String(item.quantity))
     setUnitPrice(String(item.unit_price))
-    setTotalPrice(String(item.total_price))
     setSelectedVariant(null)
     setPromptOpen(true)
   }
@@ -234,7 +360,13 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
           <TextField label="Item Name" value={externalItemName} onChange={(e) => setExternalItemName(e.target.value)} fullWidth />
           <TextField label="Quantity" type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} fullWidth />
           <TextField label="Unit Price" type="number" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} fullWidth />
-          <TextField label="Total Price" type="number" value={totalPrice} onChange={(e) => setTotalPrice(e.target.value)} fullWidth />
+          <TextField
+            label="Total Price (Auto)"
+            type="number"
+            value={computedTotalPrice.toFixed(2)}
+            InputProps={{ readOnly: true }}
+            fullWidth
+          />
           <VariantSearchAutocomplete value={selectedVariant} onChange={setSelectedVariant} />
           <Typography variant="caption" color="text.secondary">
             Current SKU: {item.variant_sku || 'Unmatched'}
@@ -278,7 +410,6 @@ export default function PurchasingManagement() {
   const { hasRole } = useAuth()
 
   const [selectedPoId, setSelectedPoId] = useState<number | null>(null)
-  const [createVendorOpen, setCreateVendorOpen] = useState(false)
   const [createPoOpen, setCreatePoOpen] = useState(false)
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false)
   const [bulkLoading, setBulkLoading] = useState(false)
@@ -287,6 +418,7 @@ export default function PurchasingManagement() {
   const [bulkProgress, setBulkProgress] = useState({ queued: 0, success: 0, failed: 0 })
   const [bulkDone, setBulkDone] = useState(false)
   const [syncingPoId, setSyncingPoId] = useState<number | null>(null)
+  const [addingItemPoId, setAddingItemPoId] = useState<number | null>(null)
   const goodwillFileInputRef = useRef<HTMLInputElement | null>(null)
   const [expandedPoId, setExpandedPoId] = useState<number | null>(null)
   const [snackbar, setSnackbar] = useState<{ open: boolean; msg: string; severity: 'success' | 'error' }>({
@@ -295,12 +427,15 @@ export default function PurchasingManagement() {
     severity: 'success',
   })
 
-  const [vendorForm, setVendorForm] = useState<VendorCreate>({ name: '', is_active: true })
+  const [vendorSearchInput, setVendorSearchInput] = useState('')
   const [poForm, setPoForm] = useState<PurchaseOrderCreate>({
     po_number: '',
     vendor_id: 0,
     order_date: new Date().toISOString().slice(0, 10),
     total_amount: 0,
+    tax_amount: 0,
+    shipping_amount: 0,
+    handling_amount: 0,
     currency: 'USD',
     notes: '',
     items: [],
@@ -316,13 +451,13 @@ export default function PurchasingManagement() {
     await queryClient.invalidateQueries({ queryKey: ['purchases'] })
   }
 
-  const createVendorMutation = useMutation({
-    mutationFn: createVendor,
-    onSuccess: async () => {
-      setCreateVendorOpen(false)
-      setVendorForm({ name: '', is_active: true })
+  const createVendorInlineMutation = useMutation({
+    mutationFn: (body: VendorCreate) => createVendor(body),
+    onSuccess: async (vendor) => {
       await queryClient.invalidateQueries({ queryKey: ['vendors'] })
-      setSnackbar({ open: true, msg: 'Vendor created.', severity: 'success' })
+      setPoForm((prev) => ({ ...prev, vendor_id: vendor.id }))
+      setVendorSearchInput(vendor.name)
+      setSnackbar({ open: true, msg: 'Vendor created and selected.', severity: 'success' })
     },
     onError: () => setSnackbar({ open: true, msg: 'Failed to create vendor.', severity: 'error' }),
   })
@@ -336,10 +471,14 @@ export default function PurchasingManagement() {
         vendor_id: 0,
         order_date: new Date().toISOString().slice(0, 10),
         total_amount: 0,
+        tax_amount: 0,
+        shipping_amount: 0,
+        handling_amount: 0,
         currency: 'USD',
         notes: '',
         items: [],
       })
+      setVendorSearchInput('')
       setSelectedPoId(po.id)
       await queryClient.invalidateQueries({ queryKey: ['purchases'] })
       setSnackbar({ open: true, msg: 'Purchase order created.', severity: 'success' })
@@ -362,6 +501,27 @@ export default function PurchasingManagement() {
     },
     onError: () => {
       setSnackbar({ open: true, msg: 'Failed to import purchasing list from Zoho.', severity: 'error' })
+    },
+  })
+
+  const importRandomZohoMutation = useMutation({
+    mutationFn: () => {
+      const randomSourcePage = Math.floor(Math.random() * 10) + 1
+      return importOneRandomPurchaseFromZoho({ sourcePage: randomSourcePage, perPage: 200 })
+    },
+    onSuccess: async (res) => {
+      await queryClient.invalidateQueries({ queryKey: ['vendors'] })
+      await queryClient.invalidateQueries({ queryKey: ['purchases'] })
+      setSnackbar({
+        open: true,
+        severity: 'success',
+        msg:
+          `Imported 1 random Zoho PO: ${res.selected_po_number} (Zoho ID ${res.selected_zoho_purchase_order_id}) ` +
+          `from page ${res.selected_source_page}.`,
+      })
+    },
+    onError: () => {
+      setSnackbar({ open: true, msg: 'Failed to import a random purchase order from Zoho.', severity: 'error' })
     },
   })
 
@@ -468,6 +628,10 @@ export default function PurchasingManagement() {
   }
 
   const bulkPercent = bulkTotal ? Math.min(Math.round((bulkProgress.queued / bulkTotal) * 100), 100) : 0
+  const selectedVendor = vendors.find((vendor) => vendor.id === poForm.vendor_id) || null
+  const vendorNameExists = vendors.some(
+    (vendor) => vendor.name.trim().toLowerCase() === vendorSearchInput.trim().toLowerCase(),
+  )
 
   return (
     <Box>
@@ -491,9 +655,16 @@ export default function PurchasingManagement() {
           <Button
             variant="outlined"
             onClick={() => importZohoMutation.mutate()}
-            disabled={importZohoMutation.isPending}
+            disabled={importZohoMutation.isPending || importRandomZohoMutation.isPending}
           >
             {importZohoMutation.isPending ? 'Importing...' : 'Import from Zoho'}
+          </Button>
+          <Button
+            variant="outlined"
+            onClick={() => importRandomZohoMutation.mutate()}
+            disabled={importZohoMutation.isPending || importRandomZohoMutation.isPending}
+          >
+            {importRandomZohoMutation.isPending ? 'Importing random PO...' : 'Import 1 Random PO'}
           </Button>
           <Button
             variant="outlined"
@@ -501,9 +672,6 @@ export default function PurchasingManagement() {
             disabled={importGoodwillCsvMutation.isPending}
           >
             {importGoodwillCsvMutation.isPending ? 'Importing CSV...' : 'Import Goodwill CSV'}
-          </Button>
-          <Button startIcon={<Add />} variant="outlined" onClick={() => setCreateVendorOpen(true)}>
-            Add Vendor
           </Button>
           <Button startIcon={<Add />} variant="contained" onClick={() => setCreatePoOpen(true)}>
             Create PO
@@ -616,13 +784,40 @@ export default function PurchasingManagement() {
                                           onNotify={(msg, severity) => setSnackbar({ open: true, msg, severity })}
                                         />
                                       ))}
-                                      {!po.items?.length && (
-                                        <TableRow>
-                                          <TableCell colSpan={7} align="center">
-                                            No line items.
-                                          </TableCell>
-                                        </TableRow>
+                                      <TableRow>
+                                        <TableCell colSpan={7}>
+                                          <Button
+                                            size="small"
+                                            variant="outlined"
+                                            startIcon={<Add />}
+                                            onClick={() =>
+                                              setAddingItemPoId((current) => (current === po.id ? null : po.id))
+                                            }
+                                          >
+                                            {addingItemPoId === po.id ? 'Hide Add Item' : 'Add New Item'}
+                                          </Button>
+                                        </TableCell>
+                                      </TableRow>
+                                      {addingItemPoId === po.id && (
+                                        <AddPurchaseOrderItemRow
+                                          poId={po.id}
+                                          onChanged={refreshPurchases}
+                                          onNotify={(msg, severity) => setSnackbar({ open: true, msg, severity })}
+                                          onDone={() => setAddingItemPoId(null)}
+                                        />
                                       )}
+                                      <TableRow>
+                                        <TableCell colSpan={4} />
+                                        <TableCell align="right" sx={{ fontWeight: 600 }}>
+                                          {(po.items || [])
+                                            .reduce((sum, item) => sum + Number(item.total_price || 0), 0)
+                                            .toFixed(2)}
+                                        </TableCell>
+                                        <TableCell align="center" sx={{ fontWeight: 600 }}>
+                                          Line Total
+                                        </TableCell>
+                                        <TableCell />
+                                      </TableRow>
                                     </TableBody>
                                   </Table>
                                 </Box>
@@ -640,47 +835,6 @@ export default function PurchasingManagement() {
         </Grid>
       </Grid>
 
-      <Dialog open={createVendorOpen} onClose={() => setCreateVendorOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>Add Vendor</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <TextField
-              label="Name"
-              value={vendorForm.name}
-              onChange={(e) => setVendorForm((prev) => ({ ...prev, name: e.target.value }))}
-              required
-            />
-            <TextField
-              label="Email"
-              value={vendorForm.email || ''}
-              onChange={(e) => setVendorForm((prev) => ({ ...prev, email: e.target.value }))}
-            />
-            <TextField
-              label="Phone"
-              value={vendorForm.phone || ''}
-              onChange={(e) => setVendorForm((prev) => ({ ...prev, phone: e.target.value }))}
-            />
-            <TextField
-              label="Address"
-              value={vendorForm.address || ''}
-              onChange={(e) => setVendorForm((prev) => ({ ...prev, address: e.target.value }))}
-              multiline
-              minRows={2}
-            />
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCreateVendorOpen(false)}>Cancel</Button>
-          <Button
-            variant="contained"
-            disabled={!vendorForm.name}
-            onClick={() => createVendorMutation.mutate(vendorForm)}
-          >
-            Save
-          </Button>
-        </DialogActions>
-      </Dialog>
-
       <Dialog open={createPoOpen} onClose={() => setCreatePoOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle>Create Purchase Order</DialogTitle>
         <DialogContent>
@@ -691,19 +845,45 @@ export default function PurchasingManagement() {
               onChange={(e) => setPoForm((prev) => ({ ...prev, po_number: e.target.value }))}
               required
             />
-            <TextField
-              select
-              label="Vendor"
-              value={poForm.vendor_id || ''}
-              onChange={(e) => setPoForm((prev) => ({ ...prev, vendor_id: Number(e.target.value) }))}
-              required
-            >
-              {vendors.map((v) => (
-                <MenuItem key={v.id} value={v.id}>
-                  {v.name}
-                </MenuItem>
-              ))}
-            </TextField>
+            <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', md: 'center' }}>
+              <Autocomplete
+                options={vendors}
+                value={selectedVendor}
+                inputValue={vendorSearchInput}
+                onChange={(_event, nextVendor) => {
+                  setPoForm((prev) => ({ ...prev, vendor_id: nextVendor?.id || 0 }))
+                  setVendorSearchInput(nextVendor?.name || '')
+                }}
+                onInputChange={(_event, nextInput) => {
+                  setVendorSearchInput(nextInput)
+                  const normalizedInput = nextInput.trim().toLowerCase()
+                  const matched = vendors.find((vendor) =>
+                    vendor.name.trim().toLowerCase().includes(normalizedInput),
+                  )
+                  setPoForm((prev) => ({ ...prev, vendor_id: matched?.id || 0 }))
+                }}
+                getOptionLabel={(option) => option.name}
+                isOptionEqualToValue={(option, value) => option.id === value.id}
+                sx={{ flex: 1 }}
+                renderInput={(params) => <TextField {...params} label="Vendor" required />}
+              />
+              <Button
+                variant="outlined"
+                disabled={
+                  createVendorInlineMutation.isPending || !vendorSearchInput.trim() || vendorNameExists
+                }
+                onClick={() =>
+                  createVendorInlineMutation.mutate({
+                    name: vendorSearchInput.trim(),
+                    is_active: true,
+                  })
+                }
+              >
+                {createVendorInlineMutation.isPending
+                  ? 'Creating vendor...'
+                  : `Create Vendor "${vendorSearchInput.trim() || 'New Vendor'}"`}
+              </Button>
+            </Stack>
             <TextField
               label="Order Date"
               type="date"
@@ -725,6 +905,28 @@ export default function PurchasingManagement() {
               type="number"
               value={poForm.total_amount}
               onChange={(e) => setPoForm((prev) => ({ ...prev, total_amount: Number(e.target.value) }))}
+            />
+            <TextField
+              label="Tax Amount"
+              type="number"
+              value={poForm.tax_amount ?? 0}
+              onChange={(e) => setPoForm((prev) => ({ ...prev, tax_amount: Number(e.target.value) }))}
+            />
+            <TextField
+              label="Shipping Amount"
+              type="number"
+              value={poForm.shipping_amount ?? 0}
+              onChange={(e) =>
+                setPoForm((prev) => ({ ...prev, shipping_amount: Number(e.target.value) }))
+              }
+            />
+            <TextField
+              label="Handling Amount"
+              type="number"
+              value={poForm.handling_amount ?? 0}
+              onChange={(e) =>
+                setPoForm((prev) => ({ ...prev, handling_amount: Number(e.target.value) }))
+              }
             />
             <TextField
               label="Currency"
