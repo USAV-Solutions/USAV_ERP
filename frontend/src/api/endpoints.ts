@@ -83,6 +83,7 @@ export const ORDERS = {
   // CRUD
   LIST: '/orders',
   ORDER: (id: number) => `/orders/${id}`,
+  DELETE: (id: number) => `/orders/${id}`,
   UPDATE_STATUS: (id: number) => `/orders/${id}`,
   UPDATE_SHIPPING: (id: number) => `/orders/${id}/shipping`,
 
@@ -105,7 +106,9 @@ export const PURCHASING = {
   PURCHASES: '/purchases',
   PURCHASE: (id: number) => `/purchases/${id}`,
   PURCHASE_ITEMS: (id: number) => `/purchases/${id}/items`,
+  PURCHASE_ITEM: (itemId: number) => `/purchases/items/${itemId}`,
   IMPORT_ZOHO: '/purchases/import/zoho',
+  IMPORT_GOODWILL_CSV: '/purchases/import/goodwill-csv',
   MATCH_ITEM: (itemId: number) => `/purchases/items/${itemId}/match`,
   MARK_DELIVERED: (id: number) => `/purchases/${id}/mark-delivered`,
 }

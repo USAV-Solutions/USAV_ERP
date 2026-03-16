@@ -40,6 +40,7 @@ import {
   DialogContent,
   DialogActions,
   LinearProgress,
+  TextField,
 } from '@mui/material'
 import {
   Refresh,
@@ -50,7 +51,7 @@ import {
 } from '@mui/icons-material'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 
-import { listOrders, getOrder, getSyncStatus, updateOrderStatus, updateShippingStatus } from '../api/orders'
+import { listOrders, getSyncStatus, updateOrderStatus, updateShippingStatus, deleteOrder } from '../api/orders'
 import { forceSyncOrder } from '../api/sync'
 import type {
   OrderBrief,
@@ -70,6 +71,8 @@ import OrderItemsPanel from '../components/orders/OrderItemsPanel'
 import { useAuth } from '../hooks/useAuth'
 import SearchField from '../components/common/SearchField'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
+import LongPressTableRow from '../components/common/LongPressTableRow'
+import HoldActionPromptDialog from '../components/common/HoldActionPromptDialog'
 
 // ── Label maps ───────────────────────────────────────────────────────
 
@@ -155,6 +158,11 @@ export default function OrdersManagement() {
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success')
   const [statusUpdatingId, setStatusUpdatingId] = useState<number | null>(null)
   const [shippingUpdatingId, setShippingUpdatingId] = useState<number | null>(null)
+  const [holdPromptOpen, setHoldPromptOpen] = useState(false)
+  const [selectedOrder, setSelectedOrder] = useState<OrderBrief | null>(null)
+  const [editOrderStatus, setEditOrderStatus] = useState<OrderStatus>('PENDING')
+  const [editShippingStatus, setEditShippingStatus] = useState<ShippingStatus>('PENDING')
+  const [editNotes, setEditNotes] = useState('')
 
   // Bulk Zoho sync (matched orders only)
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false)
@@ -248,6 +256,69 @@ export default function OrdersManagement() {
     },
     onSettled: () => setShippingUpdatingId(null),
   })
+
+  const saveHoldOrderMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedOrder) {
+        throw new Error('No order selected')
+      }
+
+      await updateOrderStatus(selectedOrder.id, {
+        status: editOrderStatus,
+        notes: editNotes,
+      })
+
+      await updateShippingStatus(selectedOrder.id, {
+        shipping_status: editShippingStatus,
+      })
+    },
+    onSuccess: async () => {
+      setSnackbarSeverity('success')
+      setSnackbarMessage('Order updated successfully.')
+      setSnackbarOpen(true)
+      setHoldPromptOpen(false)
+      setSelectedOrder(null)
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+    },
+    onError: (error: { response?: { data?: { detail?: string } }; message?: string }) => {
+      const detail = error.response?.data?.detail || error.message || 'Order update failed.'
+      setSnackbarSeverity('error')
+      setSnackbarMessage(detail)
+      setSnackbarOpen(true)
+    },
+  })
+
+  const deleteOrderMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedOrder) {
+        throw new Error('No order selected')
+      }
+      return deleteOrder(selectedOrder.id)
+    },
+    onSuccess: async () => {
+      setSnackbarSeverity('success')
+      setSnackbarMessage('Order deleted successfully.')
+      setSnackbarOpen(true)
+      setHoldPromptOpen(false)
+      setSelectedOrder(null)
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      await queryClient.invalidateQueries({ queryKey: ['syncStatus'] })
+    },
+    onError: (error: { response?: { data?: { detail?: string } }; message?: string }) => {
+      const detail = error.response?.data?.detail || error.message || 'Order delete failed.'
+      setSnackbarSeverity('error')
+      setSnackbarMessage(detail)
+      setSnackbarOpen(true)
+    },
+  })
+
+  const openHoldPrompt = (order: OrderBrief) => {
+    setSelectedOrder(order)
+    setEditOrderStatus(order.status)
+    setEditShippingStatus(order.shipping_status)
+    setEditNotes('')
+    setHoldPromptOpen(true)
+  }
 
   const handleForceSync = (orderId: number, e: React.MouseEvent) => {
     e.stopPropagation() // prevent row expand
@@ -574,9 +645,12 @@ export default function OrdersManagement() {
                   const isExpanded = expandedOrderId === order.id
                   return (
                     <Fragment key={order.id}>
-                      <TableRow
+                      <LongPressTableRow
                         hover
-                        sx={{ cursor: 'pointer', '& > *': { borderBottom: isExpanded ? 'unset' : undefined } }}
+                        payload={order}
+                        onLongPress={openHoldPrompt}
+                        enableLongPress={hasRole(['ADMIN'])}
+                        rowSx={{ cursor: 'pointer', '& > *': { borderBottom: isExpanded ? 'unset' : undefined } }}
                         onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
                       >
                         <TableCell sx={{ width: 40, px: 1 }}>
@@ -670,7 +744,7 @@ export default function OrdersManagement() {
                             </Tooltip>
                           </TableCell>
                         )}
-                      </TableRow>
+                      </LongPressTableRow>
                       {/* Expandable items panel */}
                       <TableRow>
                         <TableCell sx={{ py: 0 }} colSpan={columnCount}>
@@ -775,6 +849,78 @@ export default function OrdersManagement() {
           {snackbarMessage}
         </Alert>
       </Snackbar>
+
+      <HoldActionPromptDialog
+        open={holdPromptOpen}
+        onClose={() => {
+          setHoldPromptOpen(false)
+          setSelectedOrder(null)
+        }}
+        title="Edit Order"
+        onSave={() => saveHoldOrderMutation.mutate()}
+        onDelete={() => deleteOrderMutation.mutate()}
+        saveDisabled={!selectedOrder}
+        deleteDisabled={!selectedOrder || !hasRole(['ADMIN'])}
+        saveLoading={saveHoldOrderMutation.isPending}
+        deleteLoading={deleteOrderMutation.isPending}
+        deleteConfirmTitle="Delete Order"
+        deleteConfirmMessage={
+          <Typography>
+            Delete order <strong>{selectedOrder?.external_order_number || selectedOrder?.external_order_id}</strong>? This action cannot be undone.
+          </Typography>
+        }
+      >
+        <Stack spacing={2} sx={{ mt: 1 }}>
+          <TextField
+            label="Order"
+            value={selectedOrder ? selectedOrder.external_order_number || selectedOrder.external_order_id : ''}
+            fullWidth
+            disabled
+          />
+          <TextField
+            label="Customer"
+            value={selectedOrder?.customer_name || ''}
+            fullWidth
+            disabled
+          />
+          <FormControl fullWidth size="small">
+            <InputLabel>Order Status</InputLabel>
+            <Select
+              value={editOrderStatus}
+              onChange={(e) => setEditOrderStatus(e.target.value as OrderStatus)}
+              label="Order Status"
+            >
+              {ORDER_STATUS_OPTIONS.map((s) => (
+                <MenuItem key={s} value={s}>
+                  {s.replaceAll('_', ' ')}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <FormControl fullWidth size="small">
+            <InputLabel>Shipping Status</InputLabel>
+            <Select
+              value={editShippingStatus}
+              onChange={(e) => setEditShippingStatus(e.target.value as ShippingStatus)}
+              label="Shipping Status"
+            >
+              {SHIPPING_STATUS_OPTIONS.map((s) => (
+                <MenuItem key={s} value={s}>
+                  {s.replaceAll('_', ' ')}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <TextField
+            label="Processing Notes"
+            value={editNotes}
+            onChange={(e) => setEditNotes(e.target.value)}
+            multiline
+            minRows={3}
+            fullWidth
+          />
+        </Stack>
+      </HoldActionPromptDialog>
     </Box>
   )
 }

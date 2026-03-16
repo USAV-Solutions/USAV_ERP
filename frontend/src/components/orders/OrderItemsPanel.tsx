@@ -23,8 +23,6 @@ import {
   Alert,
   Chip,
   Stack,
-  Autocomplete,
-  AutocompleteRenderInputParams,
   Button,
 } from '@mui/material'
 import {
@@ -38,9 +36,8 @@ import {
   matchItem,
   confirmItem,
   rejectItem,
-  searchVariants,
 } from '../../api/orders'
-import { useDebouncedValue } from '../../hooks/useDebouncedValue'
+import VariantSearchAutocomplete from '../common/VariantSearchAutocomplete'
 import StatusBadge from './StatusBadge'
 import type {
   OrderDetail,
@@ -133,17 +130,7 @@ export default function OrderItemsPanel({ orderId }: OrderItemsPanelProps) {
 
 function ItemRow({ item, onAction }: { item: OrderItemDetail; onAction: () => void }) {
   const [selectedVariant, setSelectedVariant] = useState<VariantSearchResult | null>(null)
-  const [searchInput, setSearchInput] = useState('')
-  const debouncedSearchInput = useDebouncedValue(searchInput, 200)
   const [showMatch, setShowMatch] = useState(false)
-
-  // Variant search query
-  const { data: variantOptions = [], isFetching: searchLoading } = useQuery<VariantSearchResult[]>({
-    queryKey: ['variantSearch', debouncedSearchInput],
-    queryFn: () => searchVariants(debouncedSearchInput),
-    enabled: debouncedSearchInput.length >= 1,
-    staleTime: 30_000,
-  })
 
   const matchMutation = useMutation({
     mutationFn: () =>
@@ -153,7 +140,6 @@ function ItemRow({ item, onAction }: { item: OrderItemDetail; onAction: () => vo
     onSuccess: () => {
       setShowMatch(false)
       setSelectedVariant(null)
-      setSearchInput('')
       onAction()
     },
   })
@@ -261,39 +247,7 @@ function ItemRow({ item, onAction }: { item: OrderItemDetail; onAction: () => vo
         <TableRow>
           <TableCell colSpan={8} sx={{ py: 1, backgroundColor: 'background.paper' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, pl: 1 }}>
-              <Autocomplete<VariantSearchResult>
-                size="small"
-                sx={{ width: 360 }}
-                options={variantOptions}
-                loading={searchLoading}
-                value={selectedVariant}
-                onChange={(_e, value) => setSelectedVariant(value)}
-                onInputChange={(_e, value) => setSearchInput(value)}
-                getOptionLabel={(opt: VariantSearchResult) => `${opt.full_sku} — ${opt.product_name}`}
-                isOptionEqualToValue={(opt: VariantSearchResult, val: VariantSearchResult) => opt.id === val.id}
-                renderOption={(props, opt: VariantSearchResult) => (
-                  <li {...(props as React.HTMLAttributes<HTMLLIElement>)} key={opt.id}>
-                    <Box>
-                      <Typography variant="body2" fontWeight={600}>
-                        {opt.full_sku}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {opt.product_name}
-                        {opt.color_code && ` · ${opt.color_code}`}
-                        {opt.condition_code && ` · ${opt.condition_code}`}
-                      </Typography>
-                    </Box>
-                  </li>
-                )}
-                renderInput={(params: AutocompleteRenderInputParams) => (
-                  <TextField
-                    {...params}
-                    label="Search variant by name or SKU"
-                    placeholder="Type to search..."
-                  />
-                )}
-                noOptionsText={searchInput.length < 1 ? 'Type to search...' : 'No variants found'}
-              />
+              <VariantSearchAutocomplete value={selectedVariant} onChange={setSelectedVariant} />
               <Button
                 size="small"
                 variant="contained"

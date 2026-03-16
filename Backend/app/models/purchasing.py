@@ -116,6 +116,11 @@ class PurchaseOrder(Base, ZohoSyncMixin, TimestampMixin):
     expected_delivery_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     total_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD", server_default="USD")
+    tracking_number: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0, server_default="0")
+    shipping_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0, server_default="0")
+    handling_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0, server_default="0")
+    source: Mapped[str] = mapped_column(String(50), nullable=False, default="MANUAL", server_default="MANUAL")
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     vendor: Mapped["Vendor"] = relationship(
@@ -158,6 +163,7 @@ class PurchaseOrderItem(Base, TimestampMixin):
         ForeignKey("product_variant.id", ondelete="SET NULL"),
         nullable=True,
     )
+    external_item_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     external_item_name: Mapped[str] = mapped_column(String(255), nullable=False)
     quantity: Mapped[int] = mapped_column(nullable=False)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)

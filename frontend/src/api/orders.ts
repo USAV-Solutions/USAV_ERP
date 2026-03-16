@@ -72,6 +72,10 @@ export async function updateShippingStatus(
   return data
 }
 
+export async function deleteOrder(orderId: number): Promise<void> {
+  await axiosClient.delete(ORDERS.DELETE(orderId))
+}
+
 // ── Sync ─────────────────────────────────────────────────────────────
 
 export async function syncOrders(body: SyncRequest = {}): Promise<SyncResponse[]> {

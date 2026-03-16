@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react'
+import { ChangeEvent, Fragment, useRef, useState } from 'react'
 import {
   Alert,
   Box,
@@ -32,18 +32,26 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   createPurchaseOrder,
   createVendor,
+  deletePurchaseItem,
+  importPurchasesFromGoodwillCsv,
   importPurchasesFromZoho,
   listPurchaseOrders,
   listPurchaseOrdersPaged,
   listVendors,
+  updatePurchaseItem,
 } from '../api/purchasing'
 import { forceSyncPurchase } from '../api/sync'
 import type {
   PurchaseOrder,
   PurchaseOrderCreate,
+  PurchaseOrderItem,
   VendorCreate,
 } from '../types/purchasing'
 import { useAuth } from '../hooks/useAuth'
+import VariantSearchAutocomplete from '../components/common/VariantSearchAutocomplete'
+import HoldActionPromptDialog from '../components/common/HoldActionPromptDialog'
+import LongPressTableRow from '../components/common/LongPressTableRow'
+import type { VariantSearchResult } from '../types/orders'
 
 const statusColor = {
   CREATED: 'default',
@@ -56,6 +64,110 @@ const itemStatusColor = {
   MATCHED: 'info',
   RECEIVED: 'success',
 } as const
+
+interface PurchaseOrderItemRowProps {
+  item: PurchaseOrderItem
+  onChanged: () => Promise<void>
+  onNotify: (msg: string, severity: 'success' | 'error') => void
+}
+
+function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRowProps) {
+  const [promptOpen, setPromptOpen] = useState(false)
+  const [selectedVariant, setSelectedVariant] = useState<VariantSearchResult | null>(null)
+  const [externalItemId, setExternalItemId] = useState(item.external_item_id || '')
+  const [externalItemName, setExternalItemName] = useState(item.external_item_name)
+  const [quantity, setQuantity] = useState(String(item.quantity))
+  const [unitPrice, setUnitPrice] = useState(String(item.unit_price))
+  const [totalPrice, setTotalPrice] = useState(String(item.total_price))
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      updatePurchaseItem(item.id, {
+        external_item_id: externalItemId.trim() || null,
+        external_item_name: externalItemName.trim(),
+        quantity: Number(quantity),
+        unit_price: Number(unitPrice),
+        total_price: Number(totalPrice),
+        variant_id: selectedVariant ? selectedVariant.id : item.variant_id ?? undefined,
+      }),
+    onSuccess: async () => {
+      setPromptOpen(false)
+      await onChanged()
+      onNotify('Item updated successfully.', 'success')
+    },
+    onError: (error: { response?: { data?: { detail?: string } }; message?: string }) => {
+      onNotify(error.response?.data?.detail || error.message || 'Failed to update item.', 'error')
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: () => deletePurchaseItem(item.id),
+    onSuccess: async () => {
+      await onChanged()
+      onNotify('Item deleted.', 'success')
+    },
+    onError: (error: { response?: { data?: { detail?: string } }; message?: string }) => {
+      onNotify(error.response?.data?.detail || error.message || 'Failed to delete item.', 'error')
+    },
+  })
+
+  const anyPending = saveMutation.isPending || deleteMutation.isPending
+
+  const openPrompt = () => {
+    setExternalItemId(item.external_item_id || '')
+    setExternalItemName(item.external_item_name)
+    setQuantity(String(item.quantity))
+    setUnitPrice(String(item.unit_price))
+    setTotalPrice(String(item.total_price))
+    setSelectedVariant(null)
+    setPromptOpen(true)
+  }
+
+  return (
+    <>
+      <LongPressTableRow payload={item} onLongPress={openPrompt} rowSx={{ cursor: 'pointer' }}>
+        <TableCell>{item.external_item_id || '-'}</TableCell>
+        <TableCell>{item.external_item_name}</TableCell>
+        <TableCell>{item.variant_sku || '-'}</TableCell>
+        <TableCell align="center">{item.quantity}</TableCell>
+        <TableCell align="right">{item.unit_price}</TableCell>
+        <TableCell align="center">
+          <Chip size="small" color={itemStatusColor[item.status]} label={item.status} />
+        </TableCell>
+      </LongPressTableRow>
+
+      <HoldActionPromptDialog
+        open={promptOpen}
+        onClose={() => setPromptOpen(false)}
+        title="Edit Purchase Item"
+        onSave={() => saveMutation.mutate()}
+        onDelete={() => deleteMutation.mutate()}
+        saveDisabled={item.status === 'RECEIVED' || !externalItemName.trim() || Number(quantity) <= 0}
+        deleteDisabled={item.status === 'RECEIVED'}
+        saveLoading={saveMutation.isPending}
+        deleteLoading={deleteMutation.isPending}
+        deleteConfirmTitle="Delete Purchase Item"
+        deleteConfirmMessage={
+          <Typography>
+            Delete item <strong>{item.external_item_name}</strong>? This action cannot be undone.
+          </Typography>
+        }
+      >
+        <Stack spacing={2} sx={{ mt: 1 }}>
+          <TextField label="Item ID" value={externalItemId} onChange={(e) => setExternalItemId(e.target.value)} fullWidth />
+          <TextField label="Item Name" value={externalItemName} onChange={(e) => setExternalItemName(e.target.value)} fullWidth />
+          <TextField label="Quantity" type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} fullWidth />
+          <TextField label="Unit Price" type="number" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} fullWidth />
+          <TextField label="Total Price" type="number" value={totalPrice} onChange={(e) => setTotalPrice(e.target.value)} fullWidth />
+          <VariantSearchAutocomplete value={selectedVariant} onChange={setSelectedVariant} />
+          <Typography variant="caption" color="text.secondary">
+            Current SKU: {item.variant_sku || 'Unmatched'}
+          </Typography>
+        </Stack>
+      </HoldActionPromptDialog>
+    </>
+  )
+}
 
 export default function PurchasingManagement() {
   const queryClient = useQueryClient()
@@ -71,6 +183,7 @@ export default function PurchasingManagement() {
   const [bulkProgress, setBulkProgress] = useState({ queued: 0, success: 0, failed: 0 })
   const [bulkDone, setBulkDone] = useState(false)
   const [syncingPoId, setSyncingPoId] = useState<number | null>(null)
+  const goodwillFileInputRef = useRef<HTMLInputElement | null>(null)
   const [expandedPoId, setExpandedPoId] = useState<number | null>(null)
   const [snackbar, setSnackbar] = useState<{ open: boolean; msg: string; severity: 'success' | 'error' }>({
     open: false,
@@ -94,6 +207,10 @@ export default function PurchasingManagement() {
     queryKey: ['purchases'],
     queryFn: listPurchaseOrders,
   })
+
+  const refreshPurchases = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['purchases'] })
+  }
 
   const createVendorMutation = useMutation({
     mutationFn: createVendor,
@@ -143,6 +260,35 @@ export default function PurchasingManagement() {
       setSnackbar({ open: true, msg: 'Failed to import purchasing list from Zoho.', severity: 'error' })
     },
   })
+
+  const importGoodwillCsvMutation = useMutation({
+    mutationFn: (file: File) => importPurchasesFromGoodwillCsv(file),
+    onSuccess: async (res) => {
+      await queryClient.invalidateQueries({ queryKey: ['vendors'] })
+      await queryClient.invalidateQueries({ queryKey: ['purchases'] })
+      setSnackbar({
+        open: true,
+        severity: 'success',
+        msg:
+          `Goodwill CSV import done: ${res.purchase_orders_created} PO created, ` +
+          `${res.purchase_orders_updated} PO updated, ` +
+          `${res.purchase_order_items_created} items created, ${res.purchase_order_items_updated} items updated.`,
+      })
+    },
+    onError: () => {
+      setSnackbar({ open: true, msg: 'Failed to import Goodwill CSV.', severity: 'error' })
+    },
+  })
+
+  const handleGoodwillCsvSelected = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) {
+      return
+    }
+
+    importGoodwillCsvMutation.mutate(file)
+    event.target.value = ''
+  }
 
   const forceSyncPoMutation = useMutation({
     mutationFn: (poId: number) => forceSyncPurchase(poId),
@@ -245,6 +391,13 @@ export default function PurchasingManagement() {
           >
             {importZohoMutation.isPending ? 'Importing...' : 'Import from Zoho'}
           </Button>
+          <Button
+            variant="outlined"
+            onClick={() => goodwillFileInputRef.current?.click()}
+            disabled={importGoodwillCsvMutation.isPending}
+          >
+            {importGoodwillCsvMutation.isPending ? 'Importing CSV...' : 'Import Goodwill CSV'}
+          </Button>
           <Button startIcon={<Add />} variant="outlined" onClick={() => setCreateVendorOpen(true)}>
             Add Vendor
           </Button>
@@ -270,8 +423,13 @@ export default function PurchasingManagement() {
                       <TableCell sx={{ width: 44 }} />
                       <TableCell>PO #</TableCell>
                       <TableCell>Vendor</TableCell>
+                      <TableCell>Date</TableCell>
+                      <TableCell>Tracking #</TableCell>
                       <TableCell>Status</TableCell>
                       <TableCell align="center">Items</TableCell>
+                      <TableCell align="right">Tax</TableCell>
+                      <TableCell align="right">Shipping</TableCell>
+                      <TableCell align="right">Handling</TableCell>
                       <TableCell align="right">Total</TableCell>
                       {hasRole(['ADMIN']) && <TableCell align="center">Zoho</TableCell>}
                     </TableRow>
@@ -297,10 +455,15 @@ export default function PurchasingManagement() {
                             </TableCell>
                             <TableCell>{po.po_number}</TableCell>
                             <TableCell>{po.vendor?.name || po.vendor_id}</TableCell>
+                            <TableCell>{po.order_date}</TableCell>
+                            <TableCell>{po.tracking_number || '-'}</TableCell>
                             <TableCell>
                               <Chip size="small" color={statusColor[po.deliver_status]} label={po.deliver_status} />
                             </TableCell>
                             <TableCell align="center">{po.items?.length ?? 0}</TableCell>
+                            <TableCell align="right">{po.tax_amount ?? 0}</TableCell>
+                            <TableCell align="right">{po.shipping_amount ?? 0}</TableCell>
+                            <TableCell align="right">{po.handling_amount ?? 0}</TableCell>
                             <TableCell align="right">
                               {po.total_amount} {po.currency}
                             </TableCell>
@@ -322,7 +485,7 @@ export default function PurchasingManagement() {
                             )}
                           </TableRow>
                           <TableRow>
-                            <TableCell colSpan={hasRole(['ADMIN']) ? 7 : 6} sx={{ py: 0 }}>
+                            <TableCell colSpan={hasRole(['ADMIN']) ? 11 : 10} sx={{ py: 0 }}>
                               <Collapse in={expanded} timeout="auto" unmountOnExit>
                                 <Box sx={{ p: 1.5, bgcolor: 'action.hover' }}>
                                   <Typography variant="subtitle2" sx={{ mb: 1 }}>
@@ -331,26 +494,26 @@ export default function PurchasingManagement() {
                                   <Table size="small">
                                     <TableHead>
                                       <TableRow>
+                                        <TableCell>Item Id</TableCell>
                                         <TableCell>Item Name</TableCell>
                                         <TableCell>Item SKU</TableCell>
                                         <TableCell align="center">Qty</TableCell>
+                                        <TableCell align="right">Price</TableCell>
                                         <TableCell align="center">Status</TableCell>
                                       </TableRow>
                                     </TableHead>
                                     <TableBody>
                                       {(po.items || []).map((item) => (
-                                        <TableRow key={item.id}>
-                                          <TableCell>{item.external_item_name}</TableCell>
-                                          <TableCell>{item.variant_sku || '-'}</TableCell>
-                                          <TableCell align="center">{item.quantity}</TableCell>
-                                          <TableCell align="center">
-                                            <Chip size="small" color={itemStatusColor[item.status]} label={item.status} />
-                                          </TableCell>
-                                        </TableRow>
+                                        <PurchaseOrderItemRow
+                                          key={item.id}
+                                          item={item}
+                                          onChanged={refreshPurchases}
+                                          onNotify={(msg, severity) => setSnackbar({ open: true, msg, severity })}
+                                        />
                                       ))}
                                       {!po.items?.length && (
                                         <TableRow>
-                                          <TableCell colSpan={4} align="center">
+                                          <TableCell colSpan={6} align="center">
                                             No line items.
                                           </TableCell>
                                         </TableRow>
@@ -549,6 +712,16 @@ export default function PurchasingManagement() {
           {snackbar.msg}
         </Alert>
       </Snackbar>
+
+      <input
+        ref={goodwillFileInputRef}
+        type="file"
+        accept=".csv,text/csv"
+        onChange={handleGoodwillCsvSelected}
+        hidden
+        aria-label="Upload Goodwill CSV"
+        title="Upload Goodwill CSV"
+      />
     </Box>
   )
 }

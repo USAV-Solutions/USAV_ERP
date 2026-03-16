@@ -1,16 +1,19 @@
 """API routes for purchasing module."""
-from datetime import date
+import csv
+import io
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import delete
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AdminOrWarehouseUser, CurrentUser
 from app.core.database import get_db
 from app.integrations.zoho.client import ZohoClient
 from app.models import PurchaseDeliverStatus, PurchaseOrderItemStatus
+from app.models.entities import ProductVariant
 from app.models.purchasing import PurchaseOrderItem
 from app.modules.purchasing.dependencies import (
     get_purchase_order_item_repo,
@@ -19,10 +22,12 @@ from app.modules.purchasing.dependencies import (
     get_vendor_repo,
 )
 from app.modules.purchasing.schemas import (
+    GoodwillCsvImportResponse,
     PurchaseOrderCreate,
     PurchaseOrderItemCreate,
     PurchaseOrderItemMatchRequest,
     PurchaseOrderItemResponse,
+    PurchaseOrderItemUpdate,
     PurchaseOrderReceiveRequest,
     PurchaseOrderReceiveResponse,
     PurchaseOrderResponse,
@@ -44,7 +49,11 @@ router = APIRouter(tags=["Purchasing"])
 
 def _to_decimal(value: object, default: str = "0") -> Decimal:
     try:
-        return Decimal(str(value if value is not None else default))
+        text = str(value if value is not None else default)
+        normalized = text.replace("$", "").replace(",", "").strip()
+        if normalized == "":
+            normalized = default
+        return Decimal(normalized)
     except Exception:
         return Decimal(default)
 
@@ -53,11 +62,26 @@ def _to_date(value: object) -> date:
     if isinstance(value, date):
         return value
     if isinstance(value, str) and value:
+        text = value.strip()
         try:
-            return date.fromisoformat(value[:10])
+            return date.fromisoformat(text[:10])
         except ValueError:
-            pass
+            for fmt in ("%m/%d/%Y", "%m/%d/%y"):
+                try:
+                    return datetime.strptime(text, fmt).date()
+                except ValueError:
+                    continue
     return date.today()
+
+
+def _to_int(value: object, default: int = 0) -> int:
+    try:
+        text = str(value if value is not None else default).replace(",", "").strip()
+        if text == "":
+            return default
+        return int(Decimal(text))
+    except Exception:
+        return default
 
 
 def _map_zoho_po_status(status_raw: object) -> PurchaseDeliverStatus:
@@ -218,6 +242,64 @@ async def match_purchase_order_item(
     await db.commit()
     await db.refresh(item)
     return PurchaseOrderItemResponse.model_validate(item)
+
+
+@router.patch("/purchases/items/{item_id}", response_model=PurchaseOrderItemResponse)
+async def update_purchase_order_item(
+    item_id: int,
+    body: PurchaseOrderItemUpdate,
+    po_item_repo: PurchaseOrderItemRepository = Depends(get_purchase_order_item_repo),
+    db: AsyncSession = Depends(get_db),
+):
+    item = await po_item_repo.get(item_id)
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchase order item not found")
+
+    if item.status == PurchaseOrderItemStatus.RECEIVED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Received items cannot be edited",
+        )
+
+    payload = body.model_dump(exclude_unset=True)
+
+    if "variant_id" in payload:
+        variant_id = payload.get("variant_id")
+        if variant_id is not None:
+            variant = await db.get(ProductVariant, variant_id)
+            if variant is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"ProductVariant {variant_id} not found",
+                )
+            payload["status"] = PurchaseOrderItemStatus.MATCHED
+        else:
+            payload["status"] = PurchaseOrderItemStatus.UNMATCHED
+
+    updated = await po_item_repo.update(item, payload)
+    await db.commit()
+    await db.refresh(updated)
+    return PurchaseOrderItemResponse.model_validate(updated)
+
+
+@router.delete("/purchases/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_purchase_order_item(
+    item_id: int,
+    po_item_repo: PurchaseOrderItemRepository = Depends(get_purchase_order_item_repo),
+    db: AsyncSession = Depends(get_db),
+):
+    item = await po_item_repo.get(item_id)
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchase order item not found")
+
+    if item.status == PurchaseOrderItemStatus.RECEIVED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Received items cannot be deleted",
+        )
+
+    await po_item_repo.delete(item_id)
+    await db.commit()
 
 
 @router.post("/purchases/{po_id}/mark-delivered", response_model=PurchaseOrderReceiveResponse)
@@ -441,4 +523,147 @@ async def import_purchasing_from_zoho(
         page += 1
 
     await db.commit()
+    return result
+
+
+@router.post("/purchases/import/goodwill-csv", response_model=GoodwillCsvImportResponse)
+async def import_purchasing_from_goodwill_csv(
+    _current_user: CurrentUser,
+    file: UploadFile = File(...),
+    vendor_repo: VendorRepository = Depends(get_vendor_repo),
+    po_repo: PurchaseOrderRepository = Depends(get_purchase_order_repo),
+    po_item_repo: PurchaseOrderItemRepository = Depends(get_purchase_order_item_repo),
+    db: AsyncSession = Depends(get_db),
+):
+    """Import Goodwill shipped-orders CSV rows into local purchasing tables."""
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded CSV file is empty")
+
+    try:
+        content = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        content = raw.decode("latin-1")
+
+    reader = csv.DictReader(io.StringIO(content))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="CSV header row is missing")
+
+    required_headers = [
+        "Order #",
+        "Item Id",
+        "Item",
+        "Quantity",
+        "Price",
+        "Date",
+        "Tracking #",
+        "Tax",
+        "Shipping",
+        "Handling",
+    ]
+    missing_headers = [h for h in required_headers if h not in reader.fieldnames]
+    if missing_headers:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"CSV is missing required columns: {', '.join(missing_headers)}",
+        )
+
+    goodwill_vendor = await vendor_repo.get_by_field("name", "Goodwill")
+    if goodwill_vendor is None:
+        goodwill_vendor = await vendor_repo.create(
+            {
+                "name": "Goodwill",
+                "is_active": True,
+            }
+        )
+        await db.flush()
+
+    result = GoodwillCsvImportResponse()
+
+    for row in reader:
+        result.source_rows_seen += 1
+
+        po_number = str(row.get("Order #") or "").strip()
+        item_id = str(row.get("Item Id") or "").strip() or None
+        item_name = str(row.get("Item") or "").strip()
+        if not po_number or not item_name:
+            result.source_rows_skipped += 1
+            continue
+
+        quantity = _to_int(row.get("Quantity"), default=0)
+        unit_price = _to_decimal(row.get("Price"), default="0")
+        tax_amount = _to_decimal(row.get("Tax"), default="0")
+        shipping_amount = _to_decimal(row.get("Shipping"), default="0")
+        handling_amount = _to_decimal(row.get("Handling"), default="0")
+
+        if quantity <= 0:
+            result.source_rows_skipped += 1
+            continue
+
+        order_date = _to_date(row.get("Date"))
+        tracking_number = str(row.get("Tracking #") or "").strip() or None
+        total_amount = (unit_price * quantity) + tax_amount + shipping_amount + handling_amount
+
+        existing_po = await po_repo.get_by_field("po_number", po_number)
+        po_payload = {
+            "po_number": po_number,
+            "vendor_id": goodwill_vendor.id,
+            "deliver_status": PurchaseDeliverStatus.CREATED,
+            "order_date": order_date,
+            "expected_delivery_date": None,
+            "total_amount": total_amount,
+            "currency": "USD",
+            "tracking_number": tracking_number,
+            "tax_amount": tax_amount,
+            "shipping_amount": shipping_amount,
+            "handling_amount": handling_amount,
+            "source": "GOODWILL_CSV",
+            "notes": "Imported from Goodwill shipped-orders CSV.",
+        }
+
+        if existing_po is None:
+            local_po = await po_repo.create(po_payload)
+            await db.flush()
+            result.purchase_orders_created += 1
+        else:
+            local_po = await po_repo.update(existing_po, po_payload)
+            await db.flush()
+            result.purchase_orders_updated += 1
+
+        existing_item = None
+        if item_id:
+            stmt = select(PurchaseOrderItem).where(
+                PurchaseOrderItem.purchase_order_id == local_po.id,
+                PurchaseOrderItem.external_item_id == item_id,
+            )
+            existing_item = (await db.execute(stmt)).scalar_one_or_none()
+
+        if existing_item is None:
+            stmt = select(PurchaseOrderItem).where(
+                PurchaseOrderItem.purchase_order_id == local_po.id,
+                PurchaseOrderItem.external_item_name == item_name,
+            )
+            existing_item = (await db.execute(stmt)).scalar_one_or_none()
+
+        line_total = unit_price * quantity
+        item_payload = {
+            "purchase_order_id": local_po.id,
+            "variant_id": None,
+            "external_item_id": item_id,
+            "external_item_name": item_name,
+            "quantity": quantity,
+            "unit_price": unit_price,
+            "total_price": line_total,
+            "status": PurchaseOrderItemStatus.UNMATCHED,
+        }
+
+        if existing_item is None:
+            await po_item_repo.create(item_payload)
+            result.purchase_order_items_created += 1
+        else:
+            await po_item_repo.update(existing_item, item_payload)
+            result.purchase_order_items_updated += 1
+
+    await db.commit()
+    await file.close()
     return result

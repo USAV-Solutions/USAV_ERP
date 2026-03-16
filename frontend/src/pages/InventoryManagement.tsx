@@ -46,6 +46,8 @@ import ProductThumbnail from '../components/inventory/ProductThumbnail'
 import ImageGalleryModal from '../components/inventory/ImageGalleryModal'
 import VariantImageDialog from '../components/inventory/VariantImageDialog'
 import SearchField from '../components/common/SearchField'
+import HoldActionPromptDialog from '../components/common/HoldActionPromptDialog'
+import LongPressTableRow from '../components/common/LongPressTableRow'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { compileSearchMatcher } from '../utils/search'
 
@@ -59,8 +61,7 @@ interface ExpandedRowProps {
   syncDisabled: boolean
   onManageImages: (sku: string) => void
   canAdmin: boolean
-  onEditVariant: (variant: EnhancedVariant) => void
-  onDeleteVariant: (variant: EnhancedVariant) => void
+  onOpenHoldPrompt: (variant: EnhancedVariant) => void
 }
 
 interface EnhancedVariant extends Variant {
@@ -168,8 +169,7 @@ function ExpandedRow({
   syncDisabled,
   onManageImages,
   canAdmin,
-  onEditVariant,
-  onDeleteVariant,
+  onOpenHoldPrompt,
 }: ExpandedRowProps) {
   const [gallerySku, setGallerySku] = useState<string | null>(null)
 
@@ -197,7 +197,14 @@ function ExpandedRow({
             </TableHead>
             <TableBody>
               {variants.map((variant) => (
-                <TableRow key={variant.id}>
+                <LongPressTableRow
+                  key={variant.id}
+                  hover
+                  payload={variant}
+                  onLongPress={onOpenHoldPrompt}
+                  enableLongPress={canAdmin}
+                  rowSx={canAdmin ? { cursor: 'pointer' } : undefined}
+                >
                   <TableCell>
                     <ProductThumbnail
                       sku={variant.full_sku}
@@ -241,25 +248,6 @@ function ExpandedRow({
                       >
                         {syncingVariantId === variant.id ? 'Syncing...' : 'Sync to Zoho'}
                       </Button>
-                      {canAdmin && (
-                        <>
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            onClick={() => onEditVariant(variant)}
-                          >
-                            Edit
-                          </Button>
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            color="error"
-                            onClick={() => onDeleteVariant(variant)}
-                          >
-                            Delete
-                          </Button>
-                        </>
-                      )}
                     </Box>
                   </TableCell>
                   <TableCell>
@@ -269,7 +257,7 @@ function ExpandedRow({
                       color={variant.is_active ? 'success' : 'default'}
                     />
                   </TableCell>
-                </TableRow>
+                </LongPressTableRow>
               ))}
             </TableBody>
           </Table>
@@ -302,8 +290,7 @@ export default function InventoryManagement() {
   const [readinessDialogOpen, setReadinessDialogOpen] = useState(false)
   const [readinessData, setReadinessData] = useState<ZohoReadinessResponse | null>(null)
   const [syncingVariantId, setSyncingVariantId] = useState<number | null>(null)
-  const [editDialogOpen, setEditDialogOpen] = useState(false)
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [holdPromptOpen, setHoldPromptOpen] = useState(false)
   const [selectedVariant, setSelectedVariant] = useState<EnhancedVariant | null>(null)
   const [editVariantName, setEditVariantName] = useState('')
   const [editColorCode, setEditColorCode] = useState('')
@@ -314,27 +301,21 @@ export default function InventoryManagement() {
 
   const canAdmin = hasRole(['ADMIN'])
 
-  const openEditDialog = (variant: EnhancedVariant) => {
+  const openHoldPrompt = (variant: EnhancedVariant) => {
+    if (!canAdmin) {
+      return
+    }
+
     setSelectedVariant(variant)
     setEditVariantName(variant.variant_name || '')
     setEditColorCode(variant.color_code || '')
     setEditConditionCode(variant.condition_code || '')
     setEditIsActive(variant.is_active)
-    setEditDialogOpen(true)
+    setHoldPromptOpen(true)
   }
 
-  const openDeleteDialog = (variant: EnhancedVariant) => {
-    setSelectedVariant(variant)
-    setDeleteDialogOpen(true)
-  }
-
-  const closeEditDialog = () => {
-    setEditDialogOpen(false)
-    setSelectedVariant(null)
-  }
-
-  const closeDeleteDialog = () => {
-    setDeleteDialogOpen(false)
+  const closeHoldPrompt = () => {
+    setHoldPromptOpen(false)
     setSelectedVariant(null)
   }
 
@@ -353,7 +334,7 @@ export default function InventoryManagement() {
       setSnackbarSeverity('success')
       setSnackbarMessage('Variant updated successfully.')
       setSnackbarOpen(true)
-      closeEditDialog()
+      closeHoldPrompt()
       await queryClient.invalidateQueries({ queryKey: ['variants'] })
     },
     onError: (error: AxiosError<{ detail?: string }>) => {
@@ -373,7 +354,7 @@ export default function InventoryManagement() {
       setSnackbarSeverity('success')
       setSnackbarMessage('Variant deleted successfully.')
       setSnackbarOpen(true)
-      closeDeleteDialog()
+      closeHoldPrompt()
       await queryClient.invalidateQueries({ queryKey: ['variants'] })
     },
     onError: (error: AxiosError<{ detail?: string }>) => {
@@ -744,7 +725,14 @@ export default function InventoryManagement() {
                   </TableRow>
                 ) : (
                   paginatedListData.map((variant) => (
-                    <TableRow key={variant.id} hover>
+                    <LongPressTableRow
+                      key={variant.id}
+                      hover
+                      payload={variant}
+                      onLongPress={openHoldPrompt}
+                      enableLongPress={canAdmin}
+                      rowSx={canAdmin ? { cursor: 'pointer' } : undefined}
+                    >
                       <TableCell>
                         <ProductThumbnail
                           sku={variant.full_sku}
@@ -796,28 +784,9 @@ export default function InventoryManagement() {
                           >
                             {syncingVariantId === variant.id ? 'Syncing...' : 'Sync to Zoho'}
                           </Button>
-                          {canAdmin && (
-                            <>
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                onClick={() => openEditDialog(variant)}
-                              >
-                                Edit
-                              </Button>
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                color="error"
-                                onClick={() => openDeleteDialog(variant)}
-                              >
-                                Delete
-                              </Button>
-                            </>
-                          )}
                         </Box>
                       </TableCell>
-                    </TableRow>
+                    </LongPressTableRow>
                   ))
                 )}
               </TableBody>
@@ -883,8 +852,7 @@ export default function InventoryManagement() {
                           syncDisabled={isZohoSyncRunning || zohoSingleSyncMutation.isPending}
                           onManageImages={(sku) => setManageImagesSku(sku)}
                           canAdmin={canAdmin}
-                          onEditVariant={openEditDialog}
-                          onDeleteVariant={openDeleteDialog}
+                          onOpenHoldPrompt={openHoldPrompt}
                         />
                       )}
                     </>
@@ -1021,75 +989,76 @@ export default function InventoryManagement() {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={editDialogOpen} onClose={closeEditDialog} fullWidth maxWidth="sm">
-        <DialogTitle>Edit Variant</DialogTitle>
-        <DialogContent>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
-            <TextField
-              label="Display Name"
-              value={editVariantName}
-              onChange={(e) => setEditVariantName(e.target.value)}
-              placeholder="Leave empty to fallback to family name"
-              fullWidth
-            />
-            <TextField
-              label="Color Code"
-              value={editColorCode}
-              onChange={(e) => setEditColorCode(e.target.value.slice(0, 2).toUpperCase())}
-              placeholder="e.g. BK"
-              inputProps={{ maxLength: 2 }}
-              fullWidth
-            />
-            <TextField
-              label="Condition Code"
-              value={editConditionCode}
-              onChange={(e) => setEditConditionCode(e.target.value.slice(0, 1).toUpperCase())}
-              placeholder="e.g. N"
-              inputProps={{ maxLength: 1 }}
-              fullWidth
-            />
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={editIsActive}
-                  onChange={(e) => setEditIsActive(e.target.checked)}
-                />
-              }
-              label={editIsActive ? 'Active' : 'Inactive'}
-            />
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={closeEditDialog}>Cancel</Button>
-          <Button
-            variant="contained"
-            onClick={() => updateVariantMutation.mutate()}
-            disabled={updateVariantMutation.isPending || !selectedVariant}
-          >
-            {updateVariantMutation.isPending ? 'Saving...' : 'Save'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog open={deleteDialogOpen} onClose={closeDeleteDialog} maxWidth="xs" fullWidth>
-        <DialogTitle>Delete Variant</DialogTitle>
-        <DialogContent>
+      <HoldActionPromptDialog
+        open={holdPromptOpen}
+        onClose={closeHoldPrompt}
+        title="Edit Variant"
+        onSave={() => updateVariantMutation.mutate()}
+        onDelete={() => deleteVariantMutation.mutate()}
+        saveDisabled={!selectedVariant}
+        deleteDisabled={!selectedVariant}
+        saveLoading={updateVariantMutation.isPending}
+        deleteLoading={deleteVariantMutation.isPending}
+        deleteConfirmTitle="Delete Variant"
+        deleteConfirmMessage={
           <Typography>
             Delete variant <strong>{selectedVariant?.full_sku}</strong>? This action cannot be undone.
           </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={closeDeleteDialog}>Cancel</Button>
-          <Button
-            color="error"
-            variant="contained"
-            onClick={() => deleteVariantMutation.mutate()}
-            disabled={deleteVariantMutation.isPending || !selectedVariant}
-          >
-            {deleteVariantMutation.isPending ? 'Deleting...' : 'Delete'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+        }
+      >
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
+          <TextField
+            label="Full SKU"
+            value={selectedVariant?.full_sku || ''}
+            fullWidth
+            disabled
+          />
+          <TextField
+            label="UPIS-H"
+            value={selectedVariant?.identity?.generated_upis_h || ''}
+            fullWidth
+            disabled
+          />
+          <TextField
+            label="Type"
+            value={getTypeLabel(selectedVariant?.identity?.type || 'Product')}
+            fullWidth
+            disabled
+          />
+          <TextField
+            label="Display Name"
+            value={editVariantName}
+            onChange={(e) => setEditVariantName(e.target.value)}
+            placeholder="Leave empty to fallback to family name"
+            fullWidth
+          />
+          <TextField
+            label="Color Code"
+            value={editColorCode}
+            onChange={(e) => setEditColorCode(e.target.value.slice(0, 2).toUpperCase())}
+            placeholder="e.g. BK"
+            inputProps={{ maxLength: 2 }}
+            fullWidth
+          />
+          <TextField
+            label="Condition Code"
+            value={editConditionCode}
+            onChange={(e) => setEditConditionCode(e.target.value.slice(0, 1).toUpperCase())}
+            placeholder="e.g. N"
+            inputProps={{ maxLength: 1 }}
+            fullWidth
+          />
+          <FormControlLabel
+            control={
+              <Switch
+                checked={editIsActive}
+                onChange={(e) => setEditIsActive(e.target.checked)}
+              />
+            }
+            label={editIsActive ? 'Active' : 'Inactive'}
+          />
+        </Box>
+      </HoldActionPromptDialog>
     </Box>
   )
 }

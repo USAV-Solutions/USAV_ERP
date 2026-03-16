@@ -1,6 +1,7 @@
 """Purchasing schemas."""
 
 from app.modules.purchasing.schemas.purchasing import (
+    GoodwillCsvImportResponse,
     ItemReceipt,
     PurchaseOrderCreate,
     PurchaseOrderItemCreate,
@@ -32,4 +33,5 @@ __all__ = [
     "PurchaseOrderReceiveRequest",
     "PurchaseOrderReceiveResponse",
     "ZohoPurchaseImportResponse",
+    "GoodwillCsvImportResponse",
 ]

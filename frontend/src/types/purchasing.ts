@@ -26,6 +26,7 @@ export interface PurchaseOrderItem {
   purchase_order_id: number
   variant_id?: number | null
   variant_sku?: string | null
+  external_item_id?: string | null
   external_item_name: string
   quantity: number
   unit_price: number
@@ -37,6 +38,7 @@ export interface PurchaseOrderItem {
 
 export interface PurchaseOrderItemCreate {
   variant_id?: number
+  external_item_id?: string
   external_item_name: string
   quantity: number
   unit_price: number
@@ -53,6 +55,11 @@ export interface PurchaseOrder {
   expected_delivery_date?: string | null
   total_amount: number
   currency: string
+  tracking_number?: string | null
+  tax_amount?: number
+  shipping_amount?: number
+  handling_amount?: number
+  source?: string
   notes?: string | null
   zoho_id?: string | null
   vendor?: Vendor
@@ -69,12 +76,27 @@ export interface PurchaseOrderCreate {
   expected_delivery_date?: string
   total_amount: number
   currency?: string
+  tracking_number?: string
+  tax_amount?: number
+  shipping_amount?: number
+  handling_amount?: number
+  source?: string
   notes?: string
   items?: PurchaseOrderItemCreate[]
 }
 
 export interface PurchaseOrderItemMatchRequest {
   variant_id: number
+}
+
+export interface PurchaseOrderItemUpdate {
+  variant_id?: number | null
+  external_item_id?: string | null
+  external_item_name?: string
+  quantity?: number
+  unit_price?: number
+  total_price?: number
+  status?: PurchaseOrderItemStatus
 }
 
 export interface ItemReceipt {
@@ -102,4 +124,13 @@ export interface ZohoPurchaseImportResponse {
   purchase_order_items_replaced: number
   source_vendors_seen: number
   source_purchase_orders_seen: number
+}
+
+export interface GoodwillCsvImportResponse {
+  purchase_orders_created: number
+  purchase_orders_updated: number
+  purchase_order_items_created: number
+  purchase_order_items_updated: number
+  source_rows_seen: number
+  source_rows_skipped: number
 }

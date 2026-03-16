@@ -85,7 +85,8 @@ frontend/
     ├── components/                     # Reusable UI components
     │   ├── common/
     │   │   ├── Layout.tsx              # App shell: sidebar nav, top bar, user menu, <Outlet />
-    │   │   └── SeaTalkLoginButton.tsx  # SeaTalk OAuth SDK button with loading overlay
+    │   │   ├── SeaTalkLoginButton.tsx  # SeaTalk OAuth SDK button with loading overlay
+    │   │   └── VariantSearchAutocomplete.tsx # Shared SKU search Autocomplete used by matching flows
     │   ├── guards/
     │   │   └── RoleGuard.tsx           # Auth + role gate (redirects or renders children/Outlet)
     │   ├── inventory/
@@ -214,14 +215,21 @@ frontend/
   - `ZOHO` – item sync, readiness check, progress/start/stop for background sync job.
   - `SYNC` – force-sync endpoints for items, orders, purchases, and customers (two-way Zoho engine).
   - `ORDERS` – CRUD, shipping-status update endpoint (`/orders/{id}/shipping`), sync/sync-range/sync-status/reset, SKU resolution (match/confirm/reject).
-  - `PURCHASING` – vendors, purchases, add PO line items (`/purchases/{id}/items`), Zoho import (`/purchases/import/zoho`), item matching, and mark-delivered endpoints.
+  - `PURCHASING` – vendors, purchases, add PO line items (`/purchases/{id}/items`), delete PO line items (`/purchases/items/{item_id}`), Zoho import (`/purchases/import/zoho`), item matching, and mark-delivered endpoints.
 
 ---
 
 ### `purchasing.ts` (Path: `/frontend/src/api/purchasing.ts`)
 * **Purpose:** Typed API service functions for Vendor and Purchase Order workflows.
 * **Dependencies & Props:** Imports `axiosClient`, `PURCHASING` endpoints, and purchasing types from `types/purchasing.ts`.
-* **Mechanism / Render Logic:** Exports async functions for listing/creating/updating vendors, listing/creating/getting purchase orders (including paged listing), adding PO line items, matching PO items to variants, marking POs delivered with receipt payloads, and importing purchasing data from Zoho.
+* **Mechanism / Render Logic:** Exports async functions for listing/creating/updating vendors, listing/creating/getting purchase orders (including paged listing), adding PO line items, matching PO items to variants, deleting PO items, marking POs delivered with receipt payloads, and importing purchasing data from Zoho.
+
+---
+
+### `VariantSearchAutocomplete.tsx` (Path: `/frontend/src/components/common/VariantSearchAutocomplete.tsx`)
+* **Purpose:** Shared SKU search + selection component used by manual item matching workflows.
+* **Dependencies & Props:** Uses MUI `Autocomplete`, React Query, `searchVariants`, and `useDebouncedValue`.
+* **Mechanism / Render Logic:** Maintains independent selected value and text input states, debounces search text, queries `GET /variants/search`, and renders SKU/name rich options. This keeps order-item and purchasing-item matching interactions visually and behaviorally consistent.
 
 ---
 
@@ -422,7 +430,7 @@ frontend/
   - Shows a mini header (customer name, email, item count).
   - **Items table** with columns: Item Name, Ext SKU, Qty, Unit, Total, Status (`StatusBadge`), Variant SKU (Chip), Actions.
   - **`ItemRow` sub-component** handles per-item actions:
-    - **UNMATCHED items:** "Match to variant" icon button opens an inline `Autocomplete` that searches variants via `GET /variants/search?q=...`. User selects a variant and clicks "Match".
+    - **UNMATCHED items:** "Match to variant" icon button opens an inline `VariantSearchAutocomplete` search bar backed by `GET /variants/search?q=...`. User selects a variant and clicks "Match".
     - **MATCHED items:** "Confirm match" (green check) and "Reject match" (red unlink) buttons.
   - All mutations invalidate the order, orders list, and sync status queries.
   - Matching notes are displayed below applicable rows.
@@ -566,7 +574,8 @@ frontend/
   - **PO list/detail:** Supports paged loading and expanded/collapsible table rows for line-item visibility.
   - **Zoho import:** Includes bulk import trigger for vendors + purchase orders from Zoho with progress and result feedback.
   - **PO force-sync:** Supports per-purchase force-sync to Zoho via `forceSyncPurchase`.
-  - **Item matching:** Per-line-item `variant_id` input and match action for `UNMATCHED` rows.
+  - **Item matching:** Per-line-item Match action on `UNMATCHED` rows opens the same `VariantSearchAutocomplete` used by Order resolution, allowing SKU/name search and one-click match.
+  - **Item delete:** Per-line-item Delete action calls `DELETE /purchases/items/{item_id}` (disabled for `RECEIVED` rows).
   - **Mark delivered:** Admin/Warehouse action opens a receive dialog where each PO item receives quantity, optional serial numbers, and location code. Submitting calls `/purchases/{id}/mark-delivered`.
   - **Feedback:** Mutation results shown via Snackbar and query invalidation refreshes PO/vendor data.
 

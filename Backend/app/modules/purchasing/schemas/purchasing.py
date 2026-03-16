@@ -39,6 +39,7 @@ class VendorResponse(VendorBase):
 
 class PurchaseOrderItemBase(BaseModel):
     variant_id: Optional[int] = None
+    external_item_id: Optional[str] = Field(None, max_length=100)
     external_item_name: str = Field(..., max_length=255)
     quantity: int = Field(..., gt=0)
     unit_price: Decimal = Field(..., ge=0)
@@ -52,6 +53,7 @@ class PurchaseOrderItemCreate(PurchaseOrderItemBase):
 
 class PurchaseOrderItemUpdate(BaseModel):
     variant_id: Optional[int] = None
+    external_item_id: Optional[str] = Field(None, max_length=100)
     external_item_name: Optional[str] = Field(None, max_length=255)
     quantity: Optional[int] = Field(None, gt=0)
     unit_price: Optional[Decimal] = Field(None, ge=0)
@@ -77,6 +79,11 @@ class PurchaseOrderBase(BaseModel):
     expected_delivery_date: Optional[date] = None
     total_amount: Decimal = Field(..., ge=0)
     currency: str = Field(default="USD", min_length=3, max_length=3)
+    tracking_number: Optional[str] = Field(None, max_length=100)
+    tax_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    shipping_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    handling_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    source: str = Field(default="MANUAL", max_length=50)
     notes: Optional[str] = None
 
 
@@ -92,6 +99,11 @@ class PurchaseOrderUpdate(BaseModel):
     expected_delivery_date: Optional[date] = None
     total_amount: Optional[Decimal] = Field(None, ge=0)
     currency: Optional[str] = Field(None, min_length=3, max_length=3)
+    tracking_number: Optional[str] = Field(None, max_length=100)
+    tax_amount: Optional[Decimal] = Field(None, ge=0)
+    shipping_amount: Optional[Decimal] = Field(None, ge=0)
+    handling_amount: Optional[Decimal] = Field(None, ge=0)
+    source: Optional[str] = Field(None, max_length=50)
     notes: Optional[str] = None
 
 
@@ -135,3 +147,12 @@ class ZohoPurchaseImportResponse(BaseModel):
     purchase_order_items_replaced: int = 0
     source_vendors_seen: int = 0
     source_purchase_orders_seen: int = 0
+
+
+class GoodwillCsvImportResponse(BaseModel):
+    purchase_orders_created: int = 0
+    purchase_orders_updated: int = 0
+    purchase_order_items_created: int = 0
+    purchase_order_items_updated: int = 0
+    source_rows_seen: int = 0
+    source_rows_skipped: int = 0

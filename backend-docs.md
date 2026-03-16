@@ -139,6 +139,15 @@ Backend/
 │   │   │       ├── orders.py         # Order/OrderItem CRUD + match schemas
 │   │   │       └── sync.py           # IntegrationState + SyncRequest/Response
 │   │   │
+│   │   ├── purchasing/
+│   │   │   ├── __init__.py            # Module exports
+│   │   │   ├── routes.py              # Vendor, purchase order, item match/delete/import endpoints
+│   │   │   ├── service.py             # Purchase-item matching + receiving domain logic
+│   │   │   ├── dependencies.py        # DI factories for purchasing repositories/service
+│   │   │   └── schemas/
+│   │   │       ├── __init__.py        # Schema exports
+│   │   │       └── purchasing.py      # Vendor/PO/item request-response schemas
+│   │   │
 │   │   └── sync/
 │   │       ├── __init__.py            # Module docstring
 │   │       └── endpoints.py          # Manual Zoho force-sync (variant/order/customer)
@@ -171,6 +180,9 @@ Backend/
 │   │   │   └── __init__.py            # ProductFamily/Identity/VariantRepository
 │   │   ├── inventory/
 │   │   │   └── __init__.py            # BundleComponent/PlatformListing repos
+│   │   ├── purchasing/
+│   │   │   ├── __init__.py            # Vendor/PurchaseOrder/PurchaseOrderItem repos
+│   │   │   └── purchase_repository.py # Purchasing repository implementations
 │   │   └── orders/
 │   │       ├── __init__.py            # Export aggregation
 │   │       ├── order_repository.py   # OrderRepository + OrderItemRepository
@@ -946,6 +958,27 @@ Backend/
   - `SyncRangeRequest` — `platform` (optional), `since` (datetime), `until` (datetime).
   - `SyncResponse` — Per-platform result: `platform`, `new_orders`, `new_items`, `auto_matched`, `skipped_duplicates`, `errors` (list of strings), `success` (bool).
   - `SyncStatusResponse` — Dashboard overview: `platforms` (list of IntegrationStateResponse), `total_orders`, `total_unmatched_items`, `total_matched_items`.
+
+---
+
+### PURCHASING MODULE
+
+---
+
+### `routes.py` (Path: `app/modules/purchasing/routes.py`)
+
+* **Purpose:** Purchasing APIs for vendor management, purchase orders, line-item match workflows, receiving, and imports.
+* **Dependencies & Links:**
+  - Internal: `app.modules.purchasing.service.PurchasingService`, purchasing repositories, `app.integrations.zoho.client.ZohoClient`, `app.repositories.product.ProductVariantRepository`.
+  - External: `fastapi`, `sqlalchemy`.
+* **Mechanism / Core Logic:**
+  - `GET/POST/PATCH /vendors...` — Vendor list/create/update endpoints.
+  - `GET/POST /purchases...` + `GET /purchases/{po_id}` — Purchase order list/create/detail endpoints.
+  - `POST /purchases/{po_id}/items` — Add a purchase order line item.
+  - `POST /purchases/items/{item_id}/match` — Manually match a PO line item to a product variant.
+  - `DELETE /purchases/items/{item_id}` — Delete a PO line item; rejects deletion for `RECEIVED` items.
+  - `POST /purchases/{po_id}/mark-delivered` — Receive PO items into inventory and mark PO delivered.
+  - `POST /purchases/import/zoho` and `POST /purchases/import/goodwill-csv` — Source import flows.
 
 ---
 

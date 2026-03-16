@@ -1,11 +1,13 @@
 import axiosClient from './axiosClient'
 import { PURCHASING } from './endpoints'
 import type {
+  GoodwillCsvImportResponse,
   PurchaseOrderItemCreate,
   PurchaseOrder,
   PurchaseOrderCreate,
   PurchaseOrderItem,
   PurchaseOrderItemMatchRequest,
+  PurchaseOrderItemUpdate,
   PurchaseOrderReceiveRequest,
   PurchaseOrderReceiveResponse,
   Vendor,
@@ -73,6 +75,18 @@ export async function matchPurchaseItem(
   return data
 }
 
+export async function updatePurchaseItem(
+  itemId: number,
+  body: PurchaseOrderItemUpdate,
+): Promise<PurchaseOrderItem> {
+  const { data } = await axiosClient.patch<PurchaseOrderItem>(PURCHASING.PURCHASE_ITEM(itemId), body)
+  return data
+}
+
+export async function deletePurchaseItem(itemId: number): Promise<void> {
+  await axiosClient.delete(PURCHASING.PURCHASE_ITEM(itemId))
+}
+
 export async function markPurchaseDelivered(
   poId: number,
   body: PurchaseOrderReceiveRequest,
@@ -86,5 +100,18 @@ export async function markPurchaseDelivered(
 
 export async function importPurchasesFromZoho(): Promise<ZohoPurchaseImportResponse> {
   const { data } = await axiosClient.post<ZohoPurchaseImportResponse>(PURCHASING.IMPORT_ZOHO)
+  return data
+}
+
+export async function importPurchasesFromGoodwillCsv(file: File): Promise<GoodwillCsvImportResponse> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const { data } = await axiosClient.post<GoodwillCsvImportResponse>(
+    PURCHASING.IMPORT_GOODWILL_CSV,
+    formData,
+    {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    },
+  )
   return data
 }

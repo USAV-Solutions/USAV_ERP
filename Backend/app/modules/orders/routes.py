@@ -419,6 +419,25 @@ async def update_shipping_status(
     return OrderDetail.model_validate(updated)
 
 
+@router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_order(
+    order_id: int,
+    _admin: AdminUser,
+    order_repo: OrderRepository = Depends(get_order_repo),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin-only hard delete for an order and its line items."""
+    order = await order_repo.get(order_id)
+    if order is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Order {order_id} not found.",
+        )
+
+    await order_repo.delete(order_id)
+    await db.commit()
+
+
 # ============================================================================
 # SKU RESOLUTION ENDPOINTS
 # ============================================================================
