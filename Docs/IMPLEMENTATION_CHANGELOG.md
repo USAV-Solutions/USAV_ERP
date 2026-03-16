@@ -170,6 +170,7 @@ This migration:
 - Extended Create PO form with `tax_amount`, `shipping_amount`, and `handling_amount` inputs.
 - Added per-PO **Add New Item** toggles so inline line-item create forms stay hidden until requested.
 - Added Purchasing header action **Import 1 Random PO** that triggers test-focused import of a single random Zoho purchase order.
+- Added server-side pagination to Purchasing list (MUI `TablePagination`, aligned with Orders/Inventory page behavior).
 
 ### Update 2026-03-16: Purchasing Line-Item Matching + Delete Actions
 

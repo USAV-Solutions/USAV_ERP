@@ -572,6 +572,7 @@ frontend/
   - **Vendor actions in Create PO:** Vendor is selected via searchable autocomplete; users can create a new vendor directly from typed input using a Create Vendor action beside the search bar.
   - **PO actions:** Create PO dialog includes PO number, vendor search/create, dates, total, tax, shipping, handling, currency, and notes.
   - **PO list/detail:** Supports paged loading and expanded/collapsible table rows for line-item visibility.
+  - **Pagination:** Reuses the same MUI `TablePagination` style used in other management pages, with server-side `skip/limit` loading for purchase orders.
   - **Line-item actions column:** Expanded PO line-item table exposes visible per-row actions to avoid relying on hidden gestures.
   - **Line-item creation:** Expanded PO section uses an Add New Item toggle; the inline Add Line form appears only when requested for that PO. Quantity and unit price are entered, and total price is auto-calculated as quantity × unit price.
   - **Immutable line-item total:** Edit and create flows treat total price as derived/read-only to keep totals consistent.

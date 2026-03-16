@@ -21,6 +21,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   Typography,
@@ -44,7 +45,6 @@ import {
   importPurchasesFromGoodwillCsv,
   importOneRandomPurchaseFromZoho,
   importPurchasesFromZoho,
-  listPurchaseOrders,
   listPurchaseOrdersPaged,
   listVendors,
   matchPurchaseItem,
@@ -409,6 +409,8 @@ export default function PurchasingManagement() {
   const queryClient = useQueryClient()
   const { hasRole } = useAuth()
 
+  const [page, setPage] = useState(0)
+  const [rowsPerPage, setRowsPerPage] = useState(25)
   const [selectedPoId, setSelectedPoId] = useState<number | null>(null)
   const [createPoOpen, setCreatePoOpen] = useState(false)
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false)
@@ -442,10 +444,18 @@ export default function PurchasingManagement() {
   })
 
   const { data: vendors = [] } = useQuery({ queryKey: ['vendors'], queryFn: listVendors })
-  const { data: orders = [], isLoading: loadingOrders } = useQuery({
-    queryKey: ['purchases'],
-    queryFn: listPurchaseOrders,
+  const { data: pagedOrders = [], isLoading: loadingOrders } = useQuery({
+    queryKey: ['purchases', page, rowsPerPage],
+    queryFn: () =>
+      listPurchaseOrdersPaged({
+        skip: page * rowsPerPage,
+        limit: rowsPerPage + 1,
+      }),
   })
+
+  const hasNextPage = pagedOrders.length > rowsPerPage
+  const orders = hasNextPage ? pagedOrders.slice(0, rowsPerPage) : pagedOrders
+  const paginationCount = page * rowsPerPage + orders.length + (hasNextPage ? 1 : 0)
 
   const refreshPurchases = async () => {
     await queryClient.invalidateQueries({ queryKey: ['purchases'] })
@@ -831,6 +841,18 @@ export default function PurchasingManagement() {
                 </Table>
               </TableContainer>
             )}
+            <TablePagination
+              component="div"
+              rowsPerPageOptions={[10, 25, 50, 100]}
+              count={paginationCount}
+              page={page}
+              rowsPerPage={rowsPerPage}
+              onPageChange={(_, nextPage) => setPage(nextPage)}
+              onRowsPerPageChange={(e) => {
+                setRowsPerPage(parseInt(e.target.value, 10))
+                setPage(0)
+              }}
+            />
           </Paper>
         </Grid>
       </Grid>
