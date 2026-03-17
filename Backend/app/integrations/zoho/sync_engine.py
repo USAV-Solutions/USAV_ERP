@@ -32,6 +32,9 @@ from app.modules.orders.models import Order, OrderItem
 
 logger = logging.getLogger(__name__)
 
+UNMATCHED_PLACEHOLDER_ITEM_NAME = "unmatched item"
+UNMATCHED_PLACEHOLDER_ITEM_SKU = "00000"
+
 
 # =========================================================================
 # PAYLOAD MAPPERS  (USAV → Zoho)
@@ -128,7 +131,11 @@ def vendor_to_zoho_payload(vendor: Vendor) -> dict[str, Any]:
     return payload
 
 
-def purchase_order_to_zoho_payload(po: PurchaseOrder) -> dict[str, Any]:
+def purchase_order_to_zoho_payload(
+    po: PurchaseOrder,
+    *,
+    unmatched_item_id: Optional[str] = None,
+) -> dict[str, Any]:
     """Build a Zoho purchase-order payload from a local ``PurchaseOrder``."""
     vendor = getattr(po, "vendor", None)
     if not (vendor and vendor.zoho_id):
@@ -202,10 +209,24 @@ def purchase_order_to_zoho_payload(po: PurchaseOrder) -> dict[str, Any]:
         variant = getattr(item, "variant", None)
         if variant and variant.zoho_item_id:
             li["item_id"] = variant.zoho_item_id
+        elif unmatched_item_id:
+            li["item_id"] = unmatched_item_id
         line_items.append(li)
     payload["line_items"] = line_items
 
     return payload
+
+
+async def _ensure_unmatched_placeholder_item(zoho: ZohoClient) -> Optional[str]:
+    """Ensure the unmatched placeholder item exists in Zoho and return its item_id."""
+    item = await zoho.ensure_item_by_sku(
+        sku=UNMATCHED_PLACEHOLDER_ITEM_SKU,
+        name=UNMATCHED_PLACEHOLDER_ITEM_NAME,
+        rate=0.0,
+        description="Auto-created placeholder for unmatched purchase-order lines.",
+    )
+    item_id = str(item.get("item_id") or "").strip()
+    return item_id or None
 
 
 # =========================================================================
@@ -508,37 +529,45 @@ async def sync_po_outbound(po_id: int) -> None:
                 await db.commit()
                 return
 
-        payload = purchase_order_to_zoho_payload(po)
-        new_hash = generate_payload_hash(payload)
-
-        if new_hash == po.zoho_last_sync_hash:
-            logger.debug("sync_po_outbound: purchase_order %s unchanged (hash match)", po_id)
-            po.zoho_sync_error = None
-            po.zoho_sync_status = ZohoSyncStatus.SYNCED
-            po._updated_by_sync = True
-            await db.commit()
-            return
-
         try:
             zoho = ZohoClient()
 
+            unmatched_item_id: Optional[str] = None
+            if any(getattr(item, "variant", None) is None for item in (po.items or [])):
+                unmatched_item_id = await _ensure_unmatched_placeholder_item(zoho)
+                if not unmatched_item_id:
+                    raise ValueError(
+                        "Unable to resolve Zoho placeholder item for unmatched purchase-order lines"
+                    )
+
+            payload = purchase_order_to_zoho_payload(po, unmatched_item_id=unmatched_item_id)
+            new_hash = generate_payload_hash(payload)
+
+            if new_hash == po.zoho_last_sync_hash:
+                logger.debug("sync_po_outbound: purchase_order %s unchanged (hash match)", po_id)
+                po.zoho_sync_error = None
+                po.zoho_sync_status = ZohoSyncStatus.SYNCED
+                po._updated_by_sync = True
+                await db.commit()
+                return
+
+            if po.zoho_id:
+                try:
+                    existing_po = await zoho.get_purchase_order(po.zoho_id)
+                    if not existing_po:
+                        po.zoho_id = None
+                except Exception as lookup_exc:
+                    logger.warning(
+                        "sync_po_outbound: verification of existing purchase order %s failed: %s",
+                        po.zoho_id,
+                        lookup_exc,
+                    )
+
             if not po.zoho_id:
                 try:
-                    for page in range(1, 4):
-                        purchase_orders = await zoho.list_purchase_orders(page=page, per_page=200)
-                        match = next(
-                            (
-                                zoho_po
-                                for zoho_po in purchase_orders
-                                if str(zoho_po.get("purchaseorder_number", "")) == po.po_number
-                            ),
-                            None,
-                        )
-                        if match:
-                            po.zoho_id = str(match.get("purchaseorder_id", "")) or None
-                            break
-                        if len(purchase_orders) < 200:
-                            break
+                    existing_po = await zoho.find_purchase_order_by_number(po.po_number)
+                    if existing_po:
+                        po.zoho_id = str(existing_po.get("purchaseorder_id") or "").strip() or None
                 except Exception as lookup_exc:
                     logger.warning(
                         "sync_po_outbound: lookup existing purchase order failed: %s",

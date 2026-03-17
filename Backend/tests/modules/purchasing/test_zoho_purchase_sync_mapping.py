@@ -71,3 +71,31 @@ def test_purchase_order_to_zoho_payload_maps_header_custom_and_adjustment_fields
     assert "Source: AMAZON_CSV" in payload["notes"]
     assert "Tracking: TRK-123" in payload["notes"]
     assert payload["line_items"][0]["item_id"] == "it-100"
+
+
+def test_purchase_order_to_zoho_payload_maps_unmatched_lines_to_placeholder_item():
+    po = SimpleNamespace(
+        po_number="PO-456",
+        order_date=date(2026, 3, 17),
+        expected_delivery_date=None,
+        currency="USD",
+        notes=None,
+        source=None,
+        tracking_number=None,
+        tax_amount=Decimal("0"),
+        shipping_amount=Decimal("0"),
+        handling_amount=Decimal("0"),
+        vendor=SimpleNamespace(zoho_id="999001"),
+        items=[
+            SimpleNamespace(
+                external_item_name="Unknown Imported Item",
+                quantity=1,
+                unit_price=Decimal("19.99"),
+                variant=None,
+            )
+        ],
+    )
+
+    payload = purchase_order_to_zoho_payload(po, unmatched_item_id="it-placeholder")
+
+    assert payload["line_items"][0]["item_id"] == "it-placeholder"

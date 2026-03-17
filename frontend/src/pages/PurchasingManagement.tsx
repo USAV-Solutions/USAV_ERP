@@ -55,7 +55,7 @@ import {
   matchPurchaseItem,
   updatePurchaseItem,
 } from '../api/purchasing'
-import { forceSyncPurchase } from '../api/sync'
+import { forceSyncPurchase, forceSyncPurchasesByPeriod } from '../api/sync'
 import type {
   PurchaseOrder,
   PurchaseOrderCreate,
@@ -660,8 +660,7 @@ export default function PurchasingManagement() {
     },
   })
 
-  const canSyncPo = (po: PurchaseOrder) =>
-    po.items.length > 0 && po.items.every((item) => item.status !== 'UNMATCHED' && !!item.variant_id)
+  const canSyncPo = (po: PurchaseOrder) => po.items.length > 0
 
   const handleBulkSync = async () => {
     setBulkLoading(true)
@@ -670,50 +669,19 @@ export default function PurchasingManagement() {
     setBulkProgress({ queued: 0, success: 0, failed: 0 })
 
     try {
-      const pageSize = 200
-      let skip = 0
-      let eligibleIds: number[] = []
+      const response = await forceSyncPurchasesByPeriod({
+        orderDateFrom: orderDateFrom || undefined,
+        orderDateTo: orderDateTo || undefined,
+        limit: 2000,
+      })
 
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const batch = await listPurchaseOrdersPaged({ skip, limit: pageSize })
-        const matched = batch.filter((po) => canSyncPo(po)).map((po) => po.id)
-        eligibleIds = eligibleIds.concat(matched)
-
-        if (batch.length < pageSize || eligibleIds.length >= 2000) {
-          break
-        }
-        skip += pageSize
-      }
-
-      setBulkTotal(eligibleIds.length)
-
-      if (!eligibleIds.length) {
-        setBulkDone(true)
-        return
-      }
-
-      let firstError: string | null = null
-      for (const poId of eligibleIds) {
-        try {
-          await forceSyncPurchase(poId)
-          setBulkProgress((p) => ({ queued: p.queued + 1, success: p.success + 1, failed: p.failed }))
-        } catch (err: any) {
-          setBulkProgress((p) => ({ queued: p.queued + 1, success: p.success, failed: p.failed + 1 }))
-          if (!firstError) {
-            firstError = err?.response?.data?.detail || err?.message || 'One or more purchase orders failed to queue.'
-          }
-        }
-      }
-
-      if (firstError) {
-        setBulkError(firstError)
-      }
+      setBulkTotal(response.count)
+      setBulkProgress({ queued: response.count, success: response.count, failed: 0 })
 
       setBulkDone(true)
       await queryClient.invalidateQueries({ queryKey: ['purchases'] })
     } catch (err: any) {
-      setBulkError(err?.message || 'Failed to load purchase orders for bulk sync.')
+      setBulkError(err?.response?.data?.detail || err?.message || 'Failed to queue purchase orders.')
     } finally {
       setBulkLoading(false)
     }
@@ -740,7 +708,7 @@ export default function PurchasingManagement() {
               setBulkProgress({ queued: 0, success: 0, failed: 0 })
             }}
           >
-            Sync matched to Zoho
+            Sync period to Zoho
           </Button>
           <Button
             variant="outlined"
@@ -1128,14 +1096,18 @@ export default function PurchasingManagement() {
         fullWidth
         maxWidth="sm"
       >
-        <DialogTitle>Sync matched purchase orders to Zoho</DialogTitle>
+        <DialogTitle>Sync purchase orders to Zoho</DialogTitle>
         <DialogContent dividers>
           <Stack spacing={2}>
             <Typography variant="body2" color="text.secondary">
-              Only purchase orders with no unmatched items are queued.
+              Queue purchase orders to Zoho for the selected date period.
+              If no date filter is set, the latest purchase orders are queued.
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Unmatched items are automatically mapped to the placeholder item in Zoho.
             </Typography>
             <Stack spacing={1}>
-              <Typography variant="body2">Eligible purchase orders: {bulkTotal}</Typography>
+              <Typography variant="body2">Queued purchase orders: {bulkTotal}</Typography>
               <Typography variant="body2">
                 Success: {bulkProgress.success} · Failed: {bulkProgress.failed}
               </Typography>
@@ -1151,14 +1123,14 @@ export default function PurchasingManagement() {
             </Stack>
             {bulkLoading && (
               <Alert severity="info" icon={<CircularProgress size={16} />}>
-                Queueing matched purchase orders to Zoho...
+                Queueing purchase orders to Zoho...
               </Alert>
             )}
             {bulkDone && !bulkLoading && !bulkError && bulkTotal > 0 && (
-              <Alert severity="success">All matched purchase orders queued successfully.</Alert>
+              <Alert severity="success">Purchase orders queued successfully.</Alert>
             )}
             {bulkDone && !bulkLoading && bulkTotal === 0 && (
-              <Alert severity="info">No matched purchase orders found to sync.</Alert>
+              <Alert severity="info">No purchase orders found to queue for this period.</Alert>
             )}
             {bulkError && (
               <Alert severity="warning" sx={{ whiteSpace: 'pre-line' }}>

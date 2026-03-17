@@ -731,6 +731,79 @@ class ZohoClient:
         )
         return result.get("purchaseorders", [])
 
+    async def find_purchase_order_by_number(
+        self,
+        purchaseorder_number: str,
+        *,
+        max_pages: int = 50,
+        per_page: int = 200,
+    ) -> Optional[dict]:
+        """Find an existing purchase order by its purchase-order number."""
+        normalized_number = str(purchaseorder_number or "").strip()
+        if not normalized_number:
+            return None
+
+        page = 1
+        while page <= max_pages:
+            purchase_orders = await self.list_purchase_orders(page=page, per_page=per_page)
+            if not purchase_orders:
+                return None
+
+            match = next(
+                (
+                    po
+                    for po in purchase_orders
+                    if str(po.get("purchaseorder_number") or "").strip() == normalized_number
+                ),
+                None,
+            )
+            if match is not None:
+                return match
+
+            if len(purchase_orders) < per_page:
+                return None
+            page += 1
+
+        return None
+
+    async def ensure_item_by_sku(
+        self,
+        *,
+        sku: str,
+        name: str,
+        rate: float = 0.0,
+        description: str = "",
+    ) -> dict:
+        """Ensure an item exists for the given SKU by fetching first, then creating if needed."""
+        normalized_sku = str(sku or "").strip()
+        normalized_name = str(name or "").strip()
+        if not normalized_sku:
+            raise ValueError("sku is required")
+        if not normalized_name:
+            raise ValueError("name is required")
+
+        existing = await self.get_item_by_sku(normalized_sku)
+        if existing:
+            return existing
+
+        item_data = {
+            "name": normalized_name,
+            "sku": normalized_sku,
+            "rate": float(rate or 0),
+            "description": description or "",
+            "item_type": "inventory",
+            "product_type": "goods",
+        }
+        try:
+            return await self.create_item(item_data)
+        except Exception as exc:
+            # Handle duplicate/create race by re-fetching by SKU.
+            if "already exists" in str(exc) or "code\":1001" in str(exc):
+                existing = await self.get_item_by_sku(normalized_sku)
+                if existing:
+                    return existing
+            raise
+
     async def update_contact(self, contact_id: str, contact_data: dict) -> dict:
         """Update an existing contact in Zoho Inventory."""
         result = await self._request(

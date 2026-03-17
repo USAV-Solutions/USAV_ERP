@@ -5,9 +5,10 @@ Allow frontend users to trigger a Zoho sync for a specific record on demand,
 bypassing the automatic SQLAlchemy event listeners.  Every endpoint returns
 ``202 Accepted`` immediately – the actual work runs in the background.
 """
+from datetime import date
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -20,7 +21,6 @@ from app.integrations.zoho.sync_engine import (
     sync_order_outbound,
     sync_variant_outbound,
 )
-from app.models import PurchaseOrderItemStatus
 from app.models.purchasing import PurchaseOrder
 from app.models.entities import Customer, ProductVariant, ZohoSyncStatus
 from app.modules.orders.models import Order
@@ -130,8 +130,7 @@ async def force_sync_purchase_order(
     """
     Queue outbound Zoho sync for a ``PurchaseOrder``.
 
-    Safety guard: only allows sync when every line item is matched
-    (no UNMATCHED status and all items have variant_id).
+    Unmatched lines are allowed; outbound sync maps them to a placeholder item.
     """
     purchase_order = (
         await db.execute(
@@ -153,19 +152,6 @@ async def force_sync_purchase_order(
             detail=f"Purchase order {po_id} has no items to sync.",
         )
 
-    has_unmatched = any(
-        item.status == PurchaseOrderItemStatus.UNMATCHED or item.variant_id is None
-        for item in purchase_order.items
-    )
-    if has_unmatched:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Purchase order {po_id} has unmatched items. "
-                "Match all items before syncing to Zoho."
-            ),
-        )
-
     purchase_order.zoho_sync_status = ZohoSyncStatus.PENDING
     purchase_order.zoho_sync_error = None
     purchase_order._updated_by_sync = True
@@ -175,6 +161,77 @@ async def force_sync_purchase_order(
 
     logger.info("Force-sync queued | entity=purchase id=%s user=%s", po_id, _current_user.id)
     return {"status": "queued", "entity": "purchase", "id": po_id}
+
+
+@router.post(
+    "/purchases",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Force-sync purchase orders in a date range to Zoho",
+)
+async def force_sync_purchase_orders_by_period(
+    background_tasks: BackgroundTasks,
+    _current_user: CurrentUser,
+    order_date_from: date | None = Query(default=None),
+    order_date_to: date | None = Query(default=None),
+    limit: int = Query(default=500, ge=1, le=2000),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Queue outbound Zoho sync for purchase orders within an order-date window.
+
+    If no dates are provided, the latest orders are selected up to ``limit``.
+    """
+    if order_date_from and order_date_to and order_date_from > order_date_to:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="order_date_from must be less than or equal to order_date_to.",
+        )
+
+    stmt = (
+        select(PurchaseOrder)
+        .options(selectinload(PurchaseOrder.items))
+        .order_by(PurchaseOrder.order_date.desc(), PurchaseOrder.id.desc())
+        .limit(limit)
+    )
+    if order_date_from is not None:
+        stmt = stmt.where(PurchaseOrder.order_date >= order_date_from)
+    if order_date_to is not None:
+        stmt = stmt.where(PurchaseOrder.order_date <= order_date_to)
+
+    purchase_orders = (await db.execute(stmt)).scalars().all()
+    if not purchase_orders:
+        return {
+            "status": "queued",
+            "entity": "purchase",
+            "count": 0,
+            "ids": [],
+        }
+
+    queued_ids: list[int] = []
+    for po in purchase_orders:
+        if not po.items:
+            continue
+        po.zoho_sync_status = ZohoSyncStatus.PENDING
+        po.zoho_sync_error = None
+        po._updated_by_sync = True
+        queued_ids.append(po.id)
+        background_tasks.add_task(sync_po_outbound, po.id)
+
+    await db.commit()
+
+    logger.info(
+        "Force-sync queued | entity=purchase period from=%s to=%s count=%s user=%s",
+        order_date_from,
+        order_date_to,
+        len(queued_ids),
+        _current_user.id,
+    )
+    return {
+        "status": "queued",
+        "entity": "purchase",
+        "count": len(queued_ids),
+        "ids": queued_ids,
+    }
 
 
 # ------------------------------------------------------------------

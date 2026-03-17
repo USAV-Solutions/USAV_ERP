@@ -75,6 +75,7 @@ export const SYNC = {
   ITEM: (variantId: number) => `/sync/items/${variantId}`,
   ORDER: (orderId: number) => `/sync/orders/${orderId}`,
   PURCHASE: (poId: number) => `/sync/purchases/${poId}`,
+  PURCHASES: '/sync/purchases',
   CUSTOMER: (customerId: number) => `/sync/customers/${customerId}`,
 }
 
