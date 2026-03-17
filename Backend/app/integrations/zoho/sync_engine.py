@@ -229,6 +229,134 @@ async def _ensure_unmatched_placeholder_item(zoho: ZohoClient) -> Optional[str]:
     return item_id or None
 
 
+def _is_billed_po_update_error(exc: Exception) -> bool:
+    message = str(exc)
+    return "36023" in message or "marked as billed" in message.lower()
+
+
+def _build_bill_recreate_payload(bill: dict[str, Any], *, purchaseorder_id: str) -> dict[str, Any]:
+    """Build a safe bill-create payload from an existing Zoho bill payload."""
+    payload: dict[str, Any] = {
+        "purchaseorder_id": purchaseorder_id,
+        "vendor_id": bill.get("vendor_id"),
+        "bill_number": bill.get("bill_number"),
+        "date": bill.get("date"),
+        "due_date": bill.get("due_date"),
+    }
+
+    optional_keys = [
+        "reference_number",
+        "currency_id",
+        "exchange_rate",
+        "is_item_level_tax_calc",
+        "is_inclusive_tax",
+        "notes",
+        "terms",
+        "location_id",
+        "custom_fields",
+    ]
+    for key in optional_keys:
+        value = bill.get(key)
+        if value is not None:
+            payload[key] = value
+
+    line_items_payload: list[dict[str, Any]] = []
+    for line in bill.get("line_items") or []:
+        if not isinstance(line, dict):
+            continue
+        line_payload: dict[str, Any] = {}
+        for key in [
+            "line_item_id",
+            "purchaseorder_item_id",
+            "receive_item_id",
+            "item_id",
+            "name",
+            "description",
+            "account_id",
+            "rate",
+            "quantity",
+            "tax_id",
+            "tds_tax_id",
+            "location_id",
+        ]:
+            value = line.get(key)
+            if value is not None and value != "":
+                line_payload[key] = value
+
+        if "quantity" not in line_payload:
+            line_payload["quantity"] = line.get("quantity") or 1
+        if "rate" not in line_payload and line.get("item_total") is not None:
+            try:
+                qty = float(line_payload.get("quantity") or 1)
+                if qty > 0:
+                    line_payload["rate"] = float(line.get("item_total")) / qty
+            except Exception:
+                pass
+
+        if line_payload:
+            line_items_payload.append(line_payload)
+
+    payload["line_items"] = line_items_payload
+    return payload
+
+
+async def _update_billed_purchase_order_with_unbill_rebill(
+    zoho: ZohoClient,
+    *,
+    purchase_order_id: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Update a billed PO by deleting linked bills, updating PO, and recreating bills.
+
+    This is intentionally scoped for explicit operator-triggered sync flows.
+    """
+    zoho_po = await zoho.get_purchase_order(purchase_order_id)
+    bills = [b for b in (zoho_po.get("bills") or []) if isinstance(b, dict)]
+    if not bills:
+        # No linked bills; let normal update path surface any other failure reason.
+        return await zoho.update_purchase_order(purchase_order_id, payload)
+
+    bill_snapshots: list[dict[str, Any]] = []
+    deleted_bill_ids: list[str] = []
+
+    for bill_ref in bills:
+        bill_id = str(bill_ref.get("bill_id") or "").strip()
+        if not bill_id:
+            continue
+        full_bill = await zoho.get_bill(bill_id)
+        if full_bill:
+            bill_snapshots.append(full_bill)
+        await zoho.delete_bill(bill_id)
+        deleted_bill_ids.append(bill_id)
+
+    try:
+        updated_po = await zoho.update_purchase_order(purchase_order_id, payload)
+    except Exception:
+        # Best-effort recovery: recreate deleted bills if PO update fails.
+        for snapshot in bill_snapshots:
+            recreate_payload = _build_bill_recreate_payload(snapshot, purchaseorder_id=purchase_order_id)
+            try:
+                await zoho.create_bill(recreate_payload)
+            except Exception:
+                logger.exception(
+                    "sync_po_outbound: failed to restore bill after PO update failure | po_id=%s",
+                    purchase_order_id,
+                )
+        raise
+
+    for snapshot in bill_snapshots:
+        recreate_payload = _build_bill_recreate_payload(snapshot, purchaseorder_id=purchase_order_id)
+        await zoho.create_bill(recreate_payload)
+
+    logger.warning(
+        "sync_po_outbound: billed PO required unbill/rebill flow | po_id=%s bills_processed=%s",
+        purchase_order_id,
+        len(deleted_bill_ids),
+    )
+    return updated_po
+
+
 # =========================================================================
 # INBOUND MAPPERS  (Zoho → USAV)
 # =========================================================================
@@ -487,7 +615,7 @@ async def sync_vendor_outbound(vendor_id: int) -> None:
             logger.exception("sync_vendor_outbound: vendor %s failed", vendor_id)
 
 
-async def sync_po_outbound(po_id: int) -> None:
+async def sync_po_outbound(po_id: int, allow_billed_unbill_rebill: bool = False) -> None:
     """Push a ``PurchaseOrder`` to Zoho Inventory as a purchase order."""
     from sqlalchemy import select
     from sqlalchemy.orm import selectinload
@@ -575,7 +703,17 @@ async def sync_po_outbound(po_id: int) -> None:
                     )
 
             if po.zoho_id:
-                zoho_po = await zoho.update_purchase_order(po.zoho_id, payload)
+                try:
+                    zoho_po = await zoho.update_purchase_order(po.zoho_id, payload)
+                except Exception as update_exc:
+                    if allow_billed_unbill_rebill and _is_billed_po_update_error(update_exc):
+                        zoho_po = await _update_billed_purchase_order_with_unbill_rebill(
+                            zoho,
+                            purchase_order_id=po.zoho_id,
+                            payload=payload,
+                        )
+                    else:
+                        raise
             else:
                 zoho_po = await zoho.create_purchase_order(payload)
 
@@ -601,6 +739,11 @@ async def sync_po_outbound(po_id: int) -> None:
             po._updated_by_sync = True
             await db.commit()
             logger.exception("sync_po_outbound: purchase_order %s failed", po_id)
+
+
+async def sync_po_outbound_with_unbill_rebill(po_id: int) -> None:
+    """Operator-triggered PO sync that allows unbill/rebill for billed Zoho purchase orders."""
+    await sync_po_outbound(po_id, allow_billed_unbill_rebill=True)
 
 
 # =========================================================================

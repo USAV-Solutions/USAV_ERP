@@ -766,6 +766,28 @@ class ZohoClient:
 
         return None
 
+    # =========================================================================
+    # BILLS
+    # =========================================================================
+
+    async def get_bill(self, bill_id: str) -> dict:
+        """Fetch a single bill by ID."""
+        result = await self._request("GET", f"/bills/{bill_id}")
+        return result.get("bill", {})
+
+    async def delete_bill(self, bill_id: str) -> dict:
+        """Delete a bill in Zoho Inventory."""
+        return await self._request("DELETE", f"/bills/{bill_id}")
+
+    async def create_bill(self, bill_data: dict) -> dict:
+        """Create a bill in Zoho Inventory."""
+        result = await self._request(
+            "POST",
+            "/bills",
+            data={"JSONString": json.dumps(bill_data)},
+        )
+        return result.get("bill", {})
+
     async def ensure_item_by_sku(
         self,
         *,
