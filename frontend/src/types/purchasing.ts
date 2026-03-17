@@ -28,6 +28,7 @@ export interface PurchaseOrderItem {
   variant_sku?: string | null
   variant_name?: string | null
   external_item_id?: string | null
+  purchase_item_link?: string | null
   external_item_name: string
   quantity: number
   unit_price: number

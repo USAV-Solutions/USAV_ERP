@@ -985,6 +985,12 @@ Backend/
     - `source=goodwill` — Goodwill CSV parser (legacy columns: Order #, Item Id, Item, Quantity, Price, Date, Tracking #, Tax, Shipping, Handling).
     - `source=amazon` — Amazon CSV parser grouped by `Order ID`; deduplicates repeated split-payment rows and excludes all rows where `Account User` is `Dragonhn` (personal purchases).
     - `source=aliexpress` — AliExpress JSON parser expecting an array of orders with `orderId`, `items[]`, `seller`, and `priceData` fields.
+  - Purchase-order line items persist optional `purchase_item_link` for external view actions in the frontend.
+  - Link derivation during file imports:
+    - Goodwill: `https://shopgoodwill.com/item/{Item Id}`
+    - Amazon: `https://amazon.com/dp/{ASIN}`
+    - AliExpress: `items[].productLink` fallback to `orderDetailLink` when item-level link is missing.
+    - eBay mapping logic is noted in code for future importer support: `https://www.ebay.com/itm/{item_id}`.
   - Legacy compatibility endpoint `POST /purchases/import/goodwill-csv` remains available and delegates to the source-based file importer.
 
 ---

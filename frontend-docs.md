@@ -595,6 +595,7 @@ frontend/
   - **PO force-sync:** Supports per-purchase force-sync to Zoho via `forceSyncPurchase`.
   - **Item matching:** Per-line-item Match action on `UNMATCHED` rows opens an inline search bar (same `VariantSearchAutocomplete` used by Order resolution), allowing SKU/name search and one-click match.
   - **Matched display detail:** In line-item rows, a matched item shows a smaller italic subline under the item name containing the matched in-database variant name.
+  - **Item external view link:** Per-line-item eye icon opens `purchase_item_link` in a new tab; if no link exists, the eye action is disabled and rendered as inactive/grey.
   - **Unmatch action:** Matched items show a red unlink action (chain with slash) that resets the item back to `UNMATCHED`.
   - **Item delete:** Per-line-item Delete icon opens a confirmation dialog and calls `DELETE /purchases/items/{item_id}` (disabled for `RECEIVED` rows).
   - **Long-press edit:** Existing long-press edit prompt remains available for updating item fields and manual SKU correction.

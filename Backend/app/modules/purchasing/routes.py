@@ -114,6 +114,21 @@ def _to_int(value: object, default: int = 0) -> int:
         return default
 
 
+def _build_purchase_item_link(source: PurchaseFileImportSource, *, asin: str | None = None, item_id: str | None = None) -> str | None:
+    normalized_asin = str(asin or "").strip()
+    normalized_item_id = str(item_id or "").strip()
+
+    if source == PurchaseFileImportSource.AMAZON and normalized_asin:
+        return f"https://amazon.com/dp/{normalized_asin}"
+    if source == PurchaseFileImportSource.GOODWILL and normalized_item_id:
+        return f"https://shopgoodwill.com/item/{normalized_item_id}"
+    # Future eBay import mapping:
+    # if source == PurchaseFileImportSource.EBAY and normalized_item_id:
+    #     return f"https://www.ebay.com/itm/{normalized_item_id}"
+
+    return None
+
+
 def _map_zoho_po_status(status_raw: object) -> PurchaseDeliverStatus:
     status_text = str(status_raw or "").strip().lower()
     if status_text in {"billed", "partially_billed"}:
@@ -870,6 +885,7 @@ async def _resolve_vendor_id(
 async def _upsert_purchase_item(
     local_po_id: int,
     item_id: str | None,
+    purchase_item_link: str | None,
     item_name: str,
     quantity: int,
     unit_price: Decimal,
@@ -893,10 +909,15 @@ async def _upsert_purchase_item(
         existing_item = (await db.execute(stmt)).scalar_one_or_none()
 
     line_total = unit_price * quantity
+    normalized_purchase_item_link = (purchase_item_link or "").strip() or None
+    if normalized_purchase_item_link:
+        normalized_purchase_item_link = normalized_purchase_item_link[:500]
+
     item_payload = {
         "purchase_order_id": local_po_id,
         "variant_id": None,
         "external_item_id": item_id,
+        "purchase_item_link": normalized_purchase_item_link,
         "external_item_name": item_name[:255],
         "quantity": quantity,
         "unit_price": unit_price,
@@ -951,6 +972,10 @@ async def _import_goodwill_csv(
 
         po_number = str(row.get("Order #") or "").strip()
         item_id = str(row.get("Item Id") or "").strip() or None
+        purchase_item_link = _build_purchase_item_link(
+            PurchaseFileImportSource.GOODWILL,
+            item_id=item_id,
+        )
         item_name = str(row.get("Item") or "").strip()
         if not po_number or not item_name:
             result.source_rows_skipped += 1
@@ -998,6 +1023,7 @@ async def _import_goodwill_csv(
         await _upsert_purchase_item(
             local_po_id=local_po.id,
             item_id=item_id,
+            purchase_item_link=purchase_item_link,
             item_name=item_name,
             quantity=quantity,
             unit_price=unit_price,
@@ -1078,8 +1104,13 @@ async def _import_amazon_csv(
         asin = str(row.get("ASIN") or "").strip()
         line_item_id = str(row.get("PO Line Item Id") or "").strip()
         external_item_id = line_item_id or asin or None
+        purchase_item_link = _build_purchase_item_link(
+            PurchaseFileImportSource.AMAZON,
+            asin=asin,
+        )
         fingerprint = (
             external_item_id or "",
+            purchase_item_link or "",
             item_name,
             str(quantity),
             str(item_unit_price),
@@ -1091,6 +1122,7 @@ async def _import_amazon_csv(
         order_bucket["items"].append(
             {
                 "external_item_id": external_item_id,
+                "purchase_item_link": purchase_item_link,
                 "external_item_name": item_name,
                 "quantity": quantity,
                 "unit_price": item_unit_price,
@@ -1139,6 +1171,7 @@ async def _import_amazon_csv(
             await _upsert_purchase_item(
                 local_po_id=local_po.id,
                 item_id=item["external_item_id"],
+                purchase_item_link=item.get("purchase_item_link"),
                 item_name=item["external_item_name"],
                 quantity=item["quantity"],
                 unit_price=item["unit_price"],
@@ -1192,6 +1225,7 @@ async def _import_aliexpress_json(
             handling_amount = Decimal("0")
 
         parsed_items: list[dict] = []
+        order_detail_link = str(order.get("orderDetailLink") or "").strip() or None
         for item in items:
             if not isinstance(item, dict):
                 continue
@@ -1204,12 +1238,12 @@ async def _import_aliexpress_json(
             if not item_title:
                 continue
             external_item_name = item_title if not item_attributes else f"{item_title} ({item_attributes})"
-            product_link = str(item.get("productLink") or "").strip() or None
-            if product_link and len(product_link) > 100:
-                product_link = product_link[:100]
+            external_item_id = str(item.get("itemId") or item.get("productId") or item.get("skuId") or "").strip() or None
+            product_link = str(item.get("productLink") or "").strip() or order_detail_link
             parsed_items.append(
                 {
-                    "external_item_id": product_link,
+                    "external_item_id": external_item_id,
+                    "purchase_item_link": product_link,
                     "external_item_name": external_item_name,
                     "quantity": quantity,
                     "unit_price": unit_price,
@@ -1259,6 +1293,7 @@ async def _import_aliexpress_json(
             await _upsert_purchase_item(
                 local_po_id=local_po.id,
                 item_id=item["external_item_id"],
+                purchase_item_link=item.get("purchase_item_link"),
                 item_name=item["external_item_name"],
                 quantity=item["quantity"],
                 unit_price=item["unit_price"],

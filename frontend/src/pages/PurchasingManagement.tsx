@@ -36,6 +36,7 @@ import {
   DeleteOutline,
   KeyboardArrowDown,
   KeyboardArrowUp,
+  Visibility,
   Link as LinkIcon,
   LinkOff,
 } from '@mui/icons-material'
@@ -288,6 +289,8 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
 
   const anyPending =
     saveMutation.isPending || deleteMutation.isPending || matchMutation.isPending || unmatchMutation.isPending
+  const purchaseItemLink = item.purchase_item_link?.trim() || ''
+  const hasPurchaseItemLink = purchaseItemLink.length > 0
 
   const openPrompt = () => {
     setExternalItemId(item.external_item_id || '')
@@ -322,6 +325,20 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
         </TableCell>
         <TableCell align="center">
           <Stack direction="row" spacing={0.5} justifyContent="center">
+            <IconButton
+              size="small"
+              color="inherit"
+              disabled={!hasPurchaseItemLink}
+              onClick={(event) => {
+                event.stopPropagation()
+                if (!hasPurchaseItemLink) {
+                  return
+                }
+                window.open(purchaseItemLink, '_blank', 'noopener,noreferrer')
+              }}
+            >
+              <Visibility fontSize="small" />
+            </IconButton>
             {item.status === 'UNMATCHED' && (
               <IconButton
                 size="small"
