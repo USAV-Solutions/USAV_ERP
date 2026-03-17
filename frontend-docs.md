@@ -580,6 +580,8 @@ frontend/
   - **Vendor actions in Create PO:** Vendor is selected via searchable autocomplete; users can create a new vendor directly from typed input using a Create Vendor action beside the search bar.
   - **PO actions:** Create PO dialog includes PO number, vendor search/create, dates, total, tax, shipping, handling, currency, and notes.
   - **PO list/detail:** Supports paged loading and expanded/collapsible table rows for line-item visibility.
+  - **Date sorting:** Purchasing list supports date sort direction (`Newest first` / `Oldest first`) driven by server-side query parameters.
+  - **Date filter:** Purchasing list supports date-range filtering (`From` / `To`) on order date with a clear-filter action.
   - **Pagination:** Uses shared `TablePaginationWithPageJump` with server-side `skip/limit` loading and direct page jump.
   - **PO unmatched count:** Main PO rows include an `Unmatched` count chip showing number of `UNMATCHED` line items.
   - **Line-item actions column:** Expanded PO line-item table exposes visible per-row actions to avoid relying on hidden gestures.
@@ -588,6 +590,7 @@ frontend/
   - **Line-item total row:** Expanded line-items table displays a summary row showing the summed line-item total.
   - **Zoho import:** Includes bulk import trigger for vendors + purchase orders from Zoho with progress and result feedback.
   - **Purchase file import:** Header action **Import Purchase** opens source selection for `Goodwill`, `Amazon`, or `AliExpress`, then uploads the source-appropriate file type (`CSV` for Goodwill/Amazon, `JSON` for AliExpress).
+  - **Amazon import exclusion rule:** Rows with `Account User = Dragonhn` are skipped during Purchasing import because they are treated as personal purchases.
   - **Random Zoho import test:** Header action **Import 1 Random PO** imports exactly one random purchase order from Zoho for quick import validation and displays selected PO metadata in feedback.
   - **PO force-sync:** Supports per-purchase force-sync to Zoho via `forceSyncPurchase`.
   - **Item matching:** Per-line-item Match action on `UNMATCHED` rows opens an inline search bar (same `VariantSearchAutocomplete` used by Order resolution), allowing SKU/name search and one-click match.

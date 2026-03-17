@@ -178,6 +178,8 @@ This migration:
 - Added red unlink action for matched purchase items to quickly unmatch back to `UNMATCHED`.
 - Replaced Purchasing header import action with **Import Purchase** flow that prompts source selection (`Goodwill`, `Amazon`, `AliExpress`) before file upload.
 - Added backend source-based purchase import endpoint (`/purchases/import/file`) with new parsers for Amazon orders CSV and AliExpress orders JSON; retained legacy Goodwill CSV endpoint for compatibility.
+- Added Purchasing list date controls: server-side order-date sorting (newest/oldest) and order-date range filtering (`From` / `To`).
+- Updated Amazon CSV purchase import to ignore rows where `Account User` is `Dragonhn` (personal purchases exclusion).
 
 ### Update 2026-03-16: Purchasing Line-Item Matching + Delete Actions
 

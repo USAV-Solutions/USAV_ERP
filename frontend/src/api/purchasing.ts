@@ -41,10 +41,16 @@ export async function listPurchaseOrders(): Promise<PurchaseOrder[]> {
 export async function listPurchaseOrdersPaged(params: {
   skip?: number
   limit?: number
+  dateSort?: 'asc' | 'desc'
+  orderDateFrom?: string
+  orderDateTo?: string
 } = {}): Promise<PurchaseOrder[]> {
   const query = new URLSearchParams()
   if (params.skip !== undefined) query.set('skip', String(params.skip))
   if (params.limit !== undefined) query.set('limit', String(params.limit))
+  if (params.dateSort !== undefined) query.set('date_sort', params.dateSort)
+  if (params.orderDateFrom) query.set('order_date_from', params.orderDateFrom)
+  if (params.orderDateTo) query.set('order_date_to', params.orderDateTo)
 
   const qs = query.toString()
   const url = qs ? `${PURCHASING.PURCHASES}?${qs}` : PURCHASING.PURCHASES

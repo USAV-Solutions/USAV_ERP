@@ -974,11 +974,17 @@ Backend/
 * **Mechanism / Core Logic:**
   - `GET/POST/PATCH /vendors...` — Vendor list/create/update endpoints.
   - `GET/POST /purchases...` + `GET /purchases/{po_id}` — Purchase order list/create/detail endpoints.
+  - `GET /purchases` supports server-side order-date controls: `date_sort=asc|desc`, `order_date_from=YYYY-MM-DD`, `order_date_to=YYYY-MM-DD`.
   - `POST /purchases/{po_id}/items` — Add a purchase order line item.
   - `POST /purchases/items/{item_id}/match` — Manually match a PO line item to a product variant.
   - `DELETE /purchases/items/{item_id}` — Delete a PO line item; rejects deletion for `RECEIVED` items.
   - `POST /purchases/{po_id}/mark-delivered` — Receive PO items into inventory and mark PO delivered.
-  - `POST /purchases/import/zoho`, `POST /purchases/import/zoho/random-one`, and `POST /purchases/import/file?source={goodwill|amazon|aliexpress}` — Source import flows.
+  - `POST /purchases/import/zoho` — Bulk vendor + PO import from Zoho.
+  - `POST /purchases/import/zoho/random-one` — Random single PO import for test validation, with fallback probing across pages when the selected page has no results.
+  - `POST /purchases/import/file?source={goodwill|amazon|aliexpress}` — Source-based file import:
+    - `source=goodwill` — Goodwill CSV parser (legacy columns: Order #, Item Id, Item, Quantity, Price, Date, Tracking #, Tax, Shipping, Handling).
+    - `source=amazon` — Amazon CSV parser grouped by `Order ID`; deduplicates repeated split-payment rows and excludes all rows where `Account User` is `Dragonhn` (personal purchases).
+    - `source=aliexpress` — AliExpress JSON parser expecting an array of orders with `orderId`, `items[]`, `seller`, and `priceData` fields.
   - Legacy compatibility endpoint `POST /purchases/import/goodwill-csv` remains available and delegates to the source-based file importer.
 
 ---

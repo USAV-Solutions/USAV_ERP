@@ -458,6 +458,9 @@ export default function PurchasingManagement() {
 
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(25)
+  const [dateSort, setDateSort] = useState<'asc' | 'desc'>('desc')
+  const [orderDateFrom, setOrderDateFrom] = useState('')
+  const [orderDateTo, setOrderDateTo] = useState('')
   const [selectedPoId, setSelectedPoId] = useState<number | null>(null)
   const [createPoOpen, setCreatePoOpen] = useState(false)
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false)
@@ -494,11 +497,14 @@ export default function PurchasingManagement() {
 
   const { data: vendors = [] } = useQuery({ queryKey: ['vendors'], queryFn: listVendors })
   const { data: pagedOrders = [], isLoading: loadingOrders } = useQuery({
-    queryKey: ['purchases', page, rowsPerPage],
+    queryKey: ['purchases', page, rowsPerPage, dateSort, orderDateFrom, orderDateTo],
     queryFn: () =>
       listPurchaseOrdersPaged({
         skip: page * rowsPerPage,
         limit: rowsPerPage + 1,
+        dateSort,
+        orderDateFrom: orderDateFrom || undefined,
+        orderDateTo: orderDateTo || undefined,
       }),
   })
 
@@ -748,6 +754,56 @@ export default function PurchasingManagement() {
             <Typography variant="h6" sx={{ mb: 1 }}>
               Purchase Orders
             </Typography>
+            <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ mb: 2 }} alignItems={{ xs: 'stretch', md: 'center' }}>
+              <FormControl size="small" sx={{ minWidth: 190 }}>
+                <InputLabel id="po-date-sort-label">Sort By Date</InputLabel>
+                <Select
+                  labelId="po-date-sort-label"
+                  label="Sort By Date"
+                  value={dateSort}
+                  onChange={(e) => {
+                    setDateSort(e.target.value as 'asc' | 'desc')
+                    setPage(0)
+                  }}
+                >
+                  <MenuItem value="desc">Newest first</MenuItem>
+                  <MenuItem value="asc">Oldest first</MenuItem>
+                </Select>
+              </FormControl>
+              <TextField
+                size="small"
+                type="date"
+                label="From"
+                InputLabelProps={{ shrink: true }}
+                value={orderDateFrom}
+                onChange={(e) => {
+                  setOrderDateFrom(e.target.value)
+                  setPage(0)
+                }}
+              />
+              <TextField
+                size="small"
+                type="date"
+                label="To"
+                InputLabelProps={{ shrink: true }}
+                value={orderDateTo}
+                onChange={(e) => {
+                  setOrderDateTo(e.target.value)
+                  setPage(0)
+                }}
+              />
+              <Button
+                size="small"
+                onClick={() => {
+                  setOrderDateFrom('')
+                  setOrderDateTo('')
+                  setPage(0)
+                }}
+                disabled={!orderDateFrom && !orderDateTo}
+              >
+                Clear Date Filter
+              </Button>
+            </Stack>
             {loadingOrders ? (
               <Typography variant="body2">Loading...</Typography>
             ) : (

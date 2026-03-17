@@ -245,9 +245,18 @@ async def update_vendor(
 async def list_purchase_orders(
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    order_date_from: Annotated[date | None, Query()] = None,
+    order_date_to: Annotated[date | None, Query()] = None,
+    date_sort: Annotated[str, Query(pattern="^(asc|desc)$")] = "desc",
     repo: PurchaseOrderRepository = Depends(get_purchase_order_repo),
 ):
-    rows = await repo.get_multi(skip=skip, limit=limit, order_by="-created_at")
+    rows = await repo.get_multi_with_date_filters(
+        skip=skip,
+        limit=limit,
+        order_date_from=order_date_from,
+        order_date_to=order_date_to,
+        sort_date=date_sort,
+    )
     return [PurchaseOrderResponse.model_validate(r) for r in rows]
 
 
@@ -1022,9 +1031,16 @@ async def _import_amazon_csv(
     result = PurchaseFileImportResponse(source=PurchaseFileImportSource.AMAZON)
     vendor_cache: dict[str, int] = {}
     grouped_orders: dict[str, dict] = {}
+    excluded_account_user = "dragonhn"
 
     for row in reader:
         result.source_rows_seen += 1
+
+        account_user = str(row.get("Account User") or "").strip().lower()
+        if account_user == excluded_account_user:
+            result.source_rows_skipped += 1
+            continue
+
         po_number = str(row.get("Order ID") or "").strip()
         item_name = str(row.get("Title") or "").strip()
         quantity = _to_int(row.get("Item Quantity"), default=0)
