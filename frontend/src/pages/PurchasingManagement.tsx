@@ -495,6 +495,9 @@ export default function PurchasingManagement() {
   const [addingItemPoId, setAddingItemPoId] = useState<number | null>(null)
   const purchaseFileInputRef = useRef<HTMLInputElement | null>(null)
   const [importPurchaseOpen, setImportPurchaseOpen] = useState(false)
+  const [importZohoRangeOpen, setImportZohoRangeOpen] = useState(false)
+  const [importZohoRangeFrom, setImportZohoRangeFrom] = useState('')
+  const [importZohoRangeTo, setImportZohoRangeTo] = useState('')
   const [purchaseImportSource, setPurchaseImportSource] = useState<PurchaseFileImportSource>('goodwill')
   const [expandedPoId, setExpandedPoId] = useState<number | null>(null)
   const [snackbar, setSnackbar] = useState<{ open: boolean; msg: string; severity: 'success' | 'error' }>({
@@ -596,6 +599,30 @@ export default function PurchasingManagement() {
     },
     onError: () => {
       setSnackbar({ open: true, msg: 'Failed to import purchasing list from Zoho.', severity: 'error' })
+    },
+  })
+
+  const importZohoRangeMutation = useMutation({
+    mutationFn: (params: { orderDateFrom: string; orderDateTo: string }) => importPurchasesFromZoho(params),
+    onSuccess: async (res, params) => {
+      await queryClient.invalidateQueries({ queryKey: ['vendors'] })
+      await queryClient.invalidateQueries({ queryKey: ['purchases'] })
+      setImportZohoRangeOpen(false)
+      setSnackbar({
+        open: true,
+        severity: 'success',
+        msg:
+          `Zoho range import done (${params.orderDateFrom} to ${params.orderDateTo}): ` +
+          `${res.purchase_orders_created} PO created, ${res.purchase_orders_updated} PO updated, ` +
+          `${res.vendors_created} vendor created, ${res.vendors_updated} vendor updated.`,
+      })
+    },
+    onError: (error: { response?: { data?: { detail?: string } } }) => {
+      setSnackbar({
+        open: true,
+        msg: error.response?.data?.detail || 'Failed to import Zoho purchases by date range.',
+        severity: 'error',
+      })
     },
   })
 
@@ -721,14 +748,37 @@ export default function PurchasingManagement() {
           <Button
             variant="outlined"
             onClick={() => importZohoMutation.mutate()}
-            disabled={importZohoMutation.isPending || importRandomZohoMutation.isPending}
+            disabled={
+              importZohoMutation.isPending ||
+              importZohoRangeMutation.isPending ||
+              importRandomZohoMutation.isPending
+            }
           >
             {importZohoMutation.isPending ? 'Importing...' : 'Import from Zoho'}
           </Button>
           <Button
             variant="outlined"
+            onClick={() => {
+              setImportZohoRangeFrom(orderDateFrom)
+              setImportZohoRangeTo(orderDateTo)
+              setImportZohoRangeOpen(true)
+            }}
+            disabled={
+              importZohoMutation.isPending ||
+              importZohoRangeMutation.isPending ||
+              importRandomZohoMutation.isPending
+            }
+          >
+            {importZohoRangeMutation.isPending ? 'Importing range...' : 'Import Range from Zoho'}
+          </Button>
+          <Button
+            variant="outlined"
             onClick={() => importRandomZohoMutation.mutate()}
-            disabled={importZohoMutation.isPending || importRandomZohoMutation.isPending}
+            disabled={
+              importZohoMutation.isPending ||
+              importZohoRangeMutation.isPending ||
+              importRandomZohoMutation.isPending
+            }
           >
             {importRandomZohoMutation.isPending ? 'Importing random PO...' : 'Import 1 Random PO'}
           </Button>
@@ -1094,6 +1144,53 @@ export default function PurchasingManagement() {
             onClick={() => createPoMutation.mutate(poForm)}
           >
             Create
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={importZohoRangeOpen} onClose={() => setImportZohoRangeOpen(false)} fullWidth maxWidth="xs">
+        <DialogTitle>Import Range from Zoho</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              size="small"
+              type="date"
+              label="From"
+              InputLabelProps={{ shrink: true }}
+              value={importZohoRangeFrom}
+              onChange={(e) => setImportZohoRangeFrom(e.target.value)}
+            />
+            <TextField
+              size="small"
+              type="date"
+              label="To"
+              InputLabelProps={{ shrink: true }}
+              value={importZohoRangeTo}
+              onChange={(e) => setImportZohoRangeTo(e.target.value)}
+            />
+            <Alert severity="info">Only Zoho purchase orders within this order date range will be imported.</Alert>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setImportZohoRangeOpen(false)} disabled={importZohoRangeMutation.isPending}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            disabled={
+              importZohoRangeMutation.isPending ||
+              !importZohoRangeFrom ||
+              !importZohoRangeTo ||
+              importZohoRangeFrom > importZohoRangeTo
+            }
+            onClick={() =>
+              importZohoRangeMutation.mutate({
+                orderDateFrom: importZohoRangeFrom,
+                orderDateTo: importZohoRangeTo,
+              })
+            }
+          >
+            {importZohoRangeMutation.isPending ? 'Importing...' : 'Import'}
           </Button>
         </DialogActions>
       </Dialog>

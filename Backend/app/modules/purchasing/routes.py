@@ -79,6 +79,22 @@ def _to_date(value: object) -> date:
     return date.today()
 
 
+def _to_date_or_none(value: object) -> date | None:
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str) and value:
+        text = value.strip()
+        try:
+            return date.fromisoformat(text[:10])
+        except ValueError:
+            for fmt in ("%m/%d/%Y", "%m/%d/%y", "%b %d, %Y", "%B %d, %Y"):
+                try:
+                    return datetime.strptime(text, fmt).date()
+                except ValueError:
+                    continue
+    return None
+
+
 def _decode_upload_text(raw: bytes) -> str:
     try:
         return raw.decode("utf-8-sig")
@@ -580,6 +596,18 @@ async def import_purchasing_from_zoho(
             po_number = str(zoho_po.get("purchaseorder_number") or "").strip()
             vendor_zoho_id = str(zoho_po.get("vendor_id") or "").strip()
 
+            # Apply period filter early using list payload date to avoid importing out-of-range
+            # orders and to skip unnecessary detail API calls.
+            list_level_order_date = _to_date_or_none(
+                zoho_po.get("date") or zoho_po.get("purchaseorder_date")
+            )
+            if order_date_from is not None:
+                if list_level_order_date is None or list_level_order_date < order_date_from:
+                    continue
+            if order_date_to is not None:
+                if list_level_order_date is None or list_level_order_date > order_date_to:
+                    continue
+
             # Zoho list endpoint often omits line_items; fetch full PO details when possible.
             zoho_po_detail = zoho_po
             if zoho_po_id:
@@ -607,13 +635,18 @@ async def import_purchasing_from_zoho(
                 existing_po = await po_repo.get_by_field("po_number", po_number)
 
             tax_amount, shipping_amount, handling_amount = _extract_zoho_po_charges(zoho_po_detail)
-            order_date_value = _to_date(
+            order_date_value = _to_date_or_none(
                 zoho_po_detail.get("date")
                 or zoho_po_detail.get("purchaseorder_date")
                 or zoho_po.get("date")
                 or zoho_po.get("purchaseorder_date")
             )
 
+            if order_date_value is None:
+                # With a date range selected, unknown-date records should not be imported.
+                if order_date_from is not None or order_date_to is not None:
+                    continue
+                order_date_value = date.today()
             if order_date_from is not None and order_date_value < order_date_from:
                 continue
             if order_date_to is not None and order_date_value > order_date_to:
