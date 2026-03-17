@@ -7,6 +7,7 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models import PurchaseDeliverStatus, PurchaseOrderItemStatus
+from app.models.entities import ZohoSyncStatus
 
 
 class VendorBase(BaseModel):
@@ -114,6 +115,8 @@ class PurchaseOrderUpdate(BaseModel):
 class PurchaseOrderResponse(PurchaseOrderBase):
     id: int
     zoho_id: Optional[str] = None
+    zoho_sync_status: ZohoSyncStatus
+    zoho_sync_error: Optional[str] = None
     vendor: Optional[VendorResponse] = None
     items: list[PurchaseOrderItemResponse] = Field(default_factory=list)
     created_at: datetime

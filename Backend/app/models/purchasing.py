@@ -26,7 +26,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
-from app.models.entities import TimestampMixin, ZohoSyncMixin
+from app.models.entities import TimestampMixin, ZohoSyncMixin, ZohoSyncStatus
 
 if TYPE_CHECKING:
     from app.models.entities import ProductVariant
@@ -122,6 +122,12 @@ class PurchaseOrder(Base, ZohoSyncMixin, TimestampMixin):
     handling_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0, server_default="0")
     source: Mapped[str] = mapped_column(String(50), nullable=False, default="MANUAL", server_default="MANUAL")
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    zoho_sync_status: Mapped[ZohoSyncStatus] = mapped_column(
+        Enum(ZohoSyncStatus, name="zoho_sync_status_enum", create_constraint=False),
+        nullable=False,
+        default=ZohoSyncStatus.DIRTY,
+        server_default=ZohoSyncStatus.DIRTY.value,
+    )
 
     vendor: Mapped["Vendor"] = relationship(
         "Vendor",
@@ -140,6 +146,7 @@ class PurchaseOrder(Base, ZohoSyncMixin, TimestampMixin):
         Index("ix_purchase_order_vendor_id", "vendor_id"),
         Index("ix_purchase_order_status", "deliver_status"),
         Index("ix_purchase_order_zoho_id", "zoho_id"),
+        Index("ix_purchase_order_zoho_sync_status", "zoho_sync_status"),
     )
 
 

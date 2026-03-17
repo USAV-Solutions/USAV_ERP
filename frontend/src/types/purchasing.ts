@@ -1,5 +1,6 @@
 export type PurchaseDeliverStatus = 'CREATED' | 'BILLED' | 'DELIVERED'
 export type PurchaseOrderItemStatus = 'UNMATCHED' | 'MATCHED' | 'RECEIVED'
+export type ZohoSyncStatus = 'PENDING' | 'SYNCED' | 'ERROR' | 'DIRTY'
 
 export interface Vendor {
   id: number
@@ -64,6 +65,8 @@ export interface PurchaseOrder {
   source?: string
   notes?: string | null
   zoho_id?: string | null
+  zoho_sync_status: ZohoSyncStatus
+  zoho_sync_error?: string | null
   vendor?: Vendor
   items: PurchaseOrderItem[]
   created_at: string

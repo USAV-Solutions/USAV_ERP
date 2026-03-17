@@ -14,9 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import AdminOrWarehouseUser, CurrentUser
 from app.core.database import get_db
 from app.integrations.zoho.client import ZohoClient
-from app.models import PurchaseDeliverStatus, PurchaseOrderItemStatus
+from app.models import PurchaseDeliverStatus, PurchaseOrderItemStatus, ZohoSyncStatus
 from app.models.entities import ProductVariant
-from app.models.purchasing import PurchaseOrderItem
+from app.models.purchasing import PurchaseOrder, PurchaseOrderItem
 from app.modules.purchasing.dependencies import (
     get_purchase_order_item_repo,
     get_purchase_order_repo,
@@ -104,6 +104,25 @@ def _normalize_currency(value: object) -> str:
     return "USD"
 
 
+def _normalize_custom_field_key(value: object) -> str:
+    text = str(value or "").strip().lower().replace(" ", "_")
+    return text
+
+
+def _build_custom_field_aliases(*keys: str) -> set[str]:
+    aliases: set[str] = set()
+    for raw in keys:
+        key = _normalize_custom_field_key(raw)
+        if not key:
+            continue
+        aliases.add(key)
+        if key.startswith("cf_"):
+            aliases.add(key[3:])
+        else:
+            aliases.add(f"cf_{key}")
+    return aliases
+
+
 def _to_int(value: object, default: int = 0) -> int:
     try:
         text = str(value if value is not None else default).replace(",", "").strip()
@@ -138,22 +157,31 @@ def _map_zoho_po_status(status_raw: object) -> PurchaseDeliverStatus:
     return PurchaseDeliverStatus.CREATED
 
 
-def _extract_custom_field_decimal(po_payload: dict, api_name: str) -> Decimal:
+def _extract_custom_field_decimal(po_payload: dict, *keys: str) -> Decimal:
+    aliases = _build_custom_field_aliases(*keys)
     custom_hash = po_payload.get("custom_field_hash") or {}
     if isinstance(custom_hash, dict):
-        unformatted_key = f"{api_name}_unformatted"
-        if unformatted_key in custom_hash:
-            return _to_decimal(custom_hash.get(unformatted_key), default="0")
-        if api_name in custom_hash:
-            return _to_decimal(custom_hash.get(api_name), default="0")
+        for key, raw_value in custom_hash.items():
+            normalized = _normalize_custom_field_key(key)
+            if normalized.endswith("_unformatted"):
+                normalized = normalized[: -len("_unformatted")]
+            if normalized in aliases:
+                return _to_decimal(raw_value, default="0")
 
     custom_fields = po_payload.get("custom_fields") or []
     if isinstance(custom_fields, list):
         for field in custom_fields:
             if not isinstance(field, dict):
                 continue
-            if str(field.get("api_name") or "").strip().lower() != api_name.lower():
+            candidates = {
+                _normalize_custom_field_key(field.get("api_name")),
+                _normalize_custom_field_key(field.get("label")),
+                _normalize_custom_field_key(field.get("field_name")),
+            }
+            if candidates.isdisjoint(aliases):
                 continue
+            if "value_unformatted" in field:
+                return _to_decimal(field.get("value_unformatted"), default="0")
             if "value" in field:
                 return _to_decimal(field.get("value"), default="0")
             if "value_formatted" in field:
@@ -180,9 +208,9 @@ def _sum_line_item_tax_amounts(po_payload: dict) -> Decimal:
 
 def _extract_zoho_po_charges(po_payload: dict) -> tuple[Decimal, Decimal, Decimal]:
     # Sandbox/custom-field setup
-    tax_amount = _extract_custom_field_decimal(po_payload, "cf_tax")
-    shipping_amount = _extract_custom_field_decimal(po_payload, "cf_shipping_fee")
-    handling_amount = _extract_custom_field_decimal(po_payload, "cf_handling_fee")
+    tax_amount = _extract_custom_field_decimal(po_payload, "cf_tax", "tax")
+    shipping_amount = _extract_custom_field_decimal(po_payload, "cf_shipping_fee", "shipping_fee", "shipping")
+    handling_amount = _extract_custom_field_decimal(po_payload, "cf_handling_fee", "handling_fee", "handling")
 
     # Standard totals fallback
     if tax_amount == 0:
@@ -198,6 +226,14 @@ def _extract_zoho_po_charges(po_payload: dict) -> tuple[Decimal, Decimal, Decima
         shipping_amount = adjustment_amount
 
     return tax_amount, shipping_amount, handling_amount
+
+
+def _extract_zoho_po_tracking(po_payload: dict) -> str | None:
+    for key in ("tracking_number", "reference_number", "shipment_tracking_number"):
+        value = str(po_payload.get(key) or "").strip()
+        if value:
+            return value[:100]
+    return None
 
 
 @router.get("/vendors", response_model=list[VendorResponse])
@@ -292,6 +328,8 @@ async def create_purchase_order(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="po_number already exists")
 
     po_payload = body.model_dump(exclude={"items"})
+    po_payload["zoho_sync_status"] = ZohoSyncStatus.DIRTY
+    po_payload["zoho_sync_error"] = None
     po = await po_repo.create(po_payload)
 
     for item in body.items:
@@ -338,6 +376,9 @@ async def add_purchase_order_item(
     payload["purchase_order_id"] = po_id
 
     created = await po_item_repo.create(payload)
+    po.zoho_sync_status = ZohoSyncStatus.DIRTY
+    po.zoho_sync_error = None
+    db.add(po)
     await db.commit()
     await db.refresh(created)
     return PurchaseOrderItemResponse.model_validate(created)
@@ -393,6 +434,11 @@ async def update_purchase_order_item(
             payload["status"] = PurchaseOrderItemStatus.UNMATCHED
 
     updated = await po_item_repo.update(item, payload)
+    po = await db.get(PurchaseOrder, item.purchase_order_id)
+    if po is not None:
+        po.zoho_sync_status = ZohoSyncStatus.DIRTY
+        po.zoho_sync_error = None
+        db.add(po)
     await db.commit()
     await db.refresh(updated)
     return PurchaseOrderItemResponse.model_validate(updated)
@@ -413,6 +459,12 @@ async def delete_purchase_order_item(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Received items cannot be deleted",
         )
+
+    po = await db.get(PurchaseOrder, item.purchase_order_id)
+    if po is not None:
+        po.zoho_sync_status = ZohoSyncStatus.DIRTY
+        po.zoho_sync_error = None
+        db.add(po)
 
     await po_item_repo.delete(item_id)
     await db.commit()
@@ -578,11 +630,16 @@ async def import_purchasing_from_zoho(
                     or zoho_po.get("currency_code")
                     or "USD"
                 )[:3],
+                "tracking_number": _extract_zoho_po_tracking(zoho_po_detail) or _extract_zoho_po_tracking(zoho_po),
                 "tax_amount": tax_amount,
                 "shipping_amount": shipping_amount,
                 "handling_amount": handling_amount,
+                "source": "ZOHO_IMPORT",
                 "notes": zoho_po_detail.get("notes") or zoho_po_detail.get("terms") or zoho_po.get("notes") or zoho_po.get("terms"),
                 "zoho_id": zoho_po_id or None,
+                "zoho_sync_status": ZohoSyncStatus.SYNCED,
+                "zoho_sync_error": None,
+                "zoho_last_synced_at": datetime.utcnow(),
             }
 
             if existing_po is None:
@@ -626,6 +683,7 @@ async def import_purchasing_from_zoho(
                     {
                         "purchase_order_id": local_po.id,
                         "variant_id": matched_variant.id if matched_variant else None,
+                        "external_item_id": str(line.get("line_item_id") or line.get("item_id") or line_sku or "").strip() or None,
                         "external_item_name": str(line.get("name") or line.get("item_name") or "Unknown item")[:255],
                         "quantity": qty,
                         "unit_price": unit_price,
@@ -795,11 +853,16 @@ async def import_single_random_purchase_from_zoho(
             or zoho_po.get("currency_code")
             or "USD"
         )[:3],
+        "tracking_number": _extract_zoho_po_tracking(zoho_po_detail) or _extract_zoho_po_tracking(zoho_po),
         "tax_amount": tax_amount,
         "shipping_amount": shipping_amount,
         "handling_amount": handling_amount,
+        "source": "ZOHO_IMPORT",
         "notes": zoho_po_detail.get("notes") or zoho_po_detail.get("terms") or zoho_po.get("notes") or zoho_po.get("terms"),
         "zoho_id": zoho_po_id or None,
+        "zoho_sync_status": ZohoSyncStatus.SYNCED,
+        "zoho_sync_error": None,
+        "zoho_last_synced_at": datetime.utcnow(),
     }
 
     if existing_po is None:
@@ -837,6 +900,7 @@ async def import_single_random_purchase_from_zoho(
             {
                 "purchase_order_id": local_po.id,
                 "variant_id": matched_variant.id if matched_variant else None,
+                "external_item_id": str(line.get("line_item_id") or line.get("item_id") or line_sku or "").strip() or None,
                 "external_item_name": str(line.get("name") or line.get("item_name") or "Unknown item")[:255],
                 "quantity": qty,
                 "unit_price": unit_price,
@@ -893,6 +957,12 @@ async def _upsert_purchase_item(
     db: AsyncSession,
     result: PurchaseFileImportResponse,
 ):
+    local_po = await db.get(PurchaseOrder, local_po_id)
+    if local_po is not None:
+        local_po.zoho_sync_status = ZohoSyncStatus.DIRTY
+        local_po.zoho_sync_error = None
+        db.add(local_po)
+
     existing_item = None
     if item_id:
         stmt = select(PurchaseOrderItem).where(
@@ -1009,6 +1079,8 @@ async def _import_goodwill_csv(
             "handling_amount": handling_amount,
             "source": "GOODWILL_CSV",
             "notes": "Imported from Goodwill shipped-orders CSV.",
+            "zoho_sync_status": ZohoSyncStatus.DIRTY,
+            "zoho_sync_error": None,
         }
 
         if existing_po is None:
@@ -1156,6 +1228,8 @@ async def _import_amazon_csv(
             "handling_amount": order_data["handling_amount"],
             "source": "AMAZON_CSV",
             "notes": "Imported from Amazon orders CSV.",
+            "zoho_sync_status": ZohoSyncStatus.DIRTY,
+            "zoho_sync_error": None,
         }
 
         if existing_po is None:
@@ -1278,6 +1352,8 @@ async def _import_aliexpress_json(
             "handling_amount": handling_amount,
             "source": "ALIEXPRESS_JSON",
             "notes": "Imported from AliExpress orders JSON.",
+            "zoho_sync_status": ZohoSyncStatus.DIRTY,
+            "zoho_sync_error": None,
         }
 
         if existing_po is None:

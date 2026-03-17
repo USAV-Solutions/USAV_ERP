@@ -63,7 +63,6 @@ import type {
   PurchaseFileImportSource,
   VendorCreate,
 } from '../types/purchasing'
-import { useAuth } from '../hooks/useAuth'
 import VariantSearchAutocomplete from '../components/common/VariantSearchAutocomplete'
 import HoldActionPromptDialog from '../components/common/HoldActionPromptDialog'
 import LongPressTableRow from '../components/common/LongPressTableRow'
@@ -80,6 +79,13 @@ const itemStatusColor = {
   UNMATCHED: 'error',
   MATCHED: 'info',
   RECEIVED: 'success',
+} as const
+
+const zohoSyncColor = {
+  PENDING: 'warning',
+  SYNCED: 'success',
+  ERROR: 'error',
+  DIRTY: 'info',
 } as const
 
 interface PurchaseOrderItemRowProps {
@@ -471,7 +477,6 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
 
 export default function PurchasingManagement() {
   const queryClient = useQueryClient()
-  const { hasRole } = useAuth()
 
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(25)
@@ -643,8 +648,9 @@ export default function PurchasingManagement() {
   const forceSyncPoMutation = useMutation({
     mutationFn: (poId: number) => forceSyncPurchase(poId),
     onMutate: (poId) => setSyncingPoId(poId),
-    onSuccess: (_data, poId) => {
+    onSuccess: async (_data, poId) => {
       setSnackbar({ open: true, msg: `Purchase order #${poId} queued for Zoho sync.`, severity: 'success' })
+      await queryClient.invalidateQueries({ queryKey: ['purchases'] })
       setSyncingPoId(null)
     },
     onError: (error: { response?: { data?: { detail?: string } }; message?: string }, poId) => {
@@ -724,20 +730,18 @@ export default function PurchasingManagement() {
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4">Purchasing</Typography>
         <Stack direction="row" spacing={1}>
-          {hasRole(['ADMIN']) && (
-            <Button
-              variant="outlined"
-              onClick={() => {
-                setBulkDialogOpen(true)
-                setBulkError(null)
-                setBulkDone(false)
-                setBulkTotal(0)
-                setBulkProgress({ queued: 0, success: 0, failed: 0 })
-              }}
-            >
-              Sync matched to Zoho
-            </Button>
-          )}
+          <Button
+            variant="outlined"
+            onClick={() => {
+              setBulkDialogOpen(true)
+              setBulkError(null)
+              setBulkDone(false)
+              setBulkTotal(0)
+              setBulkProgress({ queued: 0, success: 0, failed: 0 })
+            }}
+          >
+            Sync matched to Zoho
+          </Button>
           <Button
             variant="outlined"
             onClick={() => importZohoMutation.mutate()}
@@ -840,7 +844,8 @@ export default function PurchasingManagement() {
                       <TableCell align="right">Shipping</TableCell>
                       <TableCell align="right">Handling</TableCell>
                       <TableCell align="right">Total</TableCell>
-                      {hasRole(['ADMIN']) && <TableCell align="center">Zoho</TableCell>}
+                      <TableCell align="center">Zoho Sync</TableCell>
+                      <TableCell align="center">Zoho</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -884,25 +889,31 @@ export default function PurchasingManagement() {
                             <TableCell align="right">
                               {po.total_amount} {po.currency}
                             </TableCell>
-                            {hasRole(['ADMIN']) && (
-                              <TableCell align="center">
-                                <Button
-                                  size="small"
-                                  variant="outlined"
-                                  startIcon={syncingPoId === po.id ? <CircularProgress size={14} /> : <CloudSync />}
-                                  disabled={!canSyncPo(po) || syncingPoId === po.id}
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    forceSyncPoMutation.mutate(po.id)
-                                  }}
-                                >
-                                  Sync
-                                </Button>
-                              </TableCell>
-                            )}
+                            <TableCell align="center">
+                              <Chip
+                                size="small"
+                                color={zohoSyncColor[po.zoho_sync_status]}
+                                label={po.zoho_sync_status}
+                                title={po.zoho_sync_error || ''}
+                              />
+                            </TableCell>
+                            <TableCell align="center">
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                startIcon={syncingPoId === po.id ? <CircularProgress size={14} /> : <CloudSync />}
+                                disabled={!canSyncPo(po) || syncingPoId === po.id}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  forceSyncPoMutation.mutate(po.id)
+                                }}
+                              >
+                                Sync
+                              </Button>
+                            </TableCell>
                           </TableRow>
                           <TableRow>
-                            <TableCell colSpan={hasRole(['ADMIN']) ? 13 : 12} sx={{ py: 0 }}>
+                            <TableCell colSpan={14} sx={{ py: 0 }}>
                               <Collapse in={expanded} timeout="auto" unmountOnExit>
                                 <Box sx={{ p: 1.5, bgcolor: 'action.hover' }}>
                                   <Typography variant="subtitle2" sx={{ mb: 1 }}>

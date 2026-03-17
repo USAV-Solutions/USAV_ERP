@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import InventoryStatus, PurchaseDeliverStatus, PurchaseOrderItemStatus
 from app.models.entities import InventoryItem
-from app.models.entities import ProductVariant
+from app.models.entities import ProductVariant, ZohoSyncStatus
 from app.modules.purchasing.schemas import ItemReceipt
 from app.repositories.inventory import InventoryItemRepository
 from app.repositories.purchasing import PurchaseOrderItemRepository, PurchaseOrderRepository
@@ -37,10 +37,16 @@ class PurchasingService:
             raise ValueError(f"ProductVariant {variant_id} not found")
 
         item.variant_id = variant_id
-        # Keep PO line text aligned with the matched internal catalog item.
-        item.external_item_name = variant.variant_name or variant.full_sku
+        # Keep the source-provided item title stable after matching.
         item.status = PurchaseOrderItemStatus.MATCHED
         self.session.add(item)
+
+        po = await self.po_repo.get(item.purchase_order_id)
+        if po is not None:
+            po.zoho_sync_status = ZohoSyncStatus.DIRTY
+            po.zoho_sync_error = None
+            self.session.add(po)
+
         await self.session.flush()
         await self.session.refresh(item)
         return item
@@ -106,6 +112,8 @@ class PurchasingService:
             self.session.add(po_item)
 
         po.deliver_status = PurchaseDeliverStatus.DELIVERED
+        po.zoho_sync_status = ZohoSyncStatus.DIRTY
+        po.zoho_sync_error = None
         self.session.add(po)
 
         await self.session.flush()

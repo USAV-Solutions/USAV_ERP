@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import AdminUser
+from app.api.deps import AdminUser, CurrentUser
 from app.core.database import get_db
 from app.integrations.zoho.sync_engine import (
     sync_po_outbound,
@@ -22,7 +22,7 @@ from app.integrations.zoho.sync_engine import (
 )
 from app.models import PurchaseOrderItemStatus
 from app.models.purchasing import PurchaseOrder
-from app.models.entities import Customer, ProductVariant
+from app.models.entities import Customer, ProductVariant, ZohoSyncStatus
 from app.modules.orders.models import Order
 
 logger = logging.getLogger(__name__)
@@ -124,7 +124,7 @@ async def force_sync_order(
 async def force_sync_purchase_order(
     po_id: int,
     background_tasks: BackgroundTasks,
-    _admin: AdminUser,
+    _current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -166,9 +166,14 @@ async def force_sync_purchase_order(
             ),
         )
 
+    purchase_order.zoho_sync_status = ZohoSyncStatus.PENDING
+    purchase_order.zoho_sync_error = None
+    purchase_order._updated_by_sync = True
+    await db.commit()
+
     background_tasks.add_task(sync_po_outbound, po_id)
 
-    logger.info("Force-sync queued | entity=purchase id=%s user=%s", po_id, _admin.id)
+    logger.info("Force-sync queued | entity=purchase id=%s user=%s", po_id, _current_user.id)
     return {"status": "queued", "entity": "purchase", "id": po_id}
 
 

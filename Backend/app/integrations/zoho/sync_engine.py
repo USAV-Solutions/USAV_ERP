@@ -134,13 +134,23 @@ def purchase_order_to_zoho_payload(po: PurchaseOrder) -> dict[str, Any]:
     if not (vendor and vendor.zoho_id):
         raise ValueError("PurchaseOrder is missing vendor.zoho_id; sync vendor first.")
 
+    notes_parts: list[str] = []
+    if po.notes:
+        notes_parts.append(str(po.notes).strip())
+    if getattr(po, "source", None):
+        notes_parts.append(f"Source: {po.source}")
+    if getattr(po, "tracking_number", None):
+        notes_parts.append(f"Tracking: {po.tracking_number}")
+
     payload: dict[str, Any] = {
         "purchaseorder_number": po.po_number,
         "date": po.order_date.strftime("%Y-%m-%d"),
         "vendor_id": vendor.zoho_id,
         "currency_code": po.currency,
-        "notes": po.notes or "",
+        "notes": "\n".join(p for p in notes_parts if p),
     }
+    if getattr(po, "tracking_number", None):
+        payload["reference_number"] = po.tracking_number
     if po.expected_delivery_date:
         payload["delivery_date"] = po.expected_delivery_date.strftime("%Y-%m-%d")
 
@@ -179,8 +189,8 @@ def purchase_order_to_zoho_payload(po: PurchaseOrder) -> dict[str, Any]:
     payload["custom_fields"] = custom_fields
 
     # Legacy/main org still relies on adjustment for S&H rollup.
-    payload["adjustment"] = tax_amount + shipping_amount + handling_amount
-    payload["adjustment_description"] = "Shipping Fee + Tax + Handling Fee"
+    payload["adjustment"] = shipping_amount + handling_amount
+    payload["adjustment_description"] = "Shipping Fee + Handling Fee"
 
     line_items: list[dict[str, Any]] = []
     for item in po.items or []:
@@ -475,9 +485,15 @@ async def sync_po_outbound(po_id: int) -> None:
             logger.warning("sync_po_outbound: purchase_order %s not found", po_id)
             return
 
+        po.zoho_sync_status = ZohoSyncStatus.PENDING
+        po._updated_by_sync = True
+        await db.commit()
+        po._updated_by_sync = False
+
         vendor = po.vendor
         if vendor is None:
             po.zoho_sync_error = "Cannot sync purchase order: no linked vendor"
+            po.zoho_sync_status = ZohoSyncStatus.ERROR
             po._updated_by_sync = True
             await db.commit()
             return
@@ -487,6 +503,7 @@ async def sync_po_outbound(po_id: int) -> None:
             await db.refresh(vendor)
             if not vendor.zoho_id:
                 po.zoho_sync_error = f"Vendor {vendor.id} missing zoho_id; sync vendor first."
+                po.zoho_sync_status = ZohoSyncStatus.ERROR
                 po._updated_by_sync = True
                 await db.commit()
                 return
@@ -497,12 +514,37 @@ async def sync_po_outbound(po_id: int) -> None:
         if new_hash == po.zoho_last_sync_hash:
             logger.debug("sync_po_outbound: purchase_order %s unchanged (hash match)", po_id)
             po.zoho_sync_error = None
+            po.zoho_sync_status = ZohoSyncStatus.SYNCED
             po._updated_by_sync = True
             await db.commit()
             return
 
         try:
             zoho = ZohoClient()
+
+            if not po.zoho_id:
+                try:
+                    for page in range(1, 4):
+                        purchase_orders = await zoho.list_purchase_orders(page=page, per_page=200)
+                        match = next(
+                            (
+                                zoho_po
+                                for zoho_po in purchase_orders
+                                if str(zoho_po.get("purchaseorder_number", "")) == po.po_number
+                            ),
+                            None,
+                        )
+                        if match:
+                            po.zoho_id = str(match.get("purchaseorder_id", "")) or None
+                            break
+                        if len(purchase_orders) < 200:
+                            break
+                except Exception as lookup_exc:
+                    logger.warning(
+                        "sync_po_outbound: lookup existing purchase order failed: %s",
+                        lookup_exc,
+                    )
+
             if po.zoho_id:
                 zoho_po = await zoho.update_purchase_order(po.zoho_id, payload)
             else:
@@ -515,6 +557,7 @@ async def sync_po_outbound(po_id: int) -> None:
             po.zoho_last_sync_hash = new_hash
             po.zoho_last_synced_at = datetime.now()
             po.zoho_sync_error = None
+            po.zoho_sync_status = ZohoSyncStatus.SYNCED
             po._updated_by_sync = True
             await db.commit()
 
@@ -525,6 +568,7 @@ async def sync_po_outbound(po_id: int) -> None:
             )
         except Exception as exc:
             po.zoho_sync_error = str(exc)[:2000]
+            po.zoho_sync_status = ZohoSyncStatus.ERROR
             po._updated_by_sync = True
             await db.commit()
             logger.exception("sync_po_outbound: purchase_order %s failed", po_id)
