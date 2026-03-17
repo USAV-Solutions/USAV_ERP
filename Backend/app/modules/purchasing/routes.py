@@ -501,12 +501,20 @@ async def import_purchasing_from_zoho(
     _current_user: CurrentUser,
     max_pages: Annotated[int, Query(ge=1, le=50)] = 10,
     per_page: Annotated[int, Query(ge=1, le=200)] = 200,
+    order_date_from: Annotated[date | None, Query()] = None,
+    order_date_to: Annotated[date | None, Query()] = None,
     vendor_repo: VendorRepository = Depends(get_vendor_repo),
     po_repo: PurchaseOrderRepository = Depends(get_purchase_order_repo),
     po_item_repo: PurchaseOrderItemRepository = Depends(get_purchase_order_item_repo),
     db: AsyncSession = Depends(get_db),
 ):
     """Import vendors and purchase orders from Zoho into local purchasing tables."""
+    if order_date_from and order_date_to and order_date_from > order_date_to:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="order_date_from must be less than or equal to order_date_to",
+        )
+
     zoho = ZohoClient()
     variant_repo = ProductVariantRepository(db)
     result = ZohoPurchaseImportResponse()
@@ -599,6 +607,17 @@ async def import_purchasing_from_zoho(
                 existing_po = await po_repo.get_by_field("po_number", po_number)
 
             tax_amount, shipping_amount, handling_amount = _extract_zoho_po_charges(zoho_po_detail)
+            order_date_value = _to_date(
+                zoho_po_detail.get("date")
+                or zoho_po_detail.get("purchaseorder_date")
+                or zoho_po.get("date")
+                or zoho_po.get("purchaseorder_date")
+            )
+
+            if order_date_from is not None and order_date_value < order_date_from:
+                continue
+            if order_date_to is not None and order_date_value > order_date_to:
+                continue
 
             po_payload = {
                 "po_number": po_number,
@@ -609,12 +628,7 @@ async def import_purchasing_from_zoho(
                     or zoho_po.get("status")
                     or zoho_po.get("purchaseorder_status")
                 ),
-                "order_date": _to_date(
-                    zoho_po_detail.get("date")
-                    or zoho_po_detail.get("purchaseorder_date")
-                    or zoho_po.get("date")
-                    or zoho_po.get("purchaseorder_date")
-                ),
+                "order_date": order_date_value,
                 "expected_delivery_date": _to_date(zoho_po_detail.get("expected_delivery_date"))
                 if zoho_po_detail.get("expected_delivery_date")
                 else None,

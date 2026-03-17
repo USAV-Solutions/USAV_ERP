@@ -574,16 +574,24 @@ export default function PurchasingManagement() {
   })
 
   const importZohoMutation = useMutation({
-    mutationFn: importPurchasesFromZoho,
+    mutationFn: () =>
+      importPurchasesFromZoho({
+        orderDateFrom: orderDateFrom || undefined,
+        orderDateTo: orderDateTo || undefined,
+      }),
     onSuccess: async (res) => {
       await queryClient.invalidateQueries({ queryKey: ['vendors'] })
       await queryClient.invalidateQueries({ queryKey: ['purchases'] })
+      const rangeLabel =
+        orderDateFrom || orderDateTo
+          ? ` (range ${orderDateFrom || '...'} to ${orderDateTo || '...'})`
+          : ''
       setSnackbar({
         open: true,
         severity: 'success',
         msg:
           `Zoho import done: ${res.purchase_orders_created} PO created, ${res.purchase_orders_updated} PO updated, ` +
-          `${res.vendors_created} vendor created, ${res.vendors_updated} vendor updated.`,
+          `${res.vendors_created} vendor created, ${res.vendors_updated} vendor updated.${rangeLabel}`,
       })
     },
     onError: () => {

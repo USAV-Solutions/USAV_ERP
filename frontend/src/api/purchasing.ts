@@ -107,8 +107,17 @@ export async function markPurchaseDelivered(
   return data
 }
 
-export async function importPurchasesFromZoho(): Promise<ZohoPurchaseImportResponse> {
-  const { data } = await axiosClient.post<ZohoPurchaseImportResponse>(PURCHASING.IMPORT_ZOHO)
+export async function importPurchasesFromZoho(params?: {
+  orderDateFrom?: string
+  orderDateTo?: string
+}): Promise<ZohoPurchaseImportResponse> {
+  const query = new URLSearchParams()
+  if (params?.orderDateFrom) query.set('order_date_from', params.orderDateFrom)
+  if (params?.orderDateTo) query.set('order_date_to', params.orderDateTo)
+  const qs = query.toString()
+  const url = qs ? `${PURCHASING.IMPORT_ZOHO}?${qs}` : PURCHASING.IMPORT_ZOHO
+
+  const { data } = await axiosClient.post<ZohoPurchaseImportResponse>(url)
   return data
 }
 
