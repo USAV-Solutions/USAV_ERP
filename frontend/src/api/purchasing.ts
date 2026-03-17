@@ -2,6 +2,8 @@ import axiosClient from './axiosClient'
 import { PURCHASING } from './endpoints'
 import type {
   GoodwillCsvImportResponse,
+  PurchaseFileImportResponse,
+  PurchaseFileImportSource,
   PurchaseOrderItemCreate,
   PurchaseOrder,
   PurchaseOrderCreate,
@@ -126,6 +128,22 @@ export async function importPurchasesFromGoodwillCsv(file: File): Promise<Goodwi
   formData.append('file', file)
   const { data } = await axiosClient.post<GoodwillCsvImportResponse>(
     PURCHASING.IMPORT_GOODWILL_CSV,
+    formData,
+    {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    },
+  )
+  return data
+}
+
+export async function importPurchasesFromFile(
+  source: PurchaseFileImportSource,
+  file: File,
+): Promise<PurchaseFileImportResponse> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const { data } = await axiosClient.post<PurchaseFileImportResponse>(
+    `${PURCHASING.IMPORT_PURCHASE_FILE}?source=${encodeURIComponent(source)}`,
     formData,
     {
       headers: { 'Content-Type': 'multipart/form-data' },

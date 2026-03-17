@@ -3,6 +3,8 @@
 from app.modules.purchasing.schemas.purchasing import (
     GoodwillCsvImportResponse,
     ItemReceipt,
+    PurchaseFileImportResponse,
+    PurchaseFileImportSource,
     PurchaseOrderCreate,
     PurchaseOrderItemCreate,
     PurchaseOrderItemMatchRequest,
@@ -35,5 +37,7 @@ __all__ = [
     "PurchaseOrderReceiveResponse",
     "ZohoPurchaseImportResponse",
     "ZohoSinglePurchaseImportResponse",
+    "PurchaseFileImportSource",
+    "PurchaseFileImportResponse",
     "GoodwillCsvImportResponse",
 ]

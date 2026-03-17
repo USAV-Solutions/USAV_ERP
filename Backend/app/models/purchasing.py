@@ -197,3 +197,10 @@ class PurchaseOrderItem(Base, TimestampMixin):
         if self.variant is None:
             return None
         return self.variant.full_sku
+
+    @property
+    def variant_name(self) -> Optional[str]:
+        """Convenience display name for matched variant in purchasing UI."""
+        if self.variant is None:
+            return None
+        return self.variant.variant_name or self.variant.full_sku

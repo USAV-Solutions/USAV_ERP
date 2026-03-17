@@ -174,6 +174,10 @@ This migration:
 - Added reusable frontend pagination component `TablePaginationWithPageJump` and applied it to Orders + Purchasing pages.
 - Added direct page-number jump (`Page` input + `Go`) to Orders + Purchasing list pagination.
 - Added `Unmatched` item count chip per purchase-order row in Purchasing list (aligned with Order list visibility pattern).
+- Purchasing line-item rows now show matched in-database variant name as an italic subline under item name.
+- Added red unlink action for matched purchase items to quickly unmatch back to `UNMATCHED`.
+- Replaced Purchasing header import action with **Import Purchase** flow that prompts source selection (`Goodwill`, `Amazon`, `AliExpress`) before file upload.
+- Added backend source-based purchase import endpoint (`/purchases/import/file`) with new parsers for Amazon orders CSV and AliExpress orders JSON; retained legacy Goodwill CSV endpoint for compatibility.
 
 ### Update 2026-03-16: Purchasing Line-Item Matching + Delete Actions
 

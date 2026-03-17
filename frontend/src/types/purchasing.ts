@@ -26,6 +26,7 @@ export interface PurchaseOrderItem {
   purchase_order_id: number
   variant_id?: number | null
   variant_sku?: string | null
+  variant_name?: string | null
   external_item_id?: string | null
   external_item_name: string
   quantity: number
@@ -130,6 +131,18 @@ export interface ZohoSinglePurchaseImportResponse extends ZohoPurchaseImportResp
   selected_source_page: number
   selected_zoho_purchase_order_id: string
   selected_po_number: string
+}
+
+export type PurchaseFileImportSource = 'goodwill' | 'amazon' | 'aliexpress'
+
+export interface PurchaseFileImportResponse {
+  source: PurchaseFileImportSource
+  purchase_orders_created: number
+  purchase_orders_updated: number
+  purchase_order_items_created: number
+  purchase_order_items_updated: number
+  source_rows_seen: number
+  source_rows_skipped: number
 }
 
 export interface GoodwillCsvImportResponse {

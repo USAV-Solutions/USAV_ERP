@@ -16,6 +16,10 @@ import {
   Snackbar,
   Stack,
   IconButton,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
   Table,
   TableBody,
   TableCell,
@@ -33,6 +37,7 @@ import {
   KeyboardArrowDown,
   KeyboardArrowUp,
   Link as LinkIcon,
+  LinkOff,
 } from '@mui/icons-material'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
@@ -41,7 +46,7 @@ import {
   createPurchaseOrder,
   createVendor,
   deletePurchaseItem,
-  importPurchasesFromGoodwillCsv,
+  importPurchasesFromFile,
   importOneRandomPurchaseFromZoho,
   importPurchasesFromZoho,
   listPurchaseOrdersPaged,
@@ -54,6 +59,7 @@ import type {
   PurchaseOrder,
   PurchaseOrderCreate,
   PurchaseOrderItem,
+  PurchaseFileImportSource,
   VendorCreate,
 } from '../types/purchasing'
 import { useAuth } from '../hooks/useAuth'
@@ -264,7 +270,24 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
     },
   })
 
-  const anyPending = saveMutation.isPending || deleteMutation.isPending || matchMutation.isPending
+  const unmatchMutation = useMutation({
+    mutationFn: () =>
+      updatePurchaseItem(item.id, {
+        variant_id: null,
+      }),
+    onSuccess: async () => {
+      setShowMatch(false)
+      setSelectedVariant(null)
+      await onChanged()
+      onNotify('Item unmatched.', 'success')
+    },
+    onError: (error: { response?: { data?: { detail?: string } }; message?: string }) => {
+      onNotify(error.response?.data?.detail || error.message || 'Failed to unmatch item.', 'error')
+    },
+  })
+
+  const anyPending =
+    saveMutation.isPending || deleteMutation.isPending || matchMutation.isPending || unmatchMutation.isPending
 
   const openPrompt = () => {
     setExternalItemId(item.external_item_id || '')
@@ -279,7 +302,18 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
     <>
       <LongPressTableRow payload={item} onLongPress={openPrompt} rowSx={{ cursor: 'pointer' }}>
         <TableCell>{item.external_item_id || '-'}</TableCell>
-        <TableCell>{item.external_item_name}</TableCell>
+        <TableCell>
+          <Typography variant="body2">{item.external_item_name}</Typography>
+          {item.status === 'MATCHED' && item.variant_name && (
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ fontStyle: 'italic', fontSize: '0.72rem', display: 'block', mt: 0.25 }}
+            >
+              {item.variant_name}
+            </Typography>
+          )}
+        </TableCell>
         <TableCell>{item.variant_sku || '-'}</TableCell>
         <TableCell align="center">{item.quantity}</TableCell>
         <TableCell align="right">{item.unit_price}</TableCell>
@@ -299,6 +333,19 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
                 }}
               >
                 <LinkIcon fontSize="small" />
+              </IconButton>
+            )}
+            {item.status === 'MATCHED' && (
+              <IconButton
+                size="small"
+                color="error"
+                disabled={anyPending}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  unmatchMutation.mutate()
+                }}
+              >
+                <LinkOff fontSize="small" />
               </IconButton>
             )}
             <IconButton
@@ -421,7 +468,9 @@ export default function PurchasingManagement() {
   const [bulkDone, setBulkDone] = useState(false)
   const [syncingPoId, setSyncingPoId] = useState<number | null>(null)
   const [addingItemPoId, setAddingItemPoId] = useState<number | null>(null)
-  const goodwillFileInputRef = useRef<HTMLInputElement | null>(null)
+  const purchaseFileInputRef = useRef<HTMLInputElement | null>(null)
+  const [importPurchaseOpen, setImportPurchaseOpen] = useState(false)
+  const [purchaseImportSource, setPurchaseImportSource] = useState<PurchaseFileImportSource>('goodwill')
   const [expandedPoId, setExpandedPoId] = useState<number | null>(null)
   const [snackbar, setSnackbar] = useState<{ open: boolean; msg: string; severity: 'success' | 'error' }>({
     open: false,
@@ -535,33 +584,37 @@ export default function PurchasingManagement() {
     },
   })
 
-  const importGoodwillCsvMutation = useMutation({
-    mutationFn: (file: File) => importPurchasesFromGoodwillCsv(file),
+  const importPurchaseFileMutation = useMutation({
+    mutationFn: ({ source, file }: { source: PurchaseFileImportSource; file: File }) =>
+      importPurchasesFromFile(source, file),
     onSuccess: async (res) => {
       await queryClient.invalidateQueries({ queryKey: ['vendors'] })
       await queryClient.invalidateQueries({ queryKey: ['purchases'] })
+      const sourceLabel =
+        res.source === 'goodwill' ? 'Goodwill CSV' : res.source === 'amazon' ? 'Amazon CSV' : 'AliExpress JSON'
       setSnackbar({
         open: true,
         severity: 'success',
         msg:
-          `Goodwill CSV import done: ${res.purchase_orders_created} PO created, ` +
+          `${sourceLabel} import done: ${res.purchase_orders_created} PO created, ` +
           `${res.purchase_orders_updated} PO updated, ` +
           `${res.purchase_order_items_created} items created, ${res.purchase_order_items_updated} items updated.`,
       })
     },
     onError: () => {
-      setSnackbar({ open: true, msg: 'Failed to import Goodwill CSV.', severity: 'error' })
+      setSnackbar({ open: true, msg: 'Failed to import purchase file.', severity: 'error' })
     },
   })
 
-  const handleGoodwillCsvSelected = (event: ChangeEvent<HTMLInputElement>) => {
+  const handlePurchaseImportSelected = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) {
       return
     }
 
-    importGoodwillCsvMutation.mutate(file)
+    importPurchaseFileMutation.mutate({ source: purchaseImportSource, file })
     event.target.value = ''
+    setImportPurchaseOpen(false)
   }
 
   const forceSyncPoMutation = useMutation({
@@ -678,10 +731,10 @@ export default function PurchasingManagement() {
           </Button>
           <Button
             variant="outlined"
-            onClick={() => goodwillFileInputRef.current?.click()}
-            disabled={importGoodwillCsvMutation.isPending}
+            onClick={() => setImportPurchaseOpen(true)}
+            disabled={importPurchaseFileMutation.isPending}
           >
-            {importGoodwillCsvMutation.isPending ? 'Importing CSV...' : 'Import Goodwill CSV'}
+            {importPurchaseFileMutation.isPending ? 'Importing file...' : 'Import Purchase'}
           </Button>
           <Button startIcon={<Add />} variant="contained" onClick={() => setCreatePoOpen(true)}>
             Create PO
@@ -1040,6 +1093,44 @@ export default function PurchasingManagement() {
         </DialogActions>
       </Dialog>
 
+      <Dialog open={importPurchaseOpen} onClose={() => setImportPurchaseOpen(false)} fullWidth maxWidth="xs">
+        <DialogTitle>Import Purchase</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <FormControl fullWidth size="small">
+              <InputLabel id="purchase-import-source-label">Source</InputLabel>
+              <Select
+                labelId="purchase-import-source-label"
+                value={purchaseImportSource}
+                label="Source"
+                onChange={(e) => setPurchaseImportSource(e.target.value as PurchaseFileImportSource)}
+              >
+                <MenuItem value="goodwill">Goodwill (CSV)</MenuItem>
+                <MenuItem value="amazon">Amazon (CSV)</MenuItem>
+                <MenuItem value="aliexpress">AliExpress (JSON)</MenuItem>
+              </Select>
+            </FormControl>
+            <Alert severity="info">
+              {purchaseImportSource === 'aliexpress'
+                ? 'Upload a JSON file exported from AliExpress orders.'
+                : 'Upload a CSV file exported from the selected source.'}
+            </Alert>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setImportPurchaseOpen(false)} disabled={importPurchaseFileMutation.isPending}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            disabled={importPurchaseFileMutation.isPending}
+            onClick={() => purchaseFileInputRef.current?.click()}
+          >
+            Select File
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Snackbar
         open={snackbar.open}
         autoHideDuration={4000}
@@ -1051,13 +1142,13 @@ export default function PurchasingManagement() {
       </Snackbar>
 
       <input
-        ref={goodwillFileInputRef}
+        ref={purchaseFileInputRef}
         type="file"
-        accept=".csv,text/csv"
-        onChange={handleGoodwillCsvSelected}
+        accept={purchaseImportSource === 'aliexpress' ? '.json,application/json' : '.csv,text/csv'}
+        onChange={handlePurchaseImportSelected}
         hidden
-        aria-label="Upload Goodwill CSV"
-        title="Upload Goodwill CSV"
+        aria-label="Upload purchase import file"
+        title="Upload purchase import file"
       />
     </Box>
   )

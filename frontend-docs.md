@@ -587,9 +587,12 @@ frontend/
   - **Immutable line-item total:** Edit and create flows treat total price as derived/read-only to keep totals consistent.
   - **Line-item total row:** Expanded line-items table displays a summary row showing the summed line-item total.
   - **Zoho import:** Includes bulk import trigger for vendors + purchase orders from Zoho with progress and result feedback.
+  - **Purchase file import:** Header action **Import Purchase** opens source selection for `Goodwill`, `Amazon`, or `AliExpress`, then uploads the source-appropriate file type (`CSV` for Goodwill/Amazon, `JSON` for AliExpress).
   - **Random Zoho import test:** Header action **Import 1 Random PO** imports exactly one random purchase order from Zoho for quick import validation and displays selected PO metadata in feedback.
   - **PO force-sync:** Supports per-purchase force-sync to Zoho via `forceSyncPurchase`.
   - **Item matching:** Per-line-item Match action on `UNMATCHED` rows opens an inline search bar (same `VariantSearchAutocomplete` used by Order resolution), allowing SKU/name search and one-click match.
+  - **Matched display detail:** In line-item rows, a matched item shows a smaller italic subline under the item name containing the matched in-database variant name.
+  - **Unmatch action:** Matched items show a red unlink action (chain with slash) that resets the item back to `UNMATCHED`.
   - **Item delete:** Per-line-item Delete icon opens a confirmation dialog and calls `DELETE /purchases/items/{item_id}` (disabled for `RECEIVED` rows).
   - **Long-press edit:** Existing long-press edit prompt remains available for updating item fields and manual SKU correction.
   - **Mark delivered:** Admin/Warehouse action opens a receive dialog where each PO item receives quantity, optional serial numbers, and location code. Submitting calls `/purchases/{id}/mark-delivered`.

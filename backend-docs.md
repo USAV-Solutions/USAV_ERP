@@ -978,7 +978,8 @@ Backend/
   - `POST /purchases/items/{item_id}/match` — Manually match a PO line item to a product variant.
   - `DELETE /purchases/items/{item_id}` — Delete a PO line item; rejects deletion for `RECEIVED` items.
   - `POST /purchases/{po_id}/mark-delivered` — Receive PO items into inventory and mark PO delivered.
-  - `POST /purchases/import/zoho`, `POST /purchases/import/zoho/random-one`, and `POST /purchases/import/goodwill-csv` — Source import flows.
+  - `POST /purchases/import/zoho`, `POST /purchases/import/zoho/random-one`, and `POST /purchases/import/file?source={goodwill|amazon|aliexpress}` — Source import flows.
+  - Legacy compatibility endpoint `POST /purchases/import/goodwill-csv` remains available and delegates to the source-based file importer.
 
 ---
 

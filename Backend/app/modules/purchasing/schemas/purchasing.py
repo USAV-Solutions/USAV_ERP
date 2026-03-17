@@ -1,6 +1,7 @@
 """Pydantic schemas for purchasing module."""
 from datetime import date, datetime
 from decimal import Decimal
+from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -65,6 +66,7 @@ class PurchaseOrderItemResponse(PurchaseOrderItemBase):
     id: int
     purchase_order_id: int
     variant_sku: Optional[str] = None
+    variant_name: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -153,6 +155,22 @@ class ZohoSinglePurchaseImportResponse(ZohoPurchaseImportResponse):
     selected_source_page: int
     selected_zoho_purchase_order_id: str
     selected_po_number: str
+
+
+class PurchaseFileImportSource(str, Enum):
+    GOODWILL = "goodwill"
+    AMAZON = "amazon"
+    ALIEXPRESS = "aliexpress"
+
+
+class PurchaseFileImportResponse(BaseModel):
+    source: PurchaseFileImportSource
+    purchase_orders_created: int = 0
+    purchase_orders_updated: int = 0
+    purchase_order_items_created: int = 0
+    purchase_order_items_updated: int = 0
+    source_rows_seen: int = 0
+    source_rows_skipped: int = 0
 
 
 class GoodwillCsvImportResponse(BaseModel):

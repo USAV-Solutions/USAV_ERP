@@ -1,6 +1,7 @@
 """API routes for purchasing module."""
 import csv
 import io
+import json
 import random
 from datetime import date, datetime
 from decimal import Decimal
@@ -24,6 +25,8 @@ from app.modules.purchasing.dependencies import (
 )
 from app.modules.purchasing.schemas import (
     GoodwillCsvImportResponse,
+    PurchaseFileImportResponse,
+    PurchaseFileImportSource,
     PurchaseOrderCreate,
     PurchaseOrderItemCreate,
     PurchaseOrderItemMatchRequest,
@@ -68,12 +71,37 @@ def _to_date(value: object) -> date:
         try:
             return date.fromisoformat(text[:10])
         except ValueError:
-            for fmt in ("%m/%d/%Y", "%m/%d/%y"):
+            for fmt in ("%m/%d/%Y", "%m/%d/%y", "%b %d, %Y", "%B %d, %Y"):
                 try:
                     return datetime.strptime(text, fmt).date()
                 except ValueError:
                     continue
     return date.today()
+
+
+def _decode_upload_text(raw: bytes) -> str:
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return raw.decode("latin-1")
+
+
+def _normalize_currency(value: object) -> str:
+    currency_text = str(value or "").strip().upper()
+    aliases = {
+        "$": "USD",
+        "US$": "USD",
+        "USD": "USD",
+        "EUR": "EUR",
+        "€": "EUR",
+        "GBP": "GBP",
+        "£": "GBP",
+    }
+    if currency_text in aliases:
+        return aliases[currency_text]
+    if len(currency_text) >= 3 and currency_text[:3].isalpha():
+        return currency_text[:3]
+    return "USD"
 
 
 def _to_int(value: object, default: int = 0) -> int:
@@ -810,25 +838,78 @@ async def import_single_random_purchase_from_zoho(
     )
 
 
-@router.post("/purchases/import/goodwill-csv", response_model=GoodwillCsvImportResponse)
-async def import_purchasing_from_goodwill_csv(
-    _current_user: CurrentUser,
-    file: UploadFile = File(...),
-    vendor_repo: VendorRepository = Depends(get_vendor_repo),
-    po_repo: PurchaseOrderRepository = Depends(get_purchase_order_repo),
-    po_item_repo: PurchaseOrderItemRepository = Depends(get_purchase_order_item_repo),
-    db: AsyncSession = Depends(get_db),
+async def _resolve_vendor_id(
+    vendor_name: str,
+    vendor_repo: VendorRepository,
+    db: AsyncSession,
+    vendor_cache: dict[str, int],
+) -> int:
+    normalized_name = vendor_name.strip() or "Unknown Vendor"
+    cache_key = normalized_name.lower()
+    if cache_key in vendor_cache:
+        return vendor_cache[cache_key]
+
+    existing = await vendor_repo.get_by_field("name", normalized_name)
+    if existing is None:
+        existing = await vendor_repo.create({"name": normalized_name, "is_active": True})
+        await db.flush()
+
+    vendor_cache[cache_key] = existing.id
+    return existing.id
+
+
+async def _upsert_purchase_item(
+    local_po_id: int,
+    item_id: str | None,
+    item_name: str,
+    quantity: int,
+    unit_price: Decimal,
+    po_item_repo: PurchaseOrderItemRepository,
+    db: AsyncSession,
+    result: PurchaseFileImportResponse,
 ):
-    """Import Goodwill shipped-orders CSV rows into local purchasing tables."""
-    raw = await file.read()
-    if not raw:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded CSV file is empty")
+    existing_item = None
+    if item_id:
+        stmt = select(PurchaseOrderItem).where(
+            PurchaseOrderItem.purchase_order_id == local_po_id,
+            PurchaseOrderItem.external_item_id == item_id,
+        )
+        existing_item = (await db.execute(stmt)).scalar_one_or_none()
 
-    try:
-        content = raw.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        content = raw.decode("latin-1")
+    if existing_item is None:
+        stmt = select(PurchaseOrderItem).where(
+            PurchaseOrderItem.purchase_order_id == local_po_id,
+            PurchaseOrderItem.external_item_name == item_name,
+        )
+        existing_item = (await db.execute(stmt)).scalar_one_or_none()
 
+    line_total = unit_price * quantity
+    item_payload = {
+        "purchase_order_id": local_po_id,
+        "variant_id": None,
+        "external_item_id": item_id,
+        "external_item_name": item_name[:255],
+        "quantity": quantity,
+        "unit_price": unit_price,
+        "total_price": line_total,
+        "status": PurchaseOrderItemStatus.UNMATCHED,
+    }
+
+    if existing_item is None:
+        await po_item_repo.create(item_payload)
+        result.purchase_order_items_created += 1
+    else:
+        await po_item_repo.update(existing_item, item_payload)
+        result.purchase_order_items_updated += 1
+
+
+async def _import_goodwill_csv(
+    content: str,
+    vendor_repo: VendorRepository,
+    po_repo: PurchaseOrderRepository,
+    po_item_repo: PurchaseOrderItemRepository,
+    db: AsyncSession,
+) -> PurchaseFileImportResponse:
     reader = csv.DictReader(io.StringIO(content))
     if not reader.fieldnames:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="CSV header row is missing")
@@ -852,17 +933,9 @@ async def import_purchasing_from_goodwill_csv(
             detail=f"CSV is missing required columns: {', '.join(missing_headers)}",
         )
 
-    goodwill_vendor = await vendor_repo.get_by_field("name", "Goodwill")
-    if goodwill_vendor is None:
-        goodwill_vendor = await vendor_repo.create(
-            {
-                "name": "Goodwill",
-                "is_active": True,
-            }
-        )
-        await db.flush()
-
-    result = GoodwillCsvImportResponse()
+    result = PurchaseFileImportResponse(source=PurchaseFileImportSource.GOODWILL)
+    vendor_cache: dict[str, int] = {}
+    goodwill_vendor_id = await _resolve_vendor_id("Goodwill", vendor_repo, db, vendor_cache)
 
     for row in reader:
         result.source_rows_seen += 1
@@ -875,15 +948,14 @@ async def import_purchasing_from_goodwill_csv(
             continue
 
         quantity = _to_int(row.get("Quantity"), default=0)
-        unit_price = _to_decimal(row.get("Price"), default="0")
-        tax_amount = _to_decimal(row.get("Tax"), default="0")
-        shipping_amount = _to_decimal(row.get("Shipping"), default="0")
-        handling_amount = _to_decimal(row.get("Handling"), default="0")
-
         if quantity <= 0:
             result.source_rows_skipped += 1
             continue
 
+        unit_price = _to_decimal(row.get("Price"), default="0")
+        tax_amount = _to_decimal(row.get("Tax"), default="0")
+        shipping_amount = _to_decimal(row.get("Shipping"), default="0")
+        handling_amount = _to_decimal(row.get("Handling"), default="0")
         order_date = _to_date(row.get("Date"))
         tracking_number = str(row.get("Tracking #") or "").strip() or None
         total_amount = (unit_price * quantity) + tax_amount + shipping_amount + handling_amount
@@ -891,7 +963,7 @@ async def import_purchasing_from_goodwill_csv(
         existing_po = await po_repo.get_by_field("po_number", po_number)
         po_payload = {
             "po_number": po_number,
-            "vendor_id": goodwill_vendor.id,
+            "vendor_id": goodwill_vendor_id,
             "deliver_status": PurchaseDeliverStatus.CREATED,
             "order_date": order_date,
             "expected_delivery_date": None,
@@ -914,40 +986,346 @@ async def import_purchasing_from_goodwill_csv(
             await db.flush()
             result.purchase_orders_updated += 1
 
-        existing_item = None
-        if item_id:
-            stmt = select(PurchaseOrderItem).where(
-                PurchaseOrderItem.purchase_order_id == local_po.id,
-                PurchaseOrderItem.external_item_id == item_id,
-            )
-            existing_item = (await db.execute(stmt)).scalar_one_or_none()
+        await _upsert_purchase_item(
+            local_po_id=local_po.id,
+            item_id=item_id,
+            item_name=item_name,
+            quantity=quantity,
+            unit_price=unit_price,
+            po_item_repo=po_item_repo,
+            db=db,
+            result=result,
+        )
 
-        if existing_item is None:
-            stmt = select(PurchaseOrderItem).where(
-                PurchaseOrderItem.purchase_order_id == local_po.id,
-                PurchaseOrderItem.external_item_name == item_name,
-            )
-            existing_item = (await db.execute(stmt)).scalar_one_or_none()
+    return result
 
-        line_total = unit_price * quantity
-        item_payload = {
-            "purchase_order_id": local_po.id,
-            "variant_id": None,
-            "external_item_id": item_id,
-            "external_item_name": item_name,
-            "quantity": quantity,
-            "unit_price": unit_price,
-            "total_price": line_total,
-            "status": PurchaseOrderItemStatus.UNMATCHED,
+
+async def _import_amazon_csv(
+    content: str,
+    vendor_repo: VendorRepository,
+    po_repo: PurchaseOrderRepository,
+    po_item_repo: PurchaseOrderItemRepository,
+    db: AsyncSession,
+) -> PurchaseFileImportResponse:
+    reader = csv.DictReader(io.StringIO(content))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="CSV header row is missing")
+
+    required_headers = ["Order ID", "Order Date", "Title", "Item Quantity"]
+    missing_headers = [h for h in required_headers if h not in reader.fieldnames]
+    if missing_headers:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"CSV is missing required columns: {', '.join(missing_headers)}",
+        )
+
+    result = PurchaseFileImportResponse(source=PurchaseFileImportSource.AMAZON)
+    vendor_cache: dict[str, int] = {}
+    grouped_orders: dict[str, dict] = {}
+
+    for row in reader:
+        result.source_rows_seen += 1
+        po_number = str(row.get("Order ID") or "").strip()
+        item_name = str(row.get("Title") or "").strip()
+        quantity = _to_int(row.get("Item Quantity"), default=0)
+        if not po_number or not item_name or quantity <= 0:
+            result.source_rows_skipped += 1
+            continue
+
+        vendor_name = str(row.get("Seller Name") or "").strip() or "Amazon Marketplace"
+        currency = _normalize_currency(row.get("Currency") or "USD")
+        item_unit_price = _to_decimal(row.get("Purchase PPU"), default="0")
+        if item_unit_price <= 0:
+            subtotal_guess = _to_decimal(row.get("Item Subtotal"), default="0")
+            if subtotal_guess > 0 and quantity > 0:
+                item_unit_price = subtotal_guess / quantity
+        item_total = _to_decimal(row.get("Item Net Total") or row.get("Item Subtotal"), default="0")
+        if item_total <= 0:
+            item_total = item_unit_price * quantity
+
+        order_bucket = grouped_orders.setdefault(
+            po_number,
+            {
+                "vendor_name": vendor_name,
+                "order_date": _to_date(row.get("Order Date")),
+                "currency": currency,
+                "tracking_number": None,
+                "tax_amount": _to_decimal(row.get("Order Tax"), default="0"),
+                "shipping_amount": _to_decimal(row.get("Order Shipping & Handling"), default="0"),
+                "handling_amount": Decimal("0"),
+                "total_amount": _to_decimal(row.get("Order Net Total"), default="0"),
+                "items": [],
+                "fingerprints": set(),
+            },
+        )
+
+        asin = str(row.get("ASIN") or "").strip()
+        line_item_id = str(row.get("PO Line Item Id") or "").strip()
+        external_item_id = line_item_id or asin or None
+        fingerprint = (
+            external_item_id or "",
+            item_name,
+            str(quantity),
+            str(item_unit_price),
+            str(item_total),
+        )
+        if fingerprint in order_bucket["fingerprints"]:
+            continue
+        order_bucket["fingerprints"].add(fingerprint)
+        order_bucket["items"].append(
+            {
+                "external_item_id": external_item_id,
+                "external_item_name": item_name,
+                "quantity": quantity,
+                "unit_price": item_unit_price,
+            }
+        )
+
+    for po_number, order_data in grouped_orders.items():
+        if not order_data["items"]:
+            result.source_rows_skipped += 1
+            continue
+
+        vendor_id = await _resolve_vendor_id(order_data["vendor_name"], vendor_repo, db, vendor_cache)
+        computed_total = sum(
+            (item["unit_price"] * item["quantity"] for item in order_data["items"]),
+            Decimal("0"),
+        ) + order_data["tax_amount"] + order_data["shipping_amount"] + order_data["handling_amount"]
+        total_amount = order_data["total_amount"] if order_data["total_amount"] > 0 else computed_total
+
+        existing_po = await po_repo.get_by_field("po_number", po_number)
+        po_payload = {
+            "po_number": po_number,
+            "vendor_id": vendor_id,
+            "deliver_status": PurchaseDeliverStatus.CREATED,
+            "order_date": order_data["order_date"],
+            "expected_delivery_date": None,
+            "total_amount": total_amount,
+            "currency": order_data["currency"],
+            "tracking_number": order_data["tracking_number"],
+            "tax_amount": order_data["tax_amount"],
+            "shipping_amount": order_data["shipping_amount"],
+            "handling_amount": order_data["handling_amount"],
+            "source": "AMAZON_CSV",
+            "notes": "Imported from Amazon orders CSV.",
         }
 
-        if existing_item is None:
-            await po_item_repo.create(item_payload)
-            result.purchase_order_items_created += 1
+        if existing_po is None:
+            local_po = await po_repo.create(po_payload)
+            await db.flush()
+            result.purchase_orders_created += 1
         else:
-            await po_item_repo.update(existing_item, item_payload)
-            result.purchase_order_items_updated += 1
+            local_po = await po_repo.update(existing_po, po_payload)
+            await db.flush()
+            result.purchase_orders_updated += 1
 
+        for item in order_data["items"]:
+            await _upsert_purchase_item(
+                local_po_id=local_po.id,
+                item_id=item["external_item_id"],
+                item_name=item["external_item_name"],
+                quantity=item["quantity"],
+                unit_price=item["unit_price"],
+                po_item_repo=po_item_repo,
+                db=db,
+                result=result,
+            )
+
+    return result
+
+
+async def _import_aliexpress_json(
+    content: str,
+    vendor_repo: VendorRepository,
+    po_repo: PurchaseOrderRepository,
+    po_item_repo: PurchaseOrderItemRepository,
+    db: AsyncSession,
+) -> PurchaseFileImportResponse:
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid JSON: {exc.msg}")
+
+    if not isinstance(payload, list):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="AliExpress JSON must be an array of orders")
+
+    result = PurchaseFileImportResponse(source=PurchaseFileImportSource.ALIEXPRESS)
+    vendor_cache: dict[str, int] = {}
+
+    for order in payload:
+        result.source_rows_seen += 1
+        if not isinstance(order, dict):
+            result.source_rows_skipped += 1
+            continue
+
+        po_number = str(order.get("orderId") or "").strip()
+        items = order.get("items") or []
+        if not po_number or not isinstance(items, list) or not items:
+            result.source_rows_skipped += 1
+            continue
+
+        seller = order.get("seller") or {}
+        seller_name = str((seller or {}).get("storeName") or "").strip() or "AliExpress Seller"
+        vendor_id = await _resolve_vendor_id(seller_name, vendor_repo, db, vendor_cache)
+
+        price_data = order.get("priceData") or {}
+        tax_amount = _to_decimal(price_data.get("vat"), default="0")
+        shipping_amount = _to_decimal(price_data.get("shipping"), default="0")
+        handling_amount = _to_decimal(price_data.get("priceAdjustment"), default="0")
+        if handling_amount < 0:
+            handling_amount = Decimal("0")
+
+        parsed_items: list[dict] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            quantity = _to_int(item.get("quantity"), default=0)
+            if quantity <= 0:
+                continue
+            unit_price = _to_decimal(item.get("priceAmount"), default="0")
+            item_title = str(item.get("title") or "").strip()
+            item_attributes = str(item.get("attributes") or "").strip()
+            if not item_title:
+                continue
+            external_item_name = item_title if not item_attributes else f"{item_title} ({item_attributes})"
+            product_link = str(item.get("productLink") or "").strip() or None
+            if product_link and len(product_link) > 100:
+                product_link = product_link[:100]
+            parsed_items.append(
+                {
+                    "external_item_id": product_link,
+                    "external_item_name": external_item_name,
+                    "quantity": quantity,
+                    "unit_price": unit_price,
+                }
+            )
+
+        if not parsed_items:
+            result.source_rows_skipped += 1
+            continue
+
+        items_total = sum((item["unit_price"] * item["quantity"] for item in parsed_items), Decimal("0"))
+        total_amount = _to_decimal(price_data.get("total"), default="0")
+        if total_amount <= 0:
+            total_amount = items_total + tax_amount + shipping_amount + handling_amount
+
+        tracking_data = order.get("trackingData") or {}
+        tracking_number = str((tracking_data or {}).get("trackingNumber") or "").strip() or None
+        order_date = _to_date(order.get("orderDate") or order.get("orderDateTimestampFormat"))
+
+        existing_po = await po_repo.get_by_field("po_number", po_number)
+        po_payload = {
+            "po_number": po_number,
+            "vendor_id": vendor_id,
+            "deliver_status": PurchaseDeliverStatus.CREATED,
+            "order_date": order_date,
+            "expected_delivery_date": None,
+            "total_amount": total_amount,
+            "currency": _normalize_currency(order.get("currency") or "USD"),
+            "tracking_number": tracking_number,
+            "tax_amount": tax_amount,
+            "shipping_amount": shipping_amount,
+            "handling_amount": handling_amount,
+            "source": "ALIEXPRESS_JSON",
+            "notes": "Imported from AliExpress orders JSON.",
+        }
+
+        if existing_po is None:
+            local_po = await po_repo.create(po_payload)
+            await db.flush()
+            result.purchase_orders_created += 1
+        else:
+            local_po = await po_repo.update(existing_po, po_payload)
+            await db.flush()
+            result.purchase_orders_updated += 1
+
+        for item in parsed_items:
+            await _upsert_purchase_item(
+                local_po_id=local_po.id,
+                item_id=item["external_item_id"],
+                item_name=item["external_item_name"],
+                quantity=item["quantity"],
+                unit_price=item["unit_price"],
+                po_item_repo=po_item_repo,
+                db=db,
+                result=result,
+            )
+
+    return result
+
+
+async def _import_purchase_file_by_source(
+    source: PurchaseFileImportSource,
+    file: UploadFile,
+    vendor_repo: VendorRepository,
+    po_repo: PurchaseOrderRepository,
+    po_item_repo: PurchaseOrderItemRepository,
+    db: AsyncSession,
+) -> PurchaseFileImportResponse:
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty")
+
+    content = _decode_upload_text(raw)
+
+    if source == PurchaseFileImportSource.GOODWILL:
+        return await _import_goodwill_csv(content, vendor_repo, po_repo, po_item_repo, db)
+    if source == PurchaseFileImportSource.AMAZON:
+        return await _import_amazon_csv(content, vendor_repo, po_repo, po_item_repo, db)
+    if source == PurchaseFileImportSource.ALIEXPRESS:
+        return await _import_aliexpress_json(content, vendor_repo, po_repo, po_item_repo, db)
+
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported import source")
+
+
+@router.post("/purchases/import/file", response_model=PurchaseFileImportResponse)
+async def import_purchasing_from_file(
+    _current_user: CurrentUser,
+    source: PurchaseFileImportSource = Query(...),
+    file: UploadFile = File(...),
+    vendor_repo: VendorRepository = Depends(get_vendor_repo),
+    po_repo: PurchaseOrderRepository = Depends(get_purchase_order_repo),
+    po_item_repo: PurchaseOrderItemRepository = Depends(get_purchase_order_item_repo),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await _import_purchase_file_by_source(
+        source=source,
+        file=file,
+        vendor_repo=vendor_repo,
+        po_repo=po_repo,
+        po_item_repo=po_item_repo,
+        db=db,
+    )
     await db.commit()
     await file.close()
     return result
+
+
+@router.post("/purchases/import/goodwill-csv", response_model=GoodwillCsvImportResponse)
+async def import_purchasing_from_goodwill_csv(
+    _current_user: CurrentUser,
+    file: UploadFile = File(...),
+    vendor_repo: VendorRepository = Depends(get_vendor_repo),
+    po_repo: PurchaseOrderRepository = Depends(get_purchase_order_repo),
+    po_item_repo: PurchaseOrderItemRepository = Depends(get_purchase_order_item_repo),
+    db: AsyncSession = Depends(get_db),
+):
+    """Legacy endpoint kept for compatibility; delegates to source-based importer."""
+    result = await _import_purchase_file_by_source(
+        source=PurchaseFileImportSource.GOODWILL,
+        file=file,
+        vendor_repo=vendor_repo,
+        po_repo=po_repo,
+        po_item_repo=po_item_repo,
+        db=db,
+    )
+    await db.commit()
+    await file.close()
+    return GoodwillCsvImportResponse(
+        purchase_orders_created=result.purchase_orders_created,
+        purchase_orders_updated=result.purchase_orders_updated,
+        purchase_order_items_created=result.purchase_order_items_created,
+        purchase_order_items_updated=result.purchase_order_items_updated,
+        source_rows_seen=result.source_rows_seen,
+        source_rows_skipped=result.source_rows_skipped,
+    )
