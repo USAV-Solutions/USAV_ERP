@@ -21,7 +21,6 @@ import {
   TableCell,
   TableContainer,
   TableHead,
-  TablePagination,
   TableRow,
   TextField,
   Typography,
@@ -61,6 +60,7 @@ import { useAuth } from '../hooks/useAuth'
 import VariantSearchAutocomplete from '../components/common/VariantSearchAutocomplete'
 import HoldActionPromptDialog from '../components/common/HoldActionPromptDialog'
 import LongPressTableRow from '../components/common/LongPressTableRow'
+import TablePaginationWithPageJump from '../components/common/TablePaginationWithPageJump'
 import type { VariantSearchResult } from '../types/orders'
 
 const statusColor = {
@@ -709,6 +709,7 @@ export default function PurchasingManagement() {
                       <TableCell>Tracking #</TableCell>
                       <TableCell>Status</TableCell>
                       <TableCell align="center">Items</TableCell>
+                      <TableCell align="center">Unmatched</TableCell>
                       <TableCell align="right">Tax</TableCell>
                       <TableCell align="right">Shipping</TableCell>
                       <TableCell align="right">Handling</TableCell>
@@ -719,6 +720,7 @@ export default function PurchasingManagement() {
                   <TableBody>
                     {orders.map((po) => {
                       const expanded = expandedPoId === po.id
+                      const unmatchedCount = (po.items || []).filter((item) => item.status === 'UNMATCHED').length
                       return (
                         <Fragment key={po.id}>
                           <TableRow
@@ -743,6 +745,13 @@ export default function PurchasingManagement() {
                               <Chip size="small" color={statusColor[po.deliver_status]} label={po.deliver_status} />
                             </TableCell>
                             <TableCell align="center">{po.items?.length ?? 0}</TableCell>
+                            <TableCell align="center">
+                              <Chip
+                                size="small"
+                                color={unmatchedCount > 0 ? 'error' : 'default'}
+                                label={unmatchedCount}
+                              />
+                            </TableCell>
                             <TableCell align="right">{po.tax_amount ?? 0}</TableCell>
                             <TableCell align="right">{po.shipping_amount ?? 0}</TableCell>
                             <TableCell align="right">{po.handling_amount ?? 0}</TableCell>
@@ -767,7 +776,7 @@ export default function PurchasingManagement() {
                             )}
                           </TableRow>
                           <TableRow>
-                            <TableCell colSpan={hasRole(['ADMIN']) ? 11 : 10} sx={{ py: 0 }}>
+                            <TableCell colSpan={hasRole(['ADMIN']) ? 13 : 12} sx={{ py: 0 }}>
                               <Collapse in={expanded} timeout="auto" unmountOnExit>
                                 <Box sx={{ p: 1.5, bgcolor: 'action.hover' }}>
                                   <Typography variant="subtitle2" sx={{ mb: 1 }}>
@@ -841,15 +850,14 @@ export default function PurchasingManagement() {
                 </Table>
               </TableContainer>
             )}
-            <TablePagination
-              component="div"
-              rowsPerPageOptions={[10, 25, 50, 100]}
+            <TablePaginationWithPageJump
               count={paginationCount}
               page={page}
               rowsPerPage={rowsPerPage}
-              onPageChange={(_, nextPage) => setPage(nextPage)}
-              onRowsPerPageChange={(e) => {
-                setRowsPerPage(parseInt(e.target.value, 10))
+              rowsPerPageOptions={[10, 25, 50, 100]}
+              onPageChange={(nextPage) => setPage(nextPage)}
+              onRowsPerPageChange={(nextRowsPerPage) => {
+                setRowsPerPage(nextRowsPerPage)
                 setPage(0)
               }}
             />

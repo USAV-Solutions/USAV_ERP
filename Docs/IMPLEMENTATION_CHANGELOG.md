@@ -171,6 +171,9 @@ This migration:
 - Added per-PO **Add New Item** toggles so inline line-item create forms stay hidden until requested.
 - Added Purchasing header action **Import 1 Random PO** that triggers test-focused import of a single random Zoho purchase order.
 - Added server-side pagination to Purchasing list (MUI `TablePagination`, aligned with Orders/Inventory page behavior).
+- Added reusable frontend pagination component `TablePaginationWithPageJump` and applied it to Orders + Purchasing pages.
+- Added direct page-number jump (`Page` input + `Go`) to Orders + Purchasing list pagination.
+- Added `Unmatched` item count chip per purchase-order row in Purchasing list (aligned with Order list visibility pattern).
 
 ### Update 2026-03-16: Purchasing Line-Item Matching + Delete Actions
 

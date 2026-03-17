@@ -22,7 +22,6 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  TablePagination,
   CircularProgress,
   Select,
   MenuItem,
@@ -73,6 +72,7 @@ import SearchField from '../components/common/SearchField'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import LongPressTableRow from '../components/common/LongPressTableRow'
 import HoldActionPromptDialog from '../components/common/HoldActionPromptDialog'
+import TablePaginationWithPageJump from '../components/common/TablePaginationWithPageJump'
 
 // ── Label maps ───────────────────────────────────────────────────────
 
@@ -760,15 +760,14 @@ export default function OrdersManagement() {
             </TableBody>
           </Table>
         </TableContainer>
-        <TablePagination
-          rowsPerPageOptions={[10, 25, 50, 100]}
-          component="div"
+        <TablePaginationWithPageJump
           count={ordersData?.total ?? 0}
-          rowsPerPage={rowsPerPage}
           page={page}
-          onPageChange={(_, p) => setPage(p)}
-          onRowsPerPageChange={(e) => {
-            setRowsPerPage(parseInt(e.target.value, 10))
+          rowsPerPage={rowsPerPage}
+          rowsPerPageOptions={[10, 25, 50, 100]}
+          onPageChange={(nextPage) => setPage(nextPage)}
+          onRowsPerPageChange={(nextRowsPerPage) => {
+            setRowsPerPage(nextRowsPerPage)
             setPage(0)
           }}
         />

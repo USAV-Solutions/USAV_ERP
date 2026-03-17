@@ -226,6 +226,13 @@ frontend/
 
 ---
 
+### `TablePaginationWithPageJump.tsx` (Path: `/frontend/src/components/common/TablePaginationWithPageJump.tsx`)
+* **Purpose:** Reusable table pagination control with direct page selection.
+* **Dependencies & Props:** Wraps MUI `TablePagination`; accepts `count`, `page`, `rowsPerPage`, `rowsPerPageOptions`, and page/row change handlers.
+* **Mechanism / Render Logic:** Combines standard pagination controls with a `Page` number input and `Go` action (also supports Enter key).
+
+---
+
 ### `VariantSearchAutocomplete.tsx` (Path: `/frontend/src/components/common/VariantSearchAutocomplete.tsx`)
 * **Purpose:** Shared SKU search + selection component used by manual item matching workflows.
 * **Dependencies & Props:** Uses MUI `Autocomplete`, React Query, `searchVariants`, and `useDebouncedValue`.
@@ -560,6 +567,7 @@ frontend/
     - Columns: Expand toggle, Order # (external number), Platform (chip), Customer, Unmatched count (red chip if > 0), Total amount, Shipping Status (inline dropdown for direct status updates), Zoho Sync status (chip), Ordered date, Zoho sync button (ADMIN, triggers `forceSyncOrder`).
     - **Expandable rows:** Clicking a row expands to show `OrderItemsPanel` with full line-item details and match/confirm/reject actions.
   - **Inline status update:** Shipping status updates use a dedicated mutation (`PATCH /orders/{id}/shipping`) with its own loading state and feedback message that indicates Zoho sync is queued.
+  - **Pagination UX:** Uses shared `TablePaginationWithPageJump` for rows-per-page and direct page jump.
   - **Bulk Zoho sync dialog:** Fetches all orders (up to 2000), filters to those with 0 unmatched items, and sequentially queues each for Zoho sync. Shows a progress bar, success/fail counts, and error messages.
   - **Feedback:** Snackbar notifications for force-sync success/failure.
 
@@ -572,7 +580,8 @@ frontend/
   - **Vendor actions in Create PO:** Vendor is selected via searchable autocomplete; users can create a new vendor directly from typed input using a Create Vendor action beside the search bar.
   - **PO actions:** Create PO dialog includes PO number, vendor search/create, dates, total, tax, shipping, handling, currency, and notes.
   - **PO list/detail:** Supports paged loading and expanded/collapsible table rows for line-item visibility.
-  - **Pagination:** Reuses the same MUI `TablePagination` style used in other management pages, with server-side `skip/limit` loading for purchase orders.
+  - **Pagination:** Uses shared `TablePaginationWithPageJump` with server-side `skip/limit` loading and direct page jump.
+  - **PO unmatched count:** Main PO rows include an `Unmatched` count chip showing number of `UNMATCHED` line items.
   - **Line-item actions column:** Expanded PO line-item table exposes visible per-row actions to avoid relying on hidden gestures.
   - **Line-item creation:** Expanded PO section uses an Add New Item toggle; the inline Add Line form appears only when requested for that PO. Quantity and unit price are entered, and total price is auto-calculated as quantity × unit price.
   - **Immutable line-item total:** Edit and create flows treat total price as derived/read-only to keep totals consistent.
