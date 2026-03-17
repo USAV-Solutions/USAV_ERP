@@ -234,6 +234,11 @@ def _is_billed_po_update_error(exc: Exception) -> bool:
     return "36023" in message or "marked as billed" in message.lower()
 
 
+def _is_bill_has_recorded_payments_delete_error(exc: Exception) -> bool:
+    message = str(exc)
+    return "1040" in message or "recorded payments cannot be deleted" in message.lower()
+
+
 def _build_bill_recreate_payload(bill: dict[str, Any], *, purchaseorder_id: str) -> dict[str, Any]:
     """Build a safe bill-create payload from an existing Zoho bill payload."""
     payload: dict[str, Any] = {
@@ -326,9 +331,54 @@ async def _update_billed_purchase_order_with_unbill_rebill(
             continue
         full_bill = await zoho.get_bill(bill_id)
         if full_bill:
+            for payment in full_bill.get("payments") or []:
+                if isinstance(payment, dict):
+                    await zoho.delete_bill_payment_reference(payment)
+
+        try:
+            await zoho.delete_bill(bill_id)
+        except Exception as exc:
+            if _is_bill_has_recorded_payments_delete_error(exc):
+                # Retry once after pulling latest payment refs from Zoho.
+                retry_bill = await zoho.get_bill(bill_id)
+                for payment in retry_bill.get("payments") or []:
+                    if isinstance(payment, dict):
+                        await zoho.delete_bill_payment_reference(payment)
+                await zoho.delete_bill(bill_id)
+            else:
+                raise
+
+        if full_bill:
             bill_snapshots.append(full_bill)
-        await zoho.delete_bill(bill_id)
         deleted_bill_ids.append(bill_id)
+
+    # Some POs are non-billed but still locked due to receive records.
+    receive_ids: list[str] = []
+    page = 1
+    while page <= 50:
+        receives = await zoho.list_purchase_receives(
+            purchaseorder_id=purchase_order_id,
+            page=page,
+            per_page=200,
+        )
+        if not receives:
+            break
+
+        for receive in receives:
+            receive_id = str(
+                (receive or {}).get("receive_id")
+                or (receive or {}).get("purchasereceive_id")
+                or ""
+            ).strip()
+            if receive_id:
+                receive_ids.append(receive_id)
+
+        if len(receives) < 200:
+            break
+        page += 1
+
+    for receive_id in receive_ids:
+        await zoho.delete_purchase_receive(receive_id)
 
     try:
         updated_po = await zoho.update_purchase_order(purchase_order_id, payload)
@@ -350,9 +400,10 @@ async def _update_billed_purchase_order_with_unbill_rebill(
         await zoho.create_bill(recreate_payload)
 
     logger.warning(
-        "sync_po_outbound: billed PO required unbill/rebill flow | po_id=%s bills_processed=%s",
+        "sync_po_outbound: billed/received PO required unbill-receive-rebill flow | po_id=%s bills_processed=%s receives_deleted=%s",
         purchase_order_id,
         len(deleted_bill_ids),
+        len(receive_ids),
     )
     return updated_po
 
