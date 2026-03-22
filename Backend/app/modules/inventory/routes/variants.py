@@ -106,7 +106,7 @@ async def list_variants(
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
     identity_id: Annotated[int | None, Query(description="Filter by identity")] = None,
-    is_active: Annotated[bool | None, Query(description="Filter by active status")] = None,
+    is_active: Annotated[bool | None, Query(description="Filter by active status")] = True,
     zoho_sync_status: Annotated[ZohoSyncStatus | None, Query(description="Filter by Zoho sync status")] = None,
     db: AsyncSession = Depends(get_db),
 ):
@@ -281,6 +281,12 @@ async def delete_variant(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Product variant {variant_id} not found"
+        )
+
+    if not variant.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Product variant {variant_id} is already deleted",
         )
 
     deleted_sku = await _build_unique_deleted_sku(repo, variant.full_sku, variant.id)

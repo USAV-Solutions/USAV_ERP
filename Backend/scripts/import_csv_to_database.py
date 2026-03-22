@@ -76,10 +76,9 @@ PLATFORM_MAP = {
     "Ecwid": "ECWID",
 }
 
-# Condition code mapping - 'U' (Used) maps to None (default), others map directly
-# API only accepts 'N' (New) and 'R' (Refurbished), NULL means Used
+# Condition code mapping - API now supports explicit U (Used)
 CONDITION_MAP = {
-    "U": None,  # Used -> NULL in database
+    "U": "U",  # Used
     "N": "N",   # New
     "R": "R",   # Refurbished
 }
@@ -92,7 +91,7 @@ class CSVRow:
     group_name: str
     product_type: str  # Product, Parts, Bundle
     color_code: str | None
-    condition_code: str | None  # N, R, or None (for Used)
+    condition_code: str | None  # N, R, U, or None
     component_type: str | None
     included_products: str | None
     group_size: int
@@ -106,7 +105,7 @@ class CSVRow:
     @classmethod
     def from_dict(cls, row: dict[str, str]) -> "CSVRow":
         """Create CSVRow from CSV dict row."""
-        # Map condition code - 'U' becomes None (Used is default/NULL)
+        # Map condition code to API enum value when present.
         raw_condition = row["Product Condition"].strip() if row["Product Condition"].strip() else None
         condition_code = CONDITION_MAP.get(raw_condition, raw_condition) if raw_condition else None
         

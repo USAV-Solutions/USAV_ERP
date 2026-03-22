@@ -421,7 +421,7 @@ class OrderSyncService:
 
         entity_platform = _ORDER_TO_ENTITY_PLATFORM.get(platform)
         if entity_platform and ext_item.platform_item_id:
-            listing = await self.listing_repo.get_by_external_ref(
+            listing = await self.listing_repo.get_active_by_external_ref(
                 entity_platform, ext_item.platform_item_id,
             )
             if listing is not None:
@@ -431,7 +431,7 @@ class OrderSyncService:
 
         # Fallback: try matching by platform SKU
         if variant_id is None and entity_platform and ext_item.platform_sku:
-            listing = await self.listing_repo.get_by_external_ref(
+            listing = await self.listing_repo.get_active_by_external_ref(
                 entity_platform, ext_item.platform_sku,
             )
             if listing is not None:
@@ -441,7 +441,7 @@ class OrderSyncService:
 
         # Fallback: try matching by item name against platform listing titles
         if variant_id is None and entity_platform and ext_item.title:
-            listing = await self.listing_repo.search_by_listed_name(
+            listing = await self.listing_repo.search_active_by_listed_name(
                 entity_platform, ext_item.title,
             )
             if listing is not None:

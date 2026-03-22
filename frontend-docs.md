@@ -90,7 +90,7 @@ frontend/
     │   ├── guards/
     │   │   └── RoleGuard.tsx           # Auth + role gate (redirects or renders children/Outlet)
     │   ├── inventory/
-    │   │   ├── CreateProductDialog.tsx # Multi-step dialog: new product or variant for existing
+    │   │   ├── CreateProductDialog.tsx # Add-variant dialog for existing Product/Kit identities
     │   │   ├── CreateStockDialog.tsx   # Dialog to add an inventory stock item to a variant
     │   │   ├── ImageGalleryModal.tsx   # SKU image gallery with carousel & thumbnail strip
     │   │   ├── ProductThumbnail.tsx    # Lazy-loaded thumbnail with skeleton + error fallback
@@ -349,25 +349,18 @@ frontend/
 ---
 
 ### `CreateProductDialog.tsx` (Path: `/frontend/src/components/inventory/CreateProductDialog.tsx`)
-* **Purpose:** Complex multi-step dialog for creating new products or adding variants to existing products.
-* **Dependencies & Props:** Accepts `open: boolean`, `onClose: () => void`, and optional `onCreated?: (fullSku: string) => void`. Uses React Query for data fetching (brands, colors, conditions, identities, families, variants, LCI definitions) and mutations for creating entities.
+* **Purpose:** Focused dialog for adding a new variant to an existing parent product/kit identity.
+* **Dependencies & Props:** Accepts `open: boolean`, `onClose: () => void`, and optional `onCreated?: (fullSku: string) => void`. Uses React Query for colors, conditions, identities, families, and variants.
 * **Mechanism / Render Logic:**
-  - **Two creation modes (toggle):**
-    1. **"New Product"** – Creates a new product family, identity, and initial variant. Supports all four product types: Product, Part, Bundle, Kit.
-    2. **"Variant for Existing Product"** – Selects an existing parent identity via Autocomplete, optionally customizes the name, and creates a new variant with chosen color/condition.
-  - **Form sections (conditional on mode/type):**
-    - Type selector (Product / Part / Bundle / Kit) with descriptions.
-    - Basic information: name, brand (searchable Autocomplete + inline create), dimensions (L/W/H), weight.
-    - Color and Condition selectors (Autocomplete + inline create with code field).
-    - **Part-specific:** Parent product selector, LCI definition selector (+ inline create).
-    - **Bundle-specific:** Component search and multi-select list with chip display.
-    - **Kit-specific:** Free-text included products field.
+  - Parent selector uses Autocomplete over existing identities (restricted to Product and Kit).
+  - Optional variant-name edit updates the parent family base_name before creating the variant.
+  - Color and condition selectors are optional.
+  - Condition normalization: U/Used is treated as default and omitted from variant payload.
   - **SKU preview** calculated live from current selections.
-  - **Existing variant info** shown when in "existing" mode to avoid duplicates.
-  - **Mutations:** Chains multiple API calls (create family → create identity → create variant → optionally add bundle components).
-  - **Part naming behavior:** For new `Part` items, the entered Name is saved as `variant_name` on the created variant (while still attaching to the parent product family).
+  - Existing variants for the selected parent are displayed as chips for quick duplicate awareness.
+  - Mutation flow: optional family-name update, then create variant under selected identity.
   - On successful variant creation, emits `onCreated(full_sku)` so the parent page can immediately open image management for that new SKU.
-  - Resets all form state on close.
+  - Form state resets on dialog open and close.
 
 ---
 
@@ -528,14 +521,16 @@ frontend/
 * **Purpose:** The primary inventory catalog page. Lists all product variants with search, view modes, Zoho sync, and product creation.
 * **Dependencies & Props:** Fetches variants, identities, and families via React Query. Uses `CreateProductDialog`, `ProductThumbnail`, `ImageGalleryModal`, and `VariantImageDialog` components.
 * **Mechanism / Render Logic:**
-  - **Header actions (ADMIN only):** "Sync All to Zoho" (triggers readiness check first, then bulk sync), "Backfill Thumbnails" (runs debug endpoint to populate missing thumbnails), "Add New Item" (opens `CreateProductDialog`).
+  - **Header actions (ADMIN only):** "Sync All to Zoho" (triggers readiness check first, then bulk sync), "Backfill Thumbnails" (runs debug endpoint to populate missing thumbnails), "Add Variant" (opens `CreateProductDialog`).
   - Newly created variants can immediately open `VariantImageDialog` via the `CreateProductDialog` `onCreated` callback.
   - **Search bar + view toggle:** Text search filters by name, SKU, variant name, UPIS-H, or brand. Toggle between **list view** (flat table of all variants) and **grouped view** (rows grouped by product family, expandable).
+  - **Server page aggregation:** Variants, identities, and families are fetched across all API pages (skip/limit loop) to avoid 1000-row truncation issues in type/search mapping.
+  - **Filter/sort controls:** Type, condition, sync status, active/inactive, brand text filter, per-view sort fields, sort direction, and reset action.
   - **List view columns:** Image (thumbnail), Full SKU, Name, Type (chip), Parent UPIS-H, Color, Condition, Zoho Status (chip), Actions.
   - **Per-variant actions:** `Manage Images`, `Sync to Zoho`, plus admin-only `Edit` and `Delete` actions.
   - **Edit action (ADMIN):** Opens a dialog to update all mutable variant fields: `variant_name`, `color_code`, `condition_code`, and `is_active`.
   - **Delete action (ADMIN):** Soft-delete behavior; the variant is inactivated and archived (SKU moved to `D-{old_sku}`), rather than hard-removed.
-  - **Grouped view:** Collapsible rows by product family (name, brand, variant count). Expanded view shows a nested table with all variant details and the same admin-aware actions.
+  - **Grouped view:** Collapsible rows by product family (name, brand, variant count). Expanded rows include family summary chips (active/inactive counts and type breakdown) plus nested variant table/actions.
   - **Zoho sync features:** Single-variant sync, bulk sync (batch POST), readiness check dialog (shows checked/ready/blocked/warning counts + per-item detail table).
   - **Data enrichment:** Variants are enriched with identity and family data by joining across three parallel queries using `useMemo`.
   - **Pagination:** Client-side with MUI `TablePagination` (10/25/50/100 rows).

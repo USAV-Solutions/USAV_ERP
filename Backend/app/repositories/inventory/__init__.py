@@ -15,6 +15,7 @@ from app.models import (
     Platform,
     PlatformListing,
     PlatformSyncStatus,
+    ProductVariant,
 )
 from app.repositories.base import BaseRepository
 
@@ -106,6 +107,26 @@ class PlatformListingRepository(BaseRepository[PlatformListing]):
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def get_active_by_external_ref(
+        self,
+        platform: Platform,
+        external_ref_id: str,
+    ) -> Optional[PlatformListing]:
+        """Get listing by external ref, restricted to active variants.
+
+        This is intended for order auto-match flows so archived variants are not
+        re-matched from legacy listing rows.
+        """
+        stmt = (
+            select(PlatformListing)
+            .join(ProductVariant, ProductVariant.id == PlatformListing.variant_id)
+            .where(PlatformListing.platform == platform)
+            .where(PlatformListing.external_ref_id == external_ref_id)
+            .where(ProductVariant.is_active == True)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
     
     async def get_pending_sync(
         self,
@@ -171,6 +192,24 @@ class PlatformListingRepository(BaseRepository[PlatformListing]):
             select(PlatformListing)
             .where(PlatformListing.platform == platform)
             .where(PlatformListing.listed_name.ilike(pattern))
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def search_active_by_listed_name(
+        self,
+        platform: Platform,
+        name: str,
+    ) -> Optional[PlatformListing]:
+        """Fuzzy-match listing name, restricted to active variants."""
+        pattern = f"%{name}%"
+        stmt = (
+            select(PlatformListing)
+            .join(ProductVariant, ProductVariant.id == PlatformListing.variant_id)
+            .where(PlatformListing.platform == platform)
+            .where(PlatformListing.listed_name.ilike(pattern))
+            .where(ProductVariant.is_active == True)
             .limit(1)
         )
         result = await self.session.execute(stmt)

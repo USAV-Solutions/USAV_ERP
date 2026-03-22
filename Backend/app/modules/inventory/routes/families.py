@@ -71,6 +71,7 @@ async def create_family(
     # Create with the determined product_id
     create_data = data.model_dump()
     create_data['product_id'] = product_id
+    create_data['family_code'] = f"{product_id:05d}"
     family = await repo.create(create_data)
     return ProductFamilyResponse.model_validate(family)
 

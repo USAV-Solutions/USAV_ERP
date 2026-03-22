@@ -14,6 +14,7 @@ class ProductIdentityBase(BaseModel):
     type: IdentityType = Field(..., description="Identity type: Base, B (Bundle), P (Part), K (Kit), S (Service)")
     lci: Optional[int] = Field(None, ge=1, le=99, description="Local Component Index (1-99, only for Parts)")
     physical_class: Optional[PhysicalClass] = Field(None, description="Physical classification: E, C, P, S, W, A")
+    identity_name: Optional[str] = Field(None, max_length=255, description="Human-friendly identity name")
 
 
 class ProductIdentityCreate(ProductIdentityBase):
@@ -23,6 +24,7 @@ class ProductIdentityCreate(ProductIdentityBase):
 
 class ProductIdentityUpdate(BaseModel):
     """Schema for updating a product identity."""
+    identity_name: Optional[str] = Field(None, max_length=255)
     physical_class: Optional[PhysicalClass] = Field(None)
 
 

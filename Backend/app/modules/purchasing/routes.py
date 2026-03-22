@@ -721,10 +721,14 @@ async def import_purchasing_from_zoho(
                 matched_variant = None
                 if line_sku:
                     matched_variant = await variant_repo.get_by_sku(line_sku.upper())
+                    if matched_variant is not None and not matched_variant.is_active:
+                        matched_variant = None
                 if matched_variant is None:
                     zoho_item_id = str(line.get("item_id") or "").strip()
                     if zoho_item_id:
                         matched_variant = await variant_repo.get_by_zoho_id(zoho_item_id)
+                        if matched_variant is not None and not matched_variant.is_active:
+                            matched_variant = None
 
                 await po_item_repo.create(
                     {
@@ -938,10 +942,14 @@ async def import_single_random_purchase_from_zoho(
         matched_variant = None
         if line_sku:
             matched_variant = await variant_repo.get_by_sku(line_sku.upper())
+            if matched_variant is not None and not matched_variant.is_active:
+                matched_variant = None
         if matched_variant is None:
             zoho_item_id = str(line.get("item_id") or "").strip()
             if zoho_item_id:
                 matched_variant = await variant_repo.get_by_zoho_id(zoho_item_id)
+                if matched_variant is not None and not matched_variant.is_active:
+                    matched_variant = None
 
         await po_item_repo.create(
             {

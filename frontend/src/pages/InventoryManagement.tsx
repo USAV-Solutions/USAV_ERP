@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { Fragment, useState, useMemo } from 'react'
 import {
   Box,
   Typography,
@@ -26,6 +26,11 @@ import {
   CircularProgress,
   FormControlLabel,
   Switch,
+  Grid,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from '@mui/material'
 import {
   Add,
@@ -52,10 +57,15 @@ import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { compileSearchMatcher } from '../utils/search'
 
 type ViewMode = 'list' | 'grouped'
+type ListSortBy = 'name' | 'sku' | 'brand' | 'upis' | 'type' | 'color' | 'condition' | 'zoho'
+type GroupSortBy = 'name' | 'brand' | 'variant_count'
+type SortDirection = 'asc' | 'desc'
+
+const PAGE_SIZE = 1000
+const MAX_PAGE_ITERATIONS = 200
 
 interface ExpandedRowProps {
-  familyName: string
-  variants: EnhancedVariant[]
+  group: GroupedItem
   onSyncVariant: (variant: EnhancedVariant) => void
   syncingVariantId: number | null
   syncDisabled: boolean
@@ -162,8 +172,7 @@ const getSyncStatusChip = (status: string) => {
 }
 
 function ExpandedRow({
-  familyName,
-  variants,
+  group,
   onSyncVariant,
   syncingVariantId,
   syncDisabled,
@@ -172,14 +181,48 @@ function ExpandedRow({
   onOpenHoldPrompt,
 }: ExpandedRowProps) {
   const [gallerySku, setGallerySku] = useState<string | null>(null)
+  const typeCounts = useMemo(() => {
+    return group.variants.reduce<Record<string, number>>((acc, variant) => {
+      const key = variant.identity?.type || 'Product'
+      acc[key] = (acc[key] || 0) + 1
+      return acc
+    }, {})
+  }, [group.variants])
+
+  const activeCount = useMemo(
+    () => group.variants.filter((variant) => variant.is_active).length,
+    [group.variants],
+  )
 
   return (
     <TableRow>
       <TableCell colSpan={8} sx={{ py: 0, bgcolor: 'grey.50' }}>
         <Box sx={{ py: 2, px: 4 }}>
-          <Typography variant="subtitle2" sx={{ mb: 1 }}>
-            Variants for {familyName}
-          </Typography>
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="h6" sx={{ mb: 0.5 }}>
+              {group.name}
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+              Product ID: {group.product_id} {group.brand ? `| Brand: ${group.brand}` : ''}
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+              <Chip size="small" label={`Variants: ${group.variant_count}`} />
+              <Chip size="small" color="success" label={`Active: ${activeCount}`} />
+              <Chip
+                size="small"
+                color={activeCount === group.variant_count ? 'default' : 'warning'}
+                label={`Inactive: ${group.variant_count - activeCount}`}
+              />
+              {Object.entries(typeCounts).map(([type, count]) => (
+                <Chip
+                  key={type}
+                  size="small"
+                  color={getTypeColor(type as ProductType)}
+                  label={`${getTypeLabel(type as ProductType)}: ${count}`}
+                />
+              ))}
+            </Box>
+          </Box>
           <Table size="small">
             <TableHead>
               <TableRow>
@@ -196,7 +239,7 @@ function ExpandedRow({
               </TableRow>
             </TableHead>
             <TableBody>
-              {variants.map((variant) => (
+              {group.variants.map((variant) => (
                 <LongPressTableRow
                   key={variant.id}
                   hover
@@ -282,6 +325,14 @@ export default function InventoryManagement() {
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(25)
+  const [listSortBy, setListSortBy] = useState<ListSortBy>('name')
+  const [groupSortBy, setGroupSortBy] = useState<GroupSortBy>('name')
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
+  const [typeFilter, setTypeFilter] = useState<ProductType | ''>('')
+  const [conditionFilter, setConditionFilter] = useState<'N' | 'R' | 'U' | ''>('')
+  const [syncFilter, setSyncFilter] = useState<'SYNCED' | 'PENDING' | 'DIRTY' | 'ERROR' | ''>('')
+  const [activeFilter, setActiveFilter] = useState<'active' | 'inactive' | ''>('')
+  const [brandFilter, setBrandFilter] = useState('')
   const [gallerySku, setGallerySku] = useState<string | null>(null)
   const [manageImagesSku, setManageImagesSku] = useState<string | null>(null)
   const [snackbarOpen, setSnackbarOpen] = useState(false)
@@ -487,37 +538,49 @@ export default function InventoryManagement() {
     },
   })
 
+  const fetchAllPages = async <T,>(
+    endpoint: string,
+    baseParams?: Record<string, string | number | boolean>
+  ): Promise<T[]> => {
+    const allItems: T[] = []
+
+    for (let i = 0; i < MAX_PAGE_ITERATIONS; i += 1) {
+      const skip = i * PAGE_SIZE
+      const response = await axiosClient.get(endpoint, {
+        params: {
+          ...(baseParams || {}),
+          skip,
+          limit: PAGE_SIZE,
+        },
+      })
+
+      const pageItems: T[] = response.data.items || []
+      allItems.push(...pageItems)
+
+      if (pageItems.length < PAGE_SIZE) {
+        break
+      }
+    }
+
+    return allItems
+  }
+
   // Fetch variants with identity data
   const { data: variantsData, isLoading: variantsLoading } = useQuery({
     queryKey: ['variants'],
-    queryFn: async () => {
-      const response = await axiosClient.get(CATALOG.VARIANTS, {
-        params: { limit: 1000 }
-      })
-      return response.data.items || []
-    },
+    queryFn: async () => fetchAllPages<Variant>(CATALOG.VARIANTS, { is_active: true }),
   })
 
   // Fetch identities with family data
   const { data: identitiesData, isLoading: identitiesLoading } = useQuery({
     queryKey: ['identities'],
-    queryFn: async () => {
-      const response = await axiosClient.get(CATALOG.IDENTITIES, {
-        params: { limit: 1000 }
-      })
-      return response.data.items || []
-    },
+    queryFn: async () => fetchAllPages<ProductIdentity>(CATALOG.IDENTITIES),
   })
 
   // Fetch families
   const { data: familiesData } = useQuery({
     queryKey: ['families'],
-    queryFn: async () => {
-      const response = await axiosClient.get(CATALOG.FAMILIES, {
-        params: { limit: 1000 }
-      })
-      return response.data.items || []
-    },
+    queryFn: async () => fetchAllPages<ProductFamily>(CATALOG.FAMILIES),
   })
 
   // Combine data
@@ -547,22 +610,71 @@ export default function InventoryManagement() {
   // Filter by search query
   const filteredVariants = useMemo(() => {
     const matchesSearch = compileSearchMatcher(debouncedSearch)
+    const normalizedBrandFilter = brandFilter.trim().toLowerCase()
     return enhancedVariants.filter((variant) => {
-      return matchesSearch([
+      const conditionCode = variant.condition_code || 'U'
+      const brand = variant.identity?.family?.brand?.name || ''
+      const passesType = !typeFilter || (variant.identity?.type || 'Product') === typeFilter
+      const passesCondition = !conditionFilter || conditionCode === conditionFilter
+      const passesSync = !syncFilter || variant.zoho_sync_status === syncFilter
+      const passesActive = !activeFilter || (activeFilter === 'active' ? variant.is_active : !variant.is_active)
+      const passesBrand = !normalizedBrandFilter || brand.toLowerCase().includes(normalizedBrandFilter)
+
+      return (
+        passesType &&
+        passesCondition &&
+        passesSync &&
+        passesActive &&
+        passesBrand &&
+        matchesSearch([
         variant.identity?.family?.base_name,
         variant.variant_name,
         variant.full_sku,
         variant.identity?.generated_upis_h,
         variant.identity?.family?.brand?.name,
-      ])
+        ])
+      )
     })
-  }, [enhancedVariants, debouncedSearch])
+  }, [enhancedVariants, debouncedSearch, typeFilter, conditionFilter, syncFilter, activeFilter, brandFilter])
+
+  const sortedVariants = useMemo(() => {
+    const sorted = [...filteredVariants]
+    const multiplier = sortDirection === 'asc' ? 1 : -1
+
+    sorted.sort((a, b) => {
+      const valueFor = (variant: EnhancedVariant): string => {
+        switch (listSortBy) {
+          case 'sku':
+            return variant.full_sku || ''
+          case 'brand':
+            return variant.identity?.family?.brand?.name || ''
+          case 'upis':
+            return variant.identity?.generated_upis_h || ''
+          case 'type':
+            return variant.identity?.type || 'Product'
+          case 'color':
+            return variant.color_code || ''
+          case 'condition':
+            return variant.condition_code || 'U'
+          case 'zoho':
+            return variant.zoho_sync_status || ''
+          case 'name':
+          default:
+            return variant.variant_name || variant.identity?.family?.base_name || ''
+        }
+      }
+
+      return valueFor(a).localeCompare(valueFor(b)) * multiplier
+    })
+
+    return sorted
+  }, [filteredVariants, listSortBy, sortDirection])
 
   // Group variants by Product Family
   const groupedData: GroupedItem[] = useMemo(() => {
     const groups = new Map<number, GroupedItem>()
     
-    filteredVariants.forEach((variant) => {
+    sortedVariants.forEach((variant) => {
       const productId = variant.identity?.family?.product_id ?? -1
       
       if (!groups.has(productId)) {
@@ -580,10 +692,19 @@ export default function InventoryManagement() {
       group.variant_count = group.variants.length
     })
     
-    return Array.from(groups.values()).sort((a, b) =>
-      a.name.localeCompare(b.name),
-    )
-  }, [filteredVariants])
+    const multiplier = sortDirection === 'asc' ? 1 : -1
+    return Array.from(groups.values()).sort((a, b) => {
+      if (groupSortBy === 'variant_count') {
+        return (a.variant_count - b.variant_count) * multiplier
+      }
+
+      if (groupSortBy === 'brand') {
+        return (a.brand || '').localeCompare(b.brand || '') * multiplier
+      }
+
+      return a.name.localeCompare(b.name) * multiplier
+    })
+  }, [sortedVariants, groupSortBy, sortDirection])
 
   const handleToggleExpand = (productId: number) => {
     setExpandedRows((prev) => {
@@ -609,7 +730,7 @@ export default function InventoryManagement() {
   const isLoading = variantsLoading || identitiesLoading
 
   // Paginated data
-  const paginatedListData = filteredVariants.slice(
+  const paginatedListData = sortedVariants.slice(
     page * rowsPerPage,
     page * rowsPerPage + rowsPerPage
   )
@@ -654,7 +775,7 @@ export default function InventoryManagement() {
               startIcon={<Add />}
               onClick={() => setCreateDialogOpen(true)}
             >
-              Add New Item
+              Add Variant
             </Button>
           </Box>
         )}
@@ -663,18 +784,26 @@ export default function InventoryManagement() {
       {/* Search and View Toggle */}
 
       <Paper sx={{ p: 2, mb: 3 }}>
-        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Grid container spacing={2} alignItems="center">
+          <Grid item xs={12} md={6}>
           <SearchField
             placeholder="Search by name, SKU, or brand..."
             value={searchInput}
             onChange={setSearchInput}
             size="small"
-            sx={{ flexGrow: 1, minWidth: 300 }}
+              sx={{ width: '100%' }}
           />
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <Box sx={{ display: 'flex', justifyContent: { xs: 'flex-start', md: 'flex-end' } }}>
           <ToggleButtonGroup
             value={viewMode}
             exclusive
-            onChange={(_, value) => value && setViewMode(value)}
+                onChange={(_, value) => {
+                  if (!value) return
+                  setViewMode(value)
+                  setPage(0)
+                }}
             size="small"
           >
             <ToggleButton value="list">
@@ -688,7 +817,181 @@ export default function InventoryManagement() {
               </Tooltip>
             </ToggleButton>
           </ToggleButtonGroup>
-        </Box>
+            </Box>
+          </Grid>
+
+          <Grid item xs={6} md={2}>
+            <FormControl size="small" fullWidth>
+              <InputLabel>Type</InputLabel>
+              <Select
+                value={typeFilter}
+                label="Type"
+                onChange={(e) => {
+                  setTypeFilter(e.target.value as ProductType | '')
+                  setPage(0)
+                }}
+              >
+                <MenuItem value="">All</MenuItem>
+                <MenuItem value="Product">Product</MenuItem>
+                <MenuItem value="P">Part</MenuItem>
+                <MenuItem value="B">Bundle</MenuItem>
+                <MenuItem value="K">Kit</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+
+          <Grid item xs={6} md={2}>
+            <FormControl size="small" fullWidth>
+              <InputLabel>Condition</InputLabel>
+              <Select
+                value={conditionFilter}
+                label="Condition"
+                onChange={(e) => {
+                  setConditionFilter(e.target.value as 'N' | 'R' | 'U' | '')
+                  setPage(0)
+                }}
+              >
+                <MenuItem value="">All</MenuItem>
+                <MenuItem value="N">N</MenuItem>
+                <MenuItem value="R">R</MenuItem>
+                <MenuItem value="U">U</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+
+          <Grid item xs={6} md={2}>
+            <FormControl size="small" fullWidth>
+              <InputLabel>Sync</InputLabel>
+              <Select
+                value={syncFilter}
+                label="Sync"
+                onChange={(e) => {
+                  setSyncFilter(e.target.value as 'SYNCED' | 'PENDING' | 'DIRTY' | 'ERROR' | '')
+                  setPage(0)
+                }}
+              >
+                <MenuItem value="">All</MenuItem>
+                <MenuItem value="SYNCED">SYNCED</MenuItem>
+                <MenuItem value="PENDING">PENDING</MenuItem>
+                <MenuItem value="DIRTY">DIRTY</MenuItem>
+                <MenuItem value="ERROR">ERROR</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+
+          <Grid item xs={6} md={2}>
+            <FormControl size="small" fullWidth>
+              <InputLabel>Active</InputLabel>
+              <Select
+                value={activeFilter}
+                label="Active"
+                onChange={(e) => {
+                  setActiveFilter(e.target.value as 'active' | 'inactive' | '')
+                  setPage(0)
+                }}
+              >
+                <MenuItem value="">All</MenuItem>
+                <MenuItem value="active">Active</MenuItem>
+                <MenuItem value="inactive">Inactive</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+
+          <Grid item xs={12} md={2}>
+            <TextField
+              size="small"
+              label="Brand filter"
+              value={brandFilter}
+              onChange={(e) => {
+                setBrandFilter(e.target.value)
+                setPage(0)
+              }}
+              fullWidth
+            />
+          </Grid>
+
+          <Grid item xs={6} md={2}>
+            <FormControl size="small" fullWidth>
+              <InputLabel>Sort by</InputLabel>
+              <Select
+                value={viewMode === 'list' ? listSortBy : groupSortBy}
+                label="Sort by"
+                onChange={(e) => {
+                  if (viewMode === 'list') {
+                    setListSortBy(e.target.value as ListSortBy)
+                  } else {
+                    setGroupSortBy(e.target.value as GroupSortBy)
+                  }
+                  setPage(0)
+                }}
+              >
+                {viewMode === 'list' ? (
+                  [
+                    ['name', 'Name'],
+                    ['sku', 'SKU'],
+                    ['brand', 'Brand'],
+                    ['upis', 'UPIS-H'],
+                    ['type', 'Type'],
+                    ['color', 'Color'],
+                    ['condition', 'Condition'],
+                    ['zoho', 'Zoho Status'],
+                  ].map(([value, label]) => (
+                    <MenuItem key={value} value={value}>{label}</MenuItem>
+                  ))
+                ) : (
+                  [
+                    ['name', 'Family name'],
+                    ['brand', 'Brand'],
+                    ['variant_count', 'Variant count'],
+                  ].map(([value, label]) => (
+                    <MenuItem key={value} value={value}>{label}</MenuItem>
+                  ))
+                )}
+              </Select>
+            </FormControl>
+          </Grid>
+
+          <Grid item xs={6} md={2}>
+            <FormControl size="small" fullWidth>
+              <InputLabel>Direction</InputLabel>
+              <Select
+                value={sortDirection}
+                label="Direction"
+                onChange={(e) => {
+                  setSortDirection(e.target.value as SortDirection)
+                  setPage(0)
+                }}
+              >
+                <MenuItem value="asc">Ascending</MenuItem>
+                <MenuItem value="desc">Descending</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+
+          <Grid item xs={12} md={8}>
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+              <Chip size="small" label={`Results: ${viewMode === 'list' ? sortedVariants.length : groupedData.length}`} />
+              <Chip size="small" label={`View: ${viewMode === 'list' ? 'List' : 'Grouped'}`} variant="outlined" />
+              <Button
+                size="small"
+                variant="text"
+                onClick={() => {
+                  setTypeFilter('')
+                  setConditionFilter('')
+                  setSyncFilter('')
+                  setActiveFilter('')
+                  setBrandFilter('')
+                  setListSortBy('name')
+                  setGroupSortBy('name')
+                  setSortDirection('asc')
+                  setPage(0)
+                }}
+              >
+                Reset filters/sort
+              </Button>
+            </Box>
+          </Grid>
+        </Grid>
       </Paper>
 
       {/* Data Table */}
@@ -817,11 +1120,10 @@ export default function InventoryManagement() {
                   </TableRow>
                 ) : (
                   paginatedGroupedData.map((group) => (
-                    <>
+                    <Fragment key={group.product_id}>
                       <TableRow
-                        key={group.product_id}
                         hover
-                        sx={{ cursor: 'pointer' }}
+                        sx={{ cursor: 'pointer', '& > *': { borderBottom: expandedRows.has(group.product_id) ? 'unset' : undefined } }}
                         onClick={() => handleToggleExpand(group.product_id)}
                       >
                         <TableCell>
@@ -845,8 +1147,7 @@ export default function InventoryManagement() {
                       </TableRow>
                       {expandedRows.has(group.product_id) && (
                         <ExpandedRow
-                          familyName={group.name}
-                          variants={group.variants}
+                          group={group}
                           onSyncVariant={(variant) => void handleSyncSingleVariant(variant)}
                           syncingVariantId={syncingVariantId}
                           syncDisabled={isZohoSyncRunning || zohoSingleSyncMutation.isPending}
@@ -855,7 +1156,7 @@ export default function InventoryManagement() {
                           onOpenHoldPrompt={openHoldPrompt}
                         />
                       )}
-                    </>
+                    </Fragment>
                   ))
                 )}
               </TableBody>
@@ -865,7 +1166,7 @@ export default function InventoryManagement() {
         <TablePagination
           rowsPerPageOptions={[10, 25, 50, 100]}
           component="div"
-          count={viewMode === 'list' ? filteredVariants.length : groupedData.length}
+          count={viewMode === 'list' ? sortedVariants.length : groupedData.length}
           rowsPerPage={rowsPerPage}
           page={page}
           onPageChange={handleChangePage}

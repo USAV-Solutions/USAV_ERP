@@ -59,7 +59,7 @@ class ConditionCode(str, enum.Enum):
     """Product condition codes."""
     N = "N"  # New
     R = "R"  # Refurbished/Repair
-    # NULL = Used (default)
+    U = "U"  # Used
 
 
 class ZohoSyncStatus(str, enum.Enum):
@@ -312,6 +312,12 @@ class ProductFamily(Base, TimestampMixin):
         primary_key=True,
         comment="The 5-digit ECWID ID (e.g., 00845). Acts as namespace root.",
     )
+    family_code: Mapped[str] = mapped_column(
+        String(5),
+        nullable=False,
+        unique=True,
+        comment="Zero-padded family code derived from product_id (e.g., 00001).",
+    )
     base_name: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
@@ -418,6 +424,11 @@ class ProductIdentity(Base, TimestampMixin):
         nullable=True,
         comment="Registry Code: E (Electronics), C (Cover), etc.",
     )
+    identity_name: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Human-friendly identity name (e.g., group or component identity name).",
+    )
     generated_upis_h: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
@@ -507,7 +518,7 @@ class ProductVariant(Base, TimestampMixin):
     condition_code: Mapped[Optional[ConditionCode]] = mapped_column(
         Enum(ConditionCode, name="condition_code_enum"),
         nullable=True,
-        comment="N (New), R (Repair), or NULL (Used/Default).",
+        comment="N (New), R (Refurbished), U (Used), or NULL.",
     )
     full_sku: Mapped[str] = mapped_column(
         String(100),

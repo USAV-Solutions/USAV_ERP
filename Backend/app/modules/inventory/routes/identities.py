@@ -139,8 +139,8 @@ async def update_identity(
     """
     Update a product identity (supports both PUT and PATCH).
     
-    Note: Only physical_class can be updated. The UPIS-H and hex signature
-    are immutable after creation.
+    Note: `identity_name` and `physical_class` can be updated.
+    The UPIS-H and hex signature are immutable after creation.
     """
     repo = ProductIdentityRepository(db)
     identity = await repo.get(identity_id)

@@ -42,6 +42,7 @@ class ProductFamilyUpdate(BaseModel):
 class ProductFamilyResponse(ProductFamilyBase):
     """Schema for product family response."""
     product_id: int
+    family_code: str
     brand: Optional[BrandResponse] = Field(None, description="Brand details")
     created_at: datetime
     updated_at: datetime
