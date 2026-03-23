@@ -25,6 +25,7 @@ export default function VariantSearchAutocomplete({
 }: VariantSearchAutocompleteProps) {
   const [inputValue, setInputValue] = useState('')
   const debouncedInput = useDebouncedValue(inputValue, 200)
+  const getDisplayName = (option: VariantSearchResult) => option.variant_name || option.product_name
 
   const { data: options = [], isFetching } = useQuery<VariantSearchResult[]>({
     queryKey: ['variantSearch', debouncedInput],
@@ -43,7 +44,7 @@ export default function VariantSearchAutocomplete({
       inputValue={inputValue}
       onChange={(_event, next) => onChange(next)}
       onInputChange={(_event, nextInput) => setInputValue(nextInput)}
-      getOptionLabel={(option) => `${option.full_sku} - ${option.product_name}`}
+      getOptionLabel={(option) => `${option.full_sku} - ${getDisplayName(option)}`}
       isOptionEqualToValue={(option, selected) => option.id === selected.id}
       filterOptions={(x) => x}
       disabled={disabled}
@@ -54,7 +55,7 @@ export default function VariantSearchAutocomplete({
               {option.full_sku}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              {option.product_name}
+              {getDisplayName(option)}
               {option.color_code && ` · ${option.color_code}`}
               {option.condition_code && ` · ${option.condition_code}`}
             </Typography>

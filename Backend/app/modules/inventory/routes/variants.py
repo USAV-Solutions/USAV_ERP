@@ -71,6 +71,7 @@ async def search_variants(
         select(
             ProductVariant.id,
             ProductVariant.full_sku,
+            ProductVariant.variant_name,
             ProductVariant.color_code,
             ProductVariant.condition_code,
             ProductFamily.base_name.label("product_name"),
@@ -93,6 +94,7 @@ async def search_variants(
         {
             "id": row.id,
             "full_sku": row.full_sku,
+            "variant_name": row.variant_name or row.product_name or row.full_sku,
             "product_name": row.product_name or "",
             "color_code": row.color_code,
             "condition_code": row.condition_code.value if row.condition_code else None,

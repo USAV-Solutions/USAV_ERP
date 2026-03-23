@@ -72,6 +72,7 @@ export interface OrderItemDetail extends OrderItemBrief {
 export interface VariantSearchResult {
   id: number
   full_sku: string
+  variant_name?: string | null
   product_name: string
   color_code: string | null
   condition_code: string | null
