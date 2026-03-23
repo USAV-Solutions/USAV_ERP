@@ -64,6 +64,11 @@ _LAST_JOB: _ZohoSyncJobState | None = None
 _CURRENT_TASK: asyncio.Task | None = None
 
 
+def _batched_variants(items: list[ProductVariant], batch_size: int):
+    for start in range(0, len(items), batch_size):
+        yield (start // batch_size) + 1, items[start:start + batch_size]
+
+
 def _as_progress_response(job: _ZohoSyncJobState) -> ZohoSyncProgressResponse:
     return ZohoSyncProgressResponse(
         job_id=job.job_id,
@@ -809,6 +814,16 @@ async def _execute_bulk_sync(
         job.total_target = len(non_composite_variants) + len(composite_variants)
         job.status = "running"
 
+    batch_size = max(1, int(data.batch_size or 1))
+    total_target = len(non_composite_variants) + len(composite_variants)
+    logger.info(
+        "Zoho bulk sync start | total_target=%s standard_count=%s composite_count=%s batch_size=%s",
+        total_target,
+        len(non_composite_variants),
+        len(composite_variants),
+        batch_size,
+    )
+
     async def _handle_result(result: ZohoBulkSyncItemResult):
         results.append(result)
         if job is not None:
@@ -819,39 +834,15 @@ async def _execute_bulk_sync(
             else:
                 job.total_failed += 1
 
-    for variant in non_composite_variants:
-        if job is not None:
-            if job.cancel_requested:
-                job.status = "stopped"
-                break
-            job.current_sku = variant.full_sku
-
-        try:
-            result = await _sync_single_standard_variant(
-                db=db,
-                zoho_client=zoho_client,
-                data=data,
-                variant=variant,
-                synced_item_ids_by_identity=synced_item_ids_by_identity,
-            )
-            await _handle_result(result)
-        except Exception as exc:
-            variant.zoho_sync_status = ZohoSyncStatus.ERROR
-            await db.commit()
-            failure = ZohoBulkSyncItemResult(
-                variant_id=variant.id,
-                sku=variant.full_sku,
-                action="item_sync",
-                success=False,
-                zoho_sync_status=ZohoSyncStatus.ERROR.value,
-                message=f"{str(exc)} | attempted_name={_build_item_payload(variant).get('name', '')}",
-            )
-            if job is not None:
-                job.last_error = str(exc)
-            await _handle_result(failure)
-
-    if job is None or job.status != "stopped":
-        for variant in composite_variants:
+    for batch_index, batch in _batched_variants(non_composite_variants, batch_size):
+        logger.info(
+            "Zoho bulk sync batch start | phase=standard batch=%s batch_items=%s processed=%s/%s",
+            batch_index,
+            len(batch),
+            len(results),
+            total_target,
+        )
+        for variant in batch:
             if job is not None:
                 if job.cancel_requested:
                     job.status = "stopped"
@@ -859,7 +850,7 @@ async def _execute_bulk_sync(
                 job.current_sku = variant.full_sku
 
             try:
-                result = await _sync_single_composite_variant(
+                result = await _sync_single_standard_variant(
                     db=db,
                     zoho_client=zoho_client,
                     data=data,
@@ -873,15 +864,77 @@ async def _execute_bulk_sync(
                 failure = ZohoBulkSyncItemResult(
                     variant_id=variant.id,
                     sku=variant.full_sku,
-                    action="composite_sync",
+                    action="item_sync",
                     success=False,
                     zoho_sync_status=ZohoSyncStatus.ERROR.value,
-                    composite_synced=False,
                     message=f"{str(exc)} | attempted_name={_build_item_payload(variant).get('name', '')}",
                 )
                 if job is not None:
                     job.last_error = str(exc)
                 await _handle_result(failure)
+
+        logger.info(
+            "Zoho bulk sync batch done | phase=standard batch=%s processed=%s/%s success=%s failed=%s",
+            batch_index,
+            len(results),
+            total_target,
+            len([result for result in results if result.success]),
+            len([result for result in results if not result.success]),
+        )
+        if job is not None and job.status == "stopped":
+            break
+
+    if job is None or job.status != "stopped":
+        for batch_index, batch in _batched_variants(composite_variants, batch_size):
+            logger.info(
+                "Zoho bulk sync batch start | phase=composite batch=%s batch_items=%s processed=%s/%s",
+                batch_index,
+                len(batch),
+                len(results),
+                total_target,
+            )
+            for variant in batch:
+                if job is not None:
+                    if job.cancel_requested:
+                        job.status = "stopped"
+                        break
+                    job.current_sku = variant.full_sku
+
+                try:
+                    result = await _sync_single_composite_variant(
+                        db=db,
+                        zoho_client=zoho_client,
+                        data=data,
+                        variant=variant,
+                        synced_item_ids_by_identity=synced_item_ids_by_identity,
+                    )
+                    await _handle_result(result)
+                except Exception as exc:
+                    variant.zoho_sync_status = ZohoSyncStatus.ERROR
+                    await db.commit()
+                    failure = ZohoBulkSyncItemResult(
+                        variant_id=variant.id,
+                        sku=variant.full_sku,
+                        action="composite_sync",
+                        success=False,
+                        zoho_sync_status=ZohoSyncStatus.ERROR.value,
+                        composite_synced=False,
+                        message=f"{str(exc)} | attempted_name={_build_item_payload(variant).get('name', '')}",
+                    )
+                    if job is not None:
+                        job.last_error = str(exc)
+                    await _handle_result(failure)
+
+            logger.info(
+                "Zoho bulk sync batch done | phase=composite batch=%s processed=%s/%s success=%s failed=%s",
+                batch_index,
+                len(results),
+                total_target,
+                len([result for result in results if result.success]),
+                len([result for result in results if not result.success]),
+            )
+            if job is not None and job.status == "stopped":
+                break
 
     finished_at = datetime.now()
     total_success = len([result for result in results if result.success])

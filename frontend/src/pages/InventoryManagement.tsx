@@ -450,6 +450,7 @@ export default function InventoryManagement() {
         include_composites: true,
         force_resync: true,
         limit: 5000,
+        batch_size: 100,
       })
       return response.data
     },
