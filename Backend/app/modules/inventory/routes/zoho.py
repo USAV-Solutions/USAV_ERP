@@ -997,14 +997,26 @@ async def zoho_sync_readiness_report(
             else:
                 for component in component_rows:
                     child_variant_stmt = (
-                        select(ProductVariant.id)
+                        select(ProductVariant)
+                        .options(
+                            selectinload(ProductVariant.identity).selectinload(ProductIdentity.family),
+                            selectinload(ProductVariant.listings),
+                        )
                         .where(ProductVariant.identity_id == component.child_identity_id)
                         .where(ProductVariant.is_active == True)
+                        .order_by(ProductVariant.id)
                         .limit(1)
                     )
-                    child_variant_id = (await db.execute(child_variant_stmt)).scalar_one_or_none()
-                    if child_variant_id is None:
+                    child_variant = (await db.execute(child_variant_stmt)).scalar_one_or_none()
+                    if child_variant is None:
                         missing_fields.append(f"component_variant_missing:{component.child_identity_id}")
+                        continue
+
+                    child_payload = _build_item_payload(child_variant)
+                    if not child_payload.get("name"):
+                        missing_fields.append(f"component_name_missing:{component.child_identity_id}")
+                    if not child_payload.get("sku"):
+                        missing_fields.append(f"component_sku_missing:{component.child_identity_id}")
 
         ready = len(missing_fields) == 0
         severity = "error" if not ready else ("warning" if warnings else "ok")

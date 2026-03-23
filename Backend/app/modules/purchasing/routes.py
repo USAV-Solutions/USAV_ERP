@@ -314,7 +314,11 @@ async def list_purchase_orders(
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     order_date_from: Annotated[date | None, Query()] = None,
     order_date_to: Annotated[date | None, Query()] = None,
-    date_sort: Annotated[str, Query(pattern="^(asc|desc)$")] = "desc",
+    deliver_status: Annotated[PurchaseDeliverStatus | None, Query()] = None,
+    item_match_status: Annotated[str | None, Query(pattern="^(matched|unmatched)$")] = None,
+    zoho_sync_status: Annotated[ZohoSyncStatus | None, Query()] = None,
+    sort_by: Annotated[str, Query(pattern="^(order_date|po_number|total_amount|created_at)$")] = "order_date",
+    sort_dir: Annotated[str, Query(pattern="^(asc|desc)$")] = "desc",
     repo: PurchaseOrderRepository = Depends(get_purchase_order_repo),
 ):
     rows = await repo.get_multi_with_date_filters(
@@ -322,7 +326,11 @@ async def list_purchase_orders(
         limit=limit,
         order_date_from=order_date_from,
         order_date_to=order_date_to,
-        sort_date=date_sort,
+        deliver_status=deliver_status,
+        item_match_status=item_match_status,
+        zoho_sync_status=zoho_sync_status,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
     )
     return [PurchaseOrderResponse.model_validate(r) for r in rows]
 

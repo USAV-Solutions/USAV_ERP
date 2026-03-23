@@ -41,14 +41,22 @@ export async function listPurchaseOrders(): Promise<PurchaseOrder[]> {
 export async function listPurchaseOrdersPaged(params: {
   skip?: number
   limit?: number
-  dateSort?: 'asc' | 'desc'
+  deliverStatus?: 'CREATED' | 'BILLED' | 'DELIVERED'
+  itemMatchStatus?: 'matched' | 'unmatched'
+  zohoSyncStatus?: 'PENDING' | 'SYNCED' | 'ERROR' | 'DIRTY'
+  sortBy?: 'order_date' | 'po_number' | 'total_amount' | 'created_at'
+  sortDir?: 'asc' | 'desc'
   orderDateFrom?: string
   orderDateTo?: string
 } = {}): Promise<PurchaseOrder[]> {
   const query = new URLSearchParams()
   if (params.skip !== undefined) query.set('skip', String(params.skip))
   if (params.limit !== undefined) query.set('limit', String(params.limit))
-  if (params.dateSort !== undefined) query.set('date_sort', params.dateSort)
+  if (params.deliverStatus) query.set('deliver_status', params.deliverStatus)
+  if (params.itemMatchStatus) query.set('item_match_status', params.itemMatchStatus)
+  if (params.zohoSyncStatus) query.set('zoho_sync_status', params.zohoSyncStatus)
+  if (params.sortBy) query.set('sort_by', params.sortBy)
+  if (params.sortDir) query.set('sort_dir', params.sortDir)
   if (params.orderDateFrom) query.set('order_date_from', params.orderDateFrom)
   if (params.orderDateTo) query.set('order_date_to', params.orderDateTo)
 

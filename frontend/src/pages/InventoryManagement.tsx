@@ -139,6 +139,8 @@ interface ZohoReadinessResponse {
   items: ZohoReadinessItem[]
 }
 
+type ZohoReadinessView = 'blocked' | 'all' | 'warnings'
+
 const getTypeLabel = (type: ProductType): string => {
   const labels: Record<ProductType, string> = {
     Product: 'Product',
@@ -340,6 +342,10 @@ export default function InventoryManagement() {
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success')
   const [readinessDialogOpen, setReadinessDialogOpen] = useState(false)
   const [readinessData, setReadinessData] = useState<ZohoReadinessResponse | null>(null)
+  const [readinessView, setReadinessView] = useState<ZohoReadinessView>('blocked')
+  const [readinessSearch, setReadinessSearch] = useState('')
+  const [readinessPage, setReadinessPage] = useState(0)
+  const [readinessRowsPerPage, setReadinessRowsPerPage] = useState(25)
   const [syncingVariantId, setSyncingVariantId] = useState<number | null>(null)
   const [holdPromptOpen, setHoldPromptOpen] = useState(false)
   const [selectedVariant, setSelectedVariant] = useState<EnhancedVariant | null>(null)
@@ -528,6 +534,10 @@ export default function InventoryManagement() {
     },
     onSuccess: (data: ZohoReadinessResponse) => {
       setReadinessData(data)
+      setReadinessView('blocked')
+      setReadinessSearch('')
+      setReadinessPage(0)
+      setReadinessRowsPerPage(25)
       setReadinessDialogOpen(true)
     },
     onError: (error: AxiosError<{ detail?: string }>) => {
@@ -705,6 +715,42 @@ export default function InventoryManagement() {
       return a.name.localeCompare(b.name) * multiplier
     })
   }, [sortedVariants, groupSortBy, sortDirection])
+
+  const readinessFilteredItems = useMemo(() => {
+    if (!readinessData) {
+      return [] as ZohoReadinessItem[]
+    }
+
+    const needle = readinessSearch.trim().toLowerCase()
+    return readinessData.items.filter((item) => {
+      const passesView =
+        readinessView === 'all'
+          ? true
+          : readinessView === 'blocked'
+            ? item.severity === 'error'
+            : item.severity === 'warning'
+
+      if (!passesView) {
+        return false
+      }
+
+      if (!needle) {
+        return true
+      }
+
+      return [
+        item.sku,
+        item.identity_type,
+        ...item.missing_fields,
+        ...item.warnings,
+      ].some((value) => String(value || '').toLowerCase().includes(needle))
+    })
+  }, [readinessData, readinessSearch, readinessView])
+
+  const readinessPagedItems = useMemo(() => {
+    const start = readinessPage * readinessRowsPerPage
+    return readinessFilteredItems.slice(start, start + readinessRowsPerPage)
+  }, [readinessFilteredItems, readinessPage, readinessRowsPerPage])
 
   const handleToggleExpand = (productId: number) => {
     setExpandedRows((prev) => {
@@ -1240,6 +1286,37 @@ export default function InventoryManagement() {
                 />
               </Box>
 
+              <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
+                <FormControl size="small" sx={{ minWidth: 190 }}>
+                  <InputLabel id="readiness-view-label">Show</InputLabel>
+                  <Select
+                    labelId="readiness-view-label"
+                    label="Show"
+                    value={readinessView}
+                    onChange={(e) => {
+                      setReadinessView(e.target.value as ZohoReadinessView)
+                      setReadinessPage(0)
+                    }}
+                  >
+                    <MenuItem value="blocked">Blocked only</MenuItem>
+                    <MenuItem value="warnings">Warnings only</MenuItem>
+                    <MenuItem value="all">All checked items</MenuItem>
+                  </Select>
+                </FormControl>
+                <TextField
+                  size="small"
+                  label="Search in readiness"
+                  placeholder="SKU, type, warning, missing field"
+                  value={readinessSearch}
+                  onChange={(e) => {
+                    setReadinessSearch(e.target.value)
+                    setReadinessPage(0)
+                  }}
+                  sx={{ minWidth: 280, flex: 1 }}
+                />
+                <Chip label={`Visible: ${readinessFilteredItems.length}`} size="small" />
+              </Box>
+
               <Table size="small">
                 <TableHead>
                   <TableRow>
@@ -1251,7 +1328,7 @@ export default function InventoryManagement() {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {readinessData.items.slice(0, 25).map((item: ZohoReadinessItem) => (
+                  {readinessPagedItems.map((item: ZohoReadinessItem) => (
                     <TableRow key={item.variant_id}>
                       <TableCell>
                         <Typography variant="body2" fontFamily="monospace">
@@ -1270,8 +1347,30 @@ export default function InventoryManagement() {
                       <TableCell>{item.warnings.join(', ') || '-'}</TableCell>
                     </TableRow>
                   ))}
+                  {readinessPagedItems.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={5}>
+                        <Typography variant="body2" color="text.secondary">
+                          No items match the current readiness filter.
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  )}
                 </TableBody>
               </Table>
+
+              <TablePagination
+                component="div"
+                count={readinessFilteredItems.length}
+                page={readinessPage}
+                onPageChange={(_, nextPage) => setReadinessPage(nextPage)}
+                rowsPerPage={readinessRowsPerPage}
+                onRowsPerPageChange={(event) => {
+                  setReadinessRowsPerPage(parseInt(event.target.value, 10))
+                  setReadinessPage(0)
+                }}
+                rowsPerPageOptions={[10, 25, 50, 100]}
+              />
             </Box>
           ) : null}
         </DialogContent>
