@@ -26,12 +26,6 @@ class ZohoBulkSyncRequest(BaseModel):
         le=5000,
         description="Maximum number of variants processed in one request.",
     )
-    batch_size: int = Field(
-        default=100,
-        ge=1,
-        le=1000,
-        description="Number of variants processed per batch in bulk sync.",
-    )
 
 
 class ZohoSingleSyncRequest(BaseModel):

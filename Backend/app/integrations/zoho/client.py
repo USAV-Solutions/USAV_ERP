@@ -5,7 +5,6 @@ Handles sync between USAV Inventory and Zoho Inventory/Books.
 """
 from datetime import datetime
 from pathlib import Path
-from time import perf_counter
 from typing import List, Optional, Any
 import asyncio
 import logging
@@ -48,7 +47,6 @@ class ZohoClient:
     _shared_access_token: Optional[str] = None
     _shared_token_expires_at: Optional[datetime] = None
     _token_lock: asyncio.Lock = asyncio.Lock()
-    _request_sequence: int = 0
 
     def __init__(
         self,
@@ -163,12 +161,8 @@ class ZohoClient:
             if isinstance(data_payload, dict):
                 payload_keys = list(data_payload.keys())
 
-        ZohoClient._request_sequence += 1
-        request_id = ZohoClient._request_sequence
-
         logger.info(
-            "Zoho request start | request_id=%s method=%s endpoint=%s api=%s params=%s payload_mode=%s payload_keys=%s",
-            request_id,
+            "Zoho request | method=%s endpoint=%s api=%s params=%s payload_mode=%s payload_keys=%s",
             method,
             endpoint,
             api,
@@ -187,7 +181,6 @@ class ZohoClient:
                     headers.setdefault("Content-Type", "application/json")
                 request_headers = {**auth_headers, **headers}
 
-                started = perf_counter()
                 response = await client.request(
                     method,
                     url,
@@ -195,26 +188,11 @@ class ZohoClient:
                     params=params,
                     **kwargs
                 )
-                elapsed_ms = int((perf_counter() - started) * 1000)
-                logger.info(
-                    "Zoho request done | request_id=%s method=%s endpoint=%s status=%s elapsed_ms=%s attempt=%s",
-                    request_id,
-                    method,
-                    endpoint,
-                    response.status_code,
-                    elapsed_ms,
-                    attempt + 1,
-                )
 
                 if response.status_code in (429,):
                     retry_after_header = response.headers.get("Retry-After")
                     retry_after = int(retry_after_header) if retry_after_header and retry_after_header.isdigit() else 60
-                    logger.error(
-                        "Zoho API rate limit hit (429). request_id=%s retry_after=%ss endpoint=%s",
-                        request_id,
-                        retry_after,
-                        endpoint,
-                    )
+                    logger.error("Zoho API rate limit hit (429). Retry after %ss | endpoint=%s", retry_after, endpoint)
                     raise RateLimitError("Zoho API rate limit hit", retry_after)
 
                 # Zoho sometimes returns 400 with an Access Denied + too many requests message
@@ -222,8 +200,7 @@ class ZohoClient:
                     retry_after_header = response.headers.get("Retry-After")
                     retry_after = int(retry_after_header) if retry_after_header and retry_after_header.isdigit() else 60
                     logger.error(
-                        "Zoho API throttled (400 too many requests). request_id=%s retry_after=%ss endpoint=%s body=%s",
-                        request_id,
+                        "Zoho API throttled (400 too many requests). Retry after %ss | endpoint=%s body=%s",
                         retry_after,
                         endpoint,
                         response.text,
@@ -236,13 +213,7 @@ class ZohoClient:
                     continue
 
                 if response.status_code not in [200, 201]:
-                    logger.error(
-                        "Zoho API error | request_id=%s status=%s endpoint=%s body=%s",
-                        request_id,
-                        response.status_code,
-                        endpoint,
-                        response.text,
-                    )
+                    logger.error(f"Zoho API error: {response.status_code} - {response.text}")
                     raise Exception(f"Zoho API error: {response.text}")
 
                 return response.json()
