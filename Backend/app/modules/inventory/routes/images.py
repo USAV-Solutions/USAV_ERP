@@ -2,7 +2,7 @@
 Product Image API endpoints.
 
 Serves product variant images from /mnt/product_images/.
-Directory structure: /mnt/product_images/{generated_upis_h}/{full_sku}/listing-{n}/*.jpg
+Directory structure: /mnt/product_images/sku/{full_sku}/...
 
 For each SKU, the listing folder with the most images is selected as the
 "best" listing. The first sorted .jpg is used as the thumbnail.
@@ -103,26 +103,25 @@ async def _get_variant_context(db: AsyncSession, sku: str) -> Optional[VariantIm
 
 def _find_variant_dir(context: VariantImageContext) -> Optional[Path]:
     """
-    Resolve SKU to generated_upis_h via DB and return expected variant image dir:
-    /mnt/product_images/{generated_upis_h}/{full_sku}
+    Resolve SKU and return expected canonical variant image dir:
+    /mnt/product_images/sku/{full_sku}
     """
     if not IMAGES_ROOT.is_dir():
         logger.warning("[IMAGE_SEARCH] Image root directory does not exist: %s", IMAGES_ROOT)
         return None
 
-    variant_dir = IMAGES_ROOT / context.generated_upis_h / context.full_sku
+    variant_dir = IMAGES_ROOT / "sku" / context.full_sku
     logger.info(
-        "[IMAGE_DEBUG] Resolved variant path for sku=%s -> upis_h=%s full_sku=%s path=%s",
+        "[IMAGE_DEBUG] Resolved canonical variant path for sku=%s -> upis_h=%s path=%s",
         context.full_sku,
         context.generated_upis_h,
-        context.full_sku,
         variant_dir,
     )
     if variant_dir.is_dir():
         logger.info("[IMAGE_SEARCH] Found variant directory: %s", variant_dir)
         return variant_dir
 
-    logger.warning("[IMAGE_SEARCH] Variant directory not found: %s", variant_dir)
+    logger.warning("[IMAGE_SEARCH] Variant directory not found for sku=%s at %s", context.full_sku, variant_dir)
     return None
 
 
@@ -158,7 +157,8 @@ def _get_best_listing(variant_dir: Path) -> Optional[tuple[str, Path]]:
     best_count = 0
     listing_counts = {}
 
-    for entry in _iter_listing_dirs(variant_dir):
+    listing_dirs = _iter_listing_dirs(variant_dir)
+    for entry in listing_dirs:
         img_count = sum(
             1 for f in entry.iterdir()
             if f.is_file() and f.suffix.lower() in IMAGE_EXTENSION
@@ -175,6 +175,16 @@ def _get_best_listing(variant_dir: Path) -> Optional[tuple[str, Path]]:
     if best_listing and best_path:
         logger.info(f"[IMAGE_SEARCH] ✓ Best listing: {best_listing} with {best_count} images")
         return best_listing, best_path
+
+    if not listing_dirs:
+        flat_images = _sorted_images(variant_dir)
+        if flat_images:
+            logger.info(
+                "[IMAGE_SEARCH] Using flattened SKU image layout in %s with %s images",
+                variant_dir,
+                len(flat_images),
+            )
+            return "flat", variant_dir
     
     logger.warning(f"[IMAGE_SEARCH] ✗ No valid listings found in {variant_dir}")
     return None
@@ -201,7 +211,9 @@ def _build_public_thumbnail_url(
     image_filename: str,
 ) -> str:
     """Build direct Nginx-served URL for a thumbnail image."""
-    return f"/product-images/{context.generated_upis_h}/{context.full_sku}/{listing_name}/{image_filename}"
+    if listing_name == "flat":
+        return f"/product-images/sku/{context.full_sku}/{image_filename}"
+    return f"/product-images/sku/{context.full_sku}/{listing_name}/{image_filename}"
 async def _recompute_thumbnail_url(
     db: AsyncSession,
     context: VariantImageContext,
@@ -324,7 +336,7 @@ def _ensure_listing_dir(context: VariantImageContext, listing_index: int) -> Pat
             detail=f"Image root directory does not exist: {IMAGES_ROOT}",
         )
 
-    listing_dir = IMAGES_ROOT / context.generated_upis_h / context.full_sku / f"listing-{listing_index}"
+    listing_dir = IMAGES_ROOT / "sku" / context.full_sku / f"listing-{listing_index}"
     listing_dir.mkdir(parents=True, exist_ok=True)
     return listing_dir
 

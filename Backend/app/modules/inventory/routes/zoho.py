@@ -111,12 +111,12 @@ def _resolve_thumbnail_path(thumbnail_url: str | None) -> Path | None:
     if not thumbnail_url:
         logger.info("Zoho image resolve thumbnail: no thumbnail_url provided")
         return None
-    prefix = "/product-images/"
+    prefix = "/product-images/sku/"
     if not thumbnail_url.startswith(prefix):
         logger.info("Zoho image resolve thumbnail: unexpected URL format | thumbnail_url=%s", thumbnail_url)
         return None
     relative = thumbnail_url[len(prefix):].lstrip("/")
-    full_path = Path(settings.product_images_path) / relative
+    full_path = Path(settings.product_images_path) / "sku" / relative
     if full_path.is_file():
         logger.info("Zoho image resolve thumbnail: found file | path=%s", full_path)
         return full_path
@@ -125,17 +125,7 @@ def _resolve_thumbnail_path(thumbnail_url: str | None) -> Path | None:
 
 
 def _resolve_best_listing_image_paths(variant: ProductVariant) -> list[Path]:
-    identity = variant.identity
-    if identity is None or not identity.generated_upis_h:
-        logger.info(
-            "Zoho image resolve best-listing: missing identity context | variant_id=%s sku=%s identity_present=%s",
-            variant.id,
-            variant.full_sku,
-            identity is not None,
-        )
-        return []
-
-    variant_dir = Path(settings.product_images_path) / identity.generated_upis_h / variant.full_sku
+    variant_dir = Path(settings.product_images_path) / "sku" / variant.full_sku
     if not variant_dir.is_dir():
         logger.info(
             "Zoho image resolve best-listing: variant dir not found | variant_id=%s sku=%s path=%s",
@@ -214,6 +204,40 @@ def _resolve_best_listing_image_paths(variant: ProductVariant) -> list[Path]:
     return images
 
 
+def _resolve_flattened_image_paths(variant: ProductVariant) -> list[Path]:
+    sku_dir = Path(settings.product_images_path) / "sku" / variant.full_sku
+    if not sku_dir.is_dir():
+        logger.info(
+            "Zoho image resolve flattened: sku dir not found | variant_id=%s sku=%s path=%s",
+            variant.id,
+            variant.full_sku,
+            sku_dir,
+        )
+        return []
+
+    images = sorted(
+        file
+        for file in sku_dir.iterdir()
+        if file.is_file() and file.suffix.lower() in _IMAGE_EXTENSIONS and file.name.startswith("img-")
+    )
+    if not images:
+        logger.info(
+            "Zoho image resolve flattened: no supported images | variant_id=%s sku=%s",
+            variant.id,
+            variant.full_sku,
+        )
+        return []
+
+    logger.info(
+        "Zoho image source selected from flattened SKU folder | variant_id=%s sku=%s count=%s images=%s",
+        variant.id,
+        variant.full_sku,
+        len(images),
+        [image.name for image in images],
+    )
+    return images
+
+
 def _resolve_sync_image_paths(variant: ProductVariant) -> list[Path]:
     best_listing_images = _resolve_best_listing_image_paths(variant)
     if best_listing_images:
@@ -224,6 +248,16 @@ def _resolve_sync_image_paths(variant: ProductVariant) -> list[Path]:
             len(best_listing_images),
         )
         return best_listing_images
+
+    flattened_images = _resolve_flattened_image_paths(variant)
+    if flattened_images:
+        logger.info(
+            "Zoho image resolve final: using flattened SKU images | variant_id=%s sku=%s count=%s",
+            variant.id,
+            variant.full_sku,
+            len(flattened_images),
+        )
+        return flattened_images
 
     thumbnail_image = _resolve_thumbnail_path(variant.thumbnail_url)
     if thumbnail_image:

@@ -211,13 +211,20 @@ Backend/
 │       ├── 20260303_..._0010_rename_order_table.py
 │       ├── 20260307_..._0011_add_order_zoho_sync_status.py
 │       ├── 20260310_..._0012_add_purchasing_module.py
-│       └── 20260311_..._0013_add_shipping_status.py
+│       ├── 20260311_..._0013_add_shipping_status.py
+│       └── 20260323_..._0018_add_family_code_identity_name_and_used_condition.py
 │
 ├── scripts/
 │   ├── backfill_variant_name_from_listings.py   # Populate variant_name from listings
+│   ├── backfill_bundle_default_variants.py      # Repairs missing default bundle variants
 │   ├── create_admin_user.sql                    # SQL to seed admin user
+│   ├── download_image_candidates.py             # Downloads extracted image URLs into temp platform folders
+│   ├── flatten_and_dedupe.py                    # pHash-based visual dedupe + flattening per SKU
 │   ├── generate_hash.py                         # bcrypt password hash utility
+│   ├── generate_image_tasks.py                  # Exports listing-backed SKU image tasks from DB
 │   ├── import_csv_to_database.py               # CSV→API product import pipeline
+│   ├── import_databasework_restart.py           # Direct DB restart importer (products/parts/bundles)
+│   ├── sync_thumbnails_to_db.py                 # Writes flattened primary image URLs to ProductVariant.thumbnail_url
 │   └── test_api_manual.py                       # Manual API smoke tests
 │
 └── tests/
@@ -388,7 +395,7 @@ Backend/
   **Enums (7):**
   - `IdentityType` — Product, B (Bundle), P (Part), K (Kit).
   - `PhysicalClass` — E (Electronics), C (Cover/Case), P (Peripheral), S (Speaker), W (Wire/Cable), A (Accessory).
-  - `ConditionCode` — N (New), R (Refurbished); NULL = Used.
+  - `ConditionCode` — N (New), R (Refurbished), U (Used), plus nullable where defaults are desired.
   - `ZohoSyncStatus` — PENDING, SYNCED, ERROR, DIRTY.
   - `PlatformSyncStatus` — PENDING, SYNCED, ERROR.
   - `InventoryStatus` — AVAILABLE, SOLD, RESERVED, RMA, DAMAGED.
@@ -406,8 +413,8 @@ Backend/
   - `LCIDefinition` — `id`, `product_id` (FK→ProductFamily), `lci_index` (1-99), `component_name`. Maps component indexes to names per family.
 
   **Core Product Tables (3):**
-  - `ProductFamily` — PK: `product_id` (5-digit ECWID ID). Fields: `base_name`, `description`, `brand_id` (FK), dimensions (L×W×H), `weight`, `kit_included_products`. Relationships: `brand`, `identities` (cascade), `lci_definitions` (cascade).
-  - `ProductIdentity` — PK: `id`. Fields: `product_id` (FK→Family), `type` (IdentityType enum), `lci` (Part only), `physical_class`, `generated_upis_h` (unique computed string like `00845-P-1`), `hex_signature` (immutable 32-bit HEX). Constraints: LCI required for Parts, null for others; unique per family+type+lci. Relationships: `family`, `variants` (cascade), `bundle_children`/`bundle_parents`.
+  - `ProductFamily` — PK: `product_id` (5-digit ECWID ID). Fields: `family_code` (unique, zero-padded product_id), `base_name`, `description`, `brand_id` (FK), dimensions (L×W×H), `weight`, `kit_included_products`. Relationships: `brand`, `identities` (cascade), `lci_definitions` (cascade).
+  - `ProductIdentity` — PK: `id`. Fields: `product_id` (FK→Family), `type` (IdentityType enum), `lci` (Part only), `physical_class`, `identity_name` (optional human-readable identity), `generated_upis_h` (unique computed string like `00845-P-1`), `hex_signature` (immutable 32-bit HEX). Constraints: LCI required for Parts, null for others; unique per family+type+lci. Relationships: `family`, `variants` (cascade), `bundle_children`/`bundle_parents`.
   - `ProductVariant` — PK: `id`. Fields: `identity_id` (FK), `color_code`, `condition_code`, `full_sku` (unique, e.g. `00845-P-1-WY-N`), `variant_name`, `zoho_item_id`, `thumbnail_url`, `zoho_sync_status`, `zoho_last_synced_at`, `is_active`, `zoho_last_sync_hash`, `zoho_sync_error`. Relationships: `identity`, `listings` (cascade), `inventory_items` (cascade). Unique constraint on identity+color+condition.
 
   **Composition Tables (1):**
@@ -550,7 +557,7 @@ Backend/
   - `POST /identities` — Validates family exists; for type=P, validates LCI is provided; generates `generated_upis_h` string (e.g. `00845-P-1`) and `hex_signature` (CRC32 of UPIS-H).
   - `GET /identities/{id}` — Returns identity with loaded variants.
   - `GET /identities/upis/{upis_h}` — Lookup by UPIS-H string.
-  - `PUT/PATCH /identities/{id}` — Only `physical_class` is updatable after creation (identity is quasi-immutable).
+  - `PUT/PATCH /identities/{id}` — Supports updates to `identity_name` and `physical_class` (UPIS-H and hex signature remain immutable).
   - `DELETE /identities/{id}` — Cascade delete.
 
 ---
@@ -562,13 +569,13 @@ Backend/
   - Internal: `app.repositories.product` (ProductIdentityRepository, ProductVariantRepository), `app.models.entities.ZohoSyncStatus`, inventory schemas.
 * **Mechanism / Core Logic:**
   - `GET /variants/search` — Typeahead search by product name or SKU substring.
-  - `GET /variants` — List with optional filters: `identity_id`, `is_active`, `zoho_sync_status`.
+  - `GET /variants` — List with optional filters: `identity_id`, `is_active`, `zoho_sync_status`; default behavior returns active variants unless explicitly overridden.
   - `POST /variants` — Validates identity exists; auto-generates `full_sku` from identity's UPIS-H + color + condition (e.g. `00845-P-1-WY-N`). Sets `zoho_sync_status=PENDING`.
   - `GET /variants/{id}` — Returns variant with loaded platform listings.
   - `GET /variants/sku/{full_sku}` — SKU-based lookup.
   - `PUT/PATCH /variants/{id}` — Updates mutable variant fields (`variant_name`, `color_code`, `condition_code`, `is_active`). If color/condition changes, the API validates identity-level uniqueness and recomputes `full_sku`.
   - Local variant edits mark `zoho_sync_status=DIRTY` (except initial pending variants without a Zoho item), so Zoho outbound sync can reconcile edits.
-  - `DELETE /variants/{id}` — Soft-delete archive: sets `is_active=false`, renames SKU to `D-{old_sku}` (collision-safe suffix fallback), and clears `color_code`/`condition_code` to free identity+color+condition reuse.
+  - `DELETE /variants/{id}` — Soft-delete archive: sets `is_active=false`, renames SKU to `D-{old_sku}` (collision-safe suffix fallback), and clears `color_code`/`condition_code` to free identity+color+condition reuse; returns conflict if already deleted.
   - `POST /variants/{id}/deactivate` — Soft-delete (sets `is_active=False`).
   - `GET /variants/pending-sync/zoho` — Returns all variants where `zoho_sync_status != SYNCED`.
 
@@ -895,7 +902,7 @@ Backend/
   2. **Calculate fetch window** — `last_successful_sync - 10 minutes` buffer (or default to 2026-01-01 for first sync).
   3. **Fetch orders** — Calls `client.fetch_orders(since=fetch_since)` on the external adapter.
   4. **Ingest idempotently** — For each `ExternalOrder`, checks for existing order via `platform + external_order_id` unique constraint. Skips duplicates silently.
-  5. **Auto-match items** — For each order item: looks up `PlatformListing` by `(platform, external_ref_id)` or `(platform, external_sku)`. If found, links `variant_id` and sets status to MATCHED.
+  5. **Auto-match items** — For each order item: looks up `PlatformListing` by `(platform, external_ref_id)` or `(platform, external_sku)` and listing-name fallback. Auto-match paths are restricted to active variants so archived/deleted variants are not re-linked.
   6. **Commit & release lock** — On success: `SYNCING → IDLE`, updates `last_successful_sync`. On failure: `SYNCING → ERROR` with error message.
 
   **Admin Range Sync (`sync_platform_range()`):**
@@ -979,7 +986,7 @@ Backend/
   - `POST /purchases/items/{item_id}/match` — Manually match a PO line item to a product variant.
   - `DELETE /purchases/items/{item_id}` — Delete a PO line item; rejects deletion for `RECEIVED` items.
   - `POST /purchases/{po_id}/mark-delivered` — Receive PO items into inventory and mark PO delivered.
-  - `POST /purchases/import/zoho` — Bulk vendor + PO import from Zoho.
+  - `POST /purchases/import/zoho` — Bulk vendor + PO import from Zoho (SKU and Zoho item-id matching only attaches to active variants).
   - `POST /purchases/import/zoho/random-one` — Random single PO import for test validation, with fallback probing across pages when the selected page has no results.
   - `POST /purchases/import/file?source={goodwill|amazon|aliexpress}` — Source-based file import:
     - `source=goodwill` — Goodwill CSV parser (legacy columns: Order #, Item Id, Item, Quantity, Price, Date, Tracking #, Tax, Shipping, Handling).
@@ -1127,7 +1134,7 @@ Backend/
 * **Mechanism / Core Logic:**
 
   **Payload builders:**
-  - `variant_to_zoho_payload(variant)` — Builds Zoho item dict from ProductVariant (name, SKU, description, rate, etc.).
+  - `variant_to_zoho_payload(variant)` — Builds Zoho item dict from ProductVariant (name, SKU, description, rate, etc.) with defensive handling for listing collections.
   - `customer_to_zoho_payload(customer)` — Builds Zoho contact dict from Customer.
   - `order_to_zoho_payload(order, customer_zoho_id, line_items)` — Builds Zoho SalesOrder dict with dependency-aware line items.
   - `_sanitize_shipping_address(order)` — Trims address fields to Zoho character limits.
@@ -1334,6 +1341,28 @@ Backend/
 
 * **Purpose:** Bulk product import pipeline parsing CSV files and populating the database via API endpoints.
 * **Dependencies & Links:** `httpx`, `csv`, API endpoints.
+
+---
+
+### `backfill_bundle_default_variants.py` (Path: `scripts/backfill_bundle_default_variants.py`)
+
+* **Purpose:** Idempotent maintenance script that repairs legacy bundle identities missing a default variant (color/condition null).
+* **Dependencies & Links:** Async DB session + restart importer repair helper.
+* **Mechanism / Core Logic:**
+  - Counts orphan bundle identities before/after run.
+  - Invokes importer-level bundle default repair logic.
+  - Supports `--dry-run` rollback mode.
+
+---
+
+### `import_databasework_restart.py` (Path: `scripts/import_databasework_restart.py`)
+
+* **Purpose:** Direct-to-database restart importer for DatabaseWork CSV in three passes (products, parts, bundles).
+* **Dependencies & Links:** SQLAlchemy async session, product/inventory repositories, platform listing mapping.
+* **Mechanism / Core Logic:**
+  - Creates/normalizes `family_code`, `identity_name`, UPIS-H, and variant SKU composition.
+  - Supports explicit condition code U and default variant creation.
+  - Repairs missing bundle default variants and emits verification summary (duplicate SKUs, missing defaults, duplicate part LCIs, orphan/inactive bundle defaults).
 * **Mechanism / Core Logic:**
   - `CSVRow` — Dataclass representing a parsed CSV row.
   - `ProductGroup` — Container for grouped product data (family, identities, variants, parts, bundles).
