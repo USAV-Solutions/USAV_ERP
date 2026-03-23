@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # Allow running as: python scripts/import_databasework_restart.py
@@ -179,7 +179,8 @@ class RestartImporter:
         self.variant_repo = ProductVariantRepository(session)
         self.dry_run = dry_run
         self.stats = Stats()
-        self._bundle_next_family_id: Optional[int] = None
+        self._family_by_group_id: dict[int, ProductFamily] = {}
+        self._temp_family_code_counter = 0
 
     async def run(self, groups: list[GroupBucket]) -> None:
         # Pass 1: products + parts.
@@ -255,10 +256,7 @@ class RestartImporter:
         if not bundle_rows:
             return
 
-        source_family = await self.session.get(ProductFamily, group.group_id)
-        if source_family is None:
-            # A group with only bundles still needs a source family for component creation.
-            source_family = await self._get_or_create_family(group.group_id, group.group_name)
+        source_family = await self._get_or_create_family(group.group_id, group.group_name)
 
         # Bundle rows can have different included component configurations.
         rows_by_components: dict[tuple[str, ...], list[CsvRow]] = defaultdict(list)
@@ -296,21 +294,41 @@ class RestartImporter:
             for row in rows:
                 await self._get_or_create_listing(bundle_variant, row)
 
-    async def _get_or_create_family(self, product_id: int, base_name: str) -> ProductFamily:
-        family = await self.session.get(ProductFamily, product_id)
-        code = format_family_code(product_id)
-        if family is not None:
-            if family.family_code != code:
-                family.family_code = code
-            if not family.base_name:
-                family.base_name = base_name
-            return family
+    async def _next_temp_family_code(self) -> str:
+        self._temp_family_code_counter += 1
+        return f"z{self._temp_family_code_counter:04d}"
 
-        family = ProductFamily(product_id=product_id, family_code=code, base_name=base_name)
+    async def _create_family_auto(self, base_name: str) -> ProductFamily:
+        # Insert with temporary unique code first; replace with canonical code after DB assigns product_id.
+        family = ProductFamily(base_name=base_name, family_code=await self._next_temp_family_code())
         self.session.add(family)
         await self.session.flush()
+
+        family.family_code = format_family_code(family.product_id)
+        await self.session.flush()
+
         self.stats.families_created += 1
         return family
+
+    async def _get_or_create_family(self, group_id: int, base_name: str) -> ProductFamily:
+        cached = self._family_by_group_id.get(group_id)
+        if cached is not None:
+            return cached
+
+        stmt = (
+            select(ProductFamily)
+            .where(ProductFamily.base_name == base_name)
+            .order_by(ProductFamily.product_id)
+            .limit(1)
+        )
+        existing = (await self.session.execute(stmt)).scalar_one_or_none()
+        if existing is not None:
+            self._family_by_group_id[group_id] = existing
+            return existing
+
+        created = await self._create_family_auto(base_name)
+        self._family_by_group_id[group_id] = created
+        return created
 
     async def _get_or_create_product_identity(self, family: ProductFamily, group_name: str) -> ProductIdentity:
         stmt = (
@@ -615,15 +633,6 @@ class RestartImporter:
             return components[0].strip()
         return f"{components[0].strip()} with {', '.join(c.strip() for c in components[1:])}"
 
-    async def _next_bundle_family_id(self) -> int:
-        if self._bundle_next_family_id is None:
-            stmt = select(func.coalesce(func.max(ProductFamily.product_id), 0) + 1)
-            self._bundle_next_family_id = int((await self.session.execute(stmt)).scalar_one())
-            return self._bundle_next_family_id
-
-        self._bundle_next_family_id += 1
-        return self._bundle_next_family_id
-
     async def _get_or_create_bundle_family(self, bundle_name: str) -> ProductFamily:
         existing_stmt = (
             select(ProductFamily)
@@ -634,15 +643,8 @@ class RestartImporter:
         if existing is not None:
             return existing
 
-        return await self._create_bundle_family(bundle_name)
-
-    async def _create_bundle_family(self, bundle_name: str) -> ProductFamily:
-        next_id = await self._next_bundle_family_id()
-        family = ProductFamily(product_id=next_id, family_code=format_family_code(next_id), base_name=bundle_name)
-        self.session.add(family)
-        await self.session.flush()
+        family = await self._create_family_auto(bundle_name)
         self.stats.bundle_families_created += 1
-        self.stats.families_created += 1
         return family
 
     async def _create_bundle_identity(self, family: ProductFamily, bundle_name: str) -> ProductIdentity:
@@ -866,18 +868,58 @@ async def run_import(csv_path: Path, dry_run: bool, group_limit: Optional[int]) 
         print_stats(importer.stats)
 
 
+async def reset_product_family_sequence(session: AsyncSession) -> None:
+    """Align product_family sequence to max(product_id)+1."""
+    seq_name = (
+        await session.execute(
+            select(func.pg_get_serial_sequence("product_family", "product_id"))
+        )
+    ).scalar_one_or_none()
+
+    if not seq_name:
+        print("No serial sequence found for product_family.product_id; skipping sequence reset.")
+        return
+
+    max_id = (
+        await session.execute(select(func.coalesce(func.max(ProductFamily.product_id), 0)))
+    ).scalar_one()
+    next_value = int(max_id) + 1
+
+    await session.execute(
+        text(f"SELECT setval('{seq_name}', :next_value, false)"),
+        {"next_value": next_value},
+    )
+    print(f"Reset sequence {seq_name} -> next value {next_value}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Restart import DatabaseWork CSV directly into DB")
     parser.add_argument("--csv-path", default=str(DEFAULT_CSV_PATH), help="Path to DatabaseWork CSV")
     parser.add_argument("--dry-run", action="store_true", help="Run without persisting DB changes")
     parser.add_argument("--limit-groups", type=int, default=None, help="Process only first N groups")
+    parser.add_argument(
+        "--reset-family-sequence",
+        action="store_true",
+        help="Reset product_family auto-increment sequence before import",
+    )
     args = parser.parse_args()
 
     csv_path = Path(args.csv_path)
     if not csv_path.exists():
         raise SystemExit(f"CSV path not found: {csv_path}")
 
-    asyncio.run(run_import(csv_path, args.dry_run, args.limit_groups))
+    async def _runner() -> None:
+        if args.reset_family_sequence:
+            async with async_session_factory() as session:
+                await reset_product_family_sequence(session)
+                if args.dry_run:
+                    await session.rollback()
+                else:
+                    await session.commit()
+
+        await run_import(csv_path, args.dry_run, args.limit_groups)
+
+    asyncio.run(_runner())
 
 
 if __name__ == "__main__":
