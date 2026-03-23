@@ -517,6 +517,7 @@ export default function PurchasingManagement() {
     po_number: '',
     vendor_id: 0,
     order_date: new Date().toISOString().slice(0, 10),
+    tracking_number: '',
     total_amount: 0,
     tax_amount: 0,
     shipping_amount: 0,
@@ -582,6 +583,7 @@ export default function PurchasingManagement() {
         po_number: '',
         vendor_id: 0,
         order_date: new Date().toISOString().slice(0, 10),
+        tracking_number: '',
         total_amount: 0,
         tax_amount: 0,
         shipping_amount: 0,
@@ -1150,7 +1152,11 @@ export default function PurchasingManagement() {
                   setPoForm((prev) => ({ ...prev, vendor_id: nextVendor?.id || 0 }))
                   setVendorSearchInput(nextVendor?.name || '')
                 }}
-                onInputChange={(_event, nextInput) => {
+                onInputChange={(_event, nextInput, reason) => {
+                  // Prevent losing typed vendor names when focus shifts to "Create Vendor".
+                  if ((reason === 'reset' || reason === 'blur') && !nextInput && !selectedVendor) {
+                    return
+                  }
                   setVendorSearchInput(nextInput)
                   const normalizedInput = nextInput.trim().toLowerCase()
                   const matched = vendors.find((vendor) =>
@@ -1168,6 +1174,7 @@ export default function PurchasingManagement() {
                 disabled={
                   createVendorInlineMutation.isPending || !vendorSearchInput.trim() || vendorNameExists
                 }
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() =>
                   createVendorInlineMutation.mutate({
                     name: vendorSearchInput.trim(),
@@ -1195,6 +1202,12 @@ export default function PurchasingManagement() {
                 setPoForm((prev) => ({ ...prev, expected_delivery_date: e.target.value || undefined }))
               }
               InputLabelProps={{ shrink: true }}
+            />
+            <TextField
+              label="Tracking #"
+              value={poForm.tracking_number || ''}
+              onChange={(e) => setPoForm((prev) => ({ ...prev, tracking_number: e.target.value }))}
+              placeholder="Optional tracking number"
             />
             <TextField
               label="Total Amount"
@@ -1244,7 +1257,12 @@ export default function PurchasingManagement() {
           <Button
             variant="contained"
             disabled={!poForm.po_number || !poForm.vendor_id || !poForm.order_date}
-            onClick={() => createPoMutation.mutate(poForm)}
+            onClick={() =>
+              createPoMutation.mutate({
+                ...poForm,
+                tracking_number: poForm.tracking_number?.trim() || undefined,
+              })
+            }
           >
             Create
           </Button>
