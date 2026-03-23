@@ -27,6 +27,7 @@ import asyncio
 import json
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -205,6 +206,15 @@ def _parse_platforms(raw: str | None) -> set[str] | None:
     return parsed or None
 
 
+def _format_duration(seconds: float) -> str:
+    total_seconds = max(0, int(seconds))
+    hours, rem = divmod(total_seconds, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours > 0:
+        return f"{hours}h {minutes:02d}m {secs:02d}s"
+    return f"{minutes:02d}m {secs:02d}s"
+
+
 async def _run(args: argparse.Namespace) -> None:
     input_path = Path(args.input)
     output_path = Path(args.output)
@@ -216,6 +226,8 @@ async def _run(args: argparse.Namespace) -> None:
 
     if args.limit is not None:
         rows = rows[: args.limit]
+
+    total_rows = len(rows)
 
     listing_ids = [
         int(row["listing_id"])
@@ -237,8 +249,13 @@ async def _run(args: argparse.Namespace) -> None:
         "from_ebay": 0,
     }
 
+    started_at = time.perf_counter()
+    processed = 0
+    progress_every = max(1, int(args.progress_every))
+
     for row in rows:
         stats["tasks"] += 1
+        processed += 1
 
         sku = (row.get("sku") or "").strip()
         platform = (row.get("platform") or "").strip().upper()
@@ -302,6 +319,21 @@ async def _run(args: argparse.Namespace) -> None:
         if args.delay_ms > 0:
             await asyncio.sleep(args.delay_ms / 1000.0)
 
+        if processed % progress_every == 0 or processed == total_rows:
+            elapsed = time.perf_counter() - started_at
+            rate = processed / elapsed if elapsed > 0 else 0.0
+            remaining = max(0, total_rows - processed)
+            eta_seconds = (remaining / rate) if rate > 0 else 0.0
+            print(
+                "Progress: "
+                f"{processed}/{total_rows} "
+                f"({(processed / total_rows * 100.0) if total_rows else 100.0:.1f}%) | "
+                f"elapsed={_format_duration(elapsed)} | "
+                f"rate={rate:.2f} rows/s | "
+                f"eta={_format_duration(eta_seconds)} | "
+                f"with_urls={stats['with_urls']} empty={stats['empty']}"
+            )
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(output_rows, indent=2), encoding="utf-8")
 
@@ -327,6 +359,7 @@ def main() -> None:
     parser.add_argument("--fetch-ecwid", action="store_true", help="Call Ecwid Product API for ECWID tasks")
     parser.add_argument("--fetch-ebay", action="store_true", help="Call eBay Browse API for EBAY_* tasks")
     parser.add_argument("--delay-ms", type=int, default=0, help="Delay between row fetches in milliseconds")
+    parser.add_argument("--progress-every", type=int, default=50, help="Print progress every N rows")
 
     args = parser.parse_args()
     asyncio.run(_run(args))

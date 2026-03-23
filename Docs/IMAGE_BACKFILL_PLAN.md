@@ -72,7 +72,7 @@ Implementation recommendation:
 Current implementation command:
 
 ```bash
-python scripts/build_image_url_candidates.py --input scripts/image_tasks.json --output scripts/image_url_candidates.json --include-platform-metadata --fetch-ecwid --fetch-ebay --delay-ms 100
+python scripts/build_image_url_candidates.py --input scripts/image_tasks.json --output scripts/image_url_candidates.json --include-platform-metadata --fetch-ecwid --fetch-ebay --delay-ms 100 --progress-every 25
 ```
 
 Amazon fallback extractor (best-effort HTML scraping):
