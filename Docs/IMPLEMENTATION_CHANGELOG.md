@@ -97,7 +97,6 @@ This migration:
 	- `zoho_po_cf_tax_id`
 	- `zoho_po_cf_shipping_fee_id`
 	- `zoho_po_cf_handling_fee_id`
-- Added test-focused import endpoint `POST /api/v1/purchases/import/zoho/random-one` to import a single random Zoho Purchase Order from a chosen source page.
 
 ### New Lookup Endpoints
 
@@ -169,7 +168,6 @@ This migration:
 - Moved the Create Vendor action to the right side of the vendor search field for faster access while creating a PO.
 - Extended Create PO form with `tax_amount`, `shipping_amount`, and `handling_amount` inputs.
 - Added per-PO **Add New Item** toggles so inline line-item create forms stay hidden until requested.
-- Added Purchasing header action **Import 1 Random PO** that triggers test-focused import of a single random Zoho purchase order.
 - Added server-side pagination to Purchasing list (MUI `TablePagination`, aligned with Orders/Inventory page behavior).
 - Added reusable frontend pagination component `TablePaginationWithPageJump` and applied it to Orders + Purchasing pages.
 - Added direct page-number jump (`Page` input + `Go`) to Orders + Purchasing list pagination.

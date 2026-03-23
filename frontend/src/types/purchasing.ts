@@ -131,12 +131,6 @@ export interface ZohoPurchaseImportResponse {
   source_purchase_orders_seen: number
 }
 
-export interface ZohoSinglePurchaseImportResponse extends ZohoPurchaseImportResponse {
-  selected_source_page: number
-  selected_zoho_purchase_order_id: string
-  selected_po_number: string
-}
-
 export type PurchaseFileImportSource = 'goodwill' | 'amazon' | 'aliexpress'
 
 export interface PurchaseFileImportResponse {

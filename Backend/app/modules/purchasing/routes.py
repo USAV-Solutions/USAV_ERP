@@ -2,7 +2,6 @@
 import csv
 import io
 import json
-import random
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated
@@ -35,7 +34,6 @@ from app.modules.purchasing.schemas import (
     PurchaseOrderReceiveRequest,
     PurchaseOrderReceiveResponse,
     PurchaseOrderResponse,
-    ZohoSinglePurchaseImportResponse,
     VendorCreate,
     VendorResponse,
     VendorUpdate,
@@ -93,6 +91,15 @@ def _to_date_or_none(value: object) -> date | None:
                 except ValueError:
                     continue
     return None
+
+
+def _resolve_zoho_external_item_name(existing_name: str | None) -> str:
+    """Use preserved local naming and never source line names from Zoho payload."""
+    preserved_name = str(existing_name or "").strip()
+    if preserved_name:
+        return preserved_name[:255]
+
+    return "Imported Item"
 
 
 def _decode_upload_text(raw: bytes) -> str:
@@ -533,6 +540,12 @@ async def import_purchasing_from_zoho(
     db: AsyncSession = Depends(get_db),
 ):
     """Import vendors and purchase orders from Zoho into local purchasing tables."""
+    if order_date_from is None or order_date_to is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="order_date_from and order_date_to are required",
+        )
+
     if order_date_from and order_date_to and order_date_from > order_date_to:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -651,10 +664,7 @@ async def import_purchasing_from_zoho(
             )
 
             if order_date_value is None:
-                # With a date range selected, unknown-date records should not be imported.
-                if order_date_from is not None or order_date_to is not None:
-                    continue
-                order_date_value = date.today()
+                continue
             if order_date_from is not None and order_date_value < order_date_from:
                 continue
             if order_date_to is not None and order_date_value > order_date_to:
@@ -706,13 +716,30 @@ async def import_purchasing_from_zoho(
                 await db.flush()
                 result.purchase_orders_updated += 1
 
+            existing_item_names_by_external_id: dict[str, str] = {}
+            existing_item_names_by_position: list[str] = []
+            existing_items = await db.execute(
+                select(
+                    PurchaseOrderItem.external_item_id,
+                    PurchaseOrderItem.external_item_name,
+                )
+                .where(PurchaseOrderItem.purchase_order_id == local_po.id)
+                .order_by(PurchaseOrderItem.id.asc())
+            )
+            for existing_external_item_id, existing_external_item_name in existing_items.all():
+                normalized_existing_name = str(existing_external_item_name or "").strip()
+                if normalized_existing_name:
+                    existing_item_names_by_position.append(normalized_existing_name)
+                    if existing_external_item_id:
+                        existing_item_names_by_external_id[existing_external_item_id] = normalized_existing_name
+
             # Replace all local line-items with Zoho line-items for deterministic import.
             await db.execute(
                 delete(PurchaseOrderItem).where(PurchaseOrderItem.purchase_order_id == local_po.id)
             )
 
             line_items = zoho_po_detail.get("line_items", []) or zoho_po.get("line_items", []) or []
-            for line in line_items:
+            for line_index, line in enumerate(line_items):
                 qty = int(line.get("quantity") or 0)
                 unit_price = _to_decimal(line.get("rate") or line.get("item_total") or 0)
                 total_price = _to_decimal(line.get("item_total") or (unit_price * qty))
@@ -738,12 +765,25 @@ async def import_purchasing_from_zoho(
                         if matched_variant is not None and not matched_variant.is_active:
                             matched_variant = None
 
+                external_item_id = (
+                    str(line.get("line_item_id") or line.get("item_id") or line_sku or "").strip() or None
+                )
+                preserved_item_name = (
+                    existing_item_names_by_external_id.get(external_item_id)
+                    if external_item_id is not None
+                    else None
+                )
+                if preserved_item_name is None and line_index < len(existing_item_names_by_position):
+                    preserved_item_name = existing_item_names_by_position[line_index]
+
                 await po_item_repo.create(
                     {
                         "purchase_order_id": local_po.id,
                         "variant_id": matched_variant.id if matched_variant else None,
-                        "external_item_id": str(line.get("line_item_id") or line.get("item_id") or line_sku or "").strip() or None,
-                        "external_item_name": str(line.get("name") or line.get("item_name") or "Unknown item")[:255],
+                        "external_item_id": external_item_id,
+                        "external_item_name": _resolve_zoho_external_item_name(
+                            existing_name=preserved_item_name,
+                        ),
                         "quantity": qty,
                         "unit_price": unit_price,
                         "total_price": total_price,
@@ -762,231 +802,6 @@ async def import_purchasing_from_zoho(
 
     await db.commit()
     return result
-
-
-@router.post("/purchases/import/zoho/random-one", response_model=ZohoSinglePurchaseImportResponse)
-async def import_single_random_purchase_from_zoho(
-    _current_user: CurrentUser,
-    source_page: Annotated[int, Query(ge=1, le=50)] = 1,
-    per_page: Annotated[int, Query(ge=1, le=200)] = 200,
-    max_pages: Annotated[int, Query(ge=1, le=50)] = 50,
-    vendor_repo: VendorRepository = Depends(get_vendor_repo),
-    po_repo: PurchaseOrderRepository = Depends(get_purchase_order_repo),
-    po_item_repo: PurchaseOrderItemRepository = Depends(get_purchase_order_item_repo),
-    db: AsyncSession = Depends(get_db),
-):
-    """Import exactly one random Zoho purchase order from a source page for test runs."""
-    zoho = ZohoClient()
-    variant_repo = ProductVariantRepository(db)
-
-    purchase_orders = await zoho.list_purchase_orders(page=source_page, per_page=per_page)
-    selected_page = source_page
-
-    # If requested page is empty, probe other pages to keep one-click test import reliable.
-    if not purchase_orders:
-        for page in range(1, max_pages + 1):
-            if page == source_page:
-                continue
-            candidate = await zoho.list_purchase_orders(page=page, per_page=per_page)
-            if candidate:
-                purchase_orders = candidate
-                selected_page = page
-                break
-
-    if not purchase_orders:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No Zoho purchase orders found in searched pages")
-
-    zoho_po = random.choice(purchase_orders)
-    zoho_po_id = str(zoho_po.get("purchaseorder_id") or "").strip()
-    po_number = str(zoho_po.get("purchaseorder_number") or "").strip()
-    vendor_zoho_id = str(zoho_po.get("vendor_id") or "").strip()
-
-    if not po_number:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected Zoho purchase order has no purchaseorder_number")
-
-    zoho_po_detail = zoho_po
-    if zoho_po_id:
-        try:
-            detail = await zoho.get_purchase_order(zoho_po_id)
-            if isinstance(detail, dict) and detail:
-                zoho_po_detail = detail
-        except Exception:
-            zoho_po_detail = zoho_po
-
-    vendor_id = None
-    if vendor_zoho_id:
-        vendor_obj = await vendor_repo.get_by_field("zoho_id", vendor_zoho_id)
-        if vendor_obj is not None:
-            vendor_id = vendor_obj.id
-
-    if vendor_id is None:
-        vendor_name = str(
-            zoho_po_detail.get("vendor_name")
-            or zoho_po.get("vendor_name")
-            or ""
-        ).strip()
-
-        if vendor_zoho_id:
-            try:
-                contact = await zoho.get_contact(vendor_zoho_id)
-                if isinstance(contact, dict) and contact:
-                    vendor_name = str(contact.get("contact_name") or vendor_name).strip()
-                    vendor_email = contact.get("email")
-                    vendor_phone = contact.get("phone") or contact.get("mobile")
-                    vendor_address = contact.get("billing_address") and str(contact.get("billing_address"))
-                else:
-                    vendor_email = None
-                    vendor_phone = None
-                    vendor_address = None
-            except Exception:
-                vendor_email = None
-                vendor_phone = None
-                vendor_address = None
-        else:
-            vendor_email = None
-            vendor_phone = None
-            vendor_address = None
-
-        if not vendor_name:
-            vendor_name = f"Zoho Vendor {vendor_zoho_id}" if vendor_zoho_id else "Zoho Vendor"
-
-        existing_vendor = await vendor_repo.get_by_field("name", vendor_name)
-        vendor_payload = {
-            "name": vendor_name,
-            "email": vendor_email,
-            "phone": vendor_phone,
-            "address": vendor_address,
-            "is_active": True,
-            "zoho_id": vendor_zoho_id or None,
-        }
-
-        if existing_vendor is None:
-            local_vendor = await vendor_repo.create(vendor_payload)
-            await db.flush()
-            vendors_created = 1
-            vendors_updated = 0
-        else:
-            local_vendor = await vendor_repo.update(existing_vendor, vendor_payload)
-            await db.flush()
-            vendors_created = 0
-            vendors_updated = 1
-
-        vendor_id = local_vendor.id
-    else:
-        vendors_created = 0
-        vendors_updated = 0
-
-    existing_po = await po_repo.get_by_field("zoho_id", zoho_po_id) if zoho_po_id else None
-    if existing_po is None:
-        existing_po = await po_repo.get_by_field("po_number", po_number)
-
-    tax_amount, shipping_amount, handling_amount = _extract_zoho_po_charges(zoho_po_detail)
-
-    po_payload = {
-        "po_number": po_number,
-        "vendor_id": vendor_id,
-        "deliver_status": _map_zoho_po_status(
-            zoho_po_detail.get("status")
-            or zoho_po_detail.get("purchaseorder_status")
-            or zoho_po.get("status")
-            or zoho_po.get("purchaseorder_status")
-        ),
-        "order_date": _to_date(
-            zoho_po_detail.get("date")
-            or zoho_po_detail.get("purchaseorder_date")
-            or zoho_po.get("date")
-            or zoho_po.get("purchaseorder_date")
-        ),
-        "expected_delivery_date": _to_date(zoho_po_detail.get("expected_delivery_date"))
-        if zoho_po_detail.get("expected_delivery_date")
-        else None,
-        "total_amount": _to_decimal(
-            zoho_po_detail.get("total")
-            or zoho_po_detail.get("total_amount")
-            or zoho_po.get("total")
-            or zoho_po.get("total_amount")
-            or 0
-        ),
-        "currency": str(
-            zoho_po_detail.get("currency_code")
-            or zoho_po.get("currency_code")
-            or "USD"
-        )[:3],
-        "tracking_number": _extract_zoho_po_tracking(zoho_po_detail) or _extract_zoho_po_tracking(zoho_po),
-        "tax_amount": tax_amount,
-        "shipping_amount": shipping_amount,
-        "handling_amount": handling_amount,
-        "source": "ZOHO_IMPORT",
-        "notes": zoho_po_detail.get("notes") or zoho_po_detail.get("terms") or zoho_po.get("notes") or zoho_po.get("terms"),
-        "zoho_id": zoho_po_id or None,
-        "zoho_sync_status": ZohoSyncStatus.SYNCED,
-        "zoho_sync_error": None,
-        "zoho_last_synced_at": datetime.utcnow(),
-    }
-
-    if existing_po is None:
-        local_po = await po_repo.create(po_payload)
-        await db.flush()
-        purchase_orders_created = 1
-        purchase_orders_updated = 0
-    else:
-        local_po = await po_repo.update(existing_po, po_payload)
-        await db.flush()
-        purchase_orders_created = 0
-        purchase_orders_updated = 1
-
-    await db.execute(delete(PurchaseOrderItem).where(PurchaseOrderItem.purchase_order_id == local_po.id))
-
-    line_items = zoho_po_detail.get("line_items", []) or zoho_po.get("line_items", []) or []
-    items_replaced = 0
-    for line in line_items:
-        qty = int(line.get("quantity") or 0)
-        unit_price = _to_decimal(line.get("rate") or line.get("item_total") or 0)
-        total_price = _to_decimal(line.get("item_total") or (unit_price * qty))
-        if qty <= 0:
-            continue
-
-        line_sku = str(line.get("sku") or line.get("item_sku") or line.get("product_sku") or "").strip()
-        matched_variant = None
-        if line_sku:
-            matched_variant = await variant_repo.get_by_sku(line_sku.upper())
-            if matched_variant is not None and not matched_variant.is_active:
-                matched_variant = None
-        if matched_variant is None:
-            zoho_item_id = str(line.get("item_id") or "").strip()
-            if zoho_item_id:
-                matched_variant = await variant_repo.get_by_zoho_id(zoho_item_id)
-                if matched_variant is not None and not matched_variant.is_active:
-                    matched_variant = None
-
-        await po_item_repo.create(
-            {
-                "purchase_order_id": local_po.id,
-                "variant_id": matched_variant.id if matched_variant else None,
-                "external_item_id": str(line.get("line_item_id") or line.get("item_id") or line_sku or "").strip() or None,
-                "external_item_name": str(line.get("name") or line.get("item_name") or "Unknown item")[:255],
-                "quantity": qty,
-                "unit_price": unit_price,
-                "total_price": total_price,
-                "status": PurchaseOrderItemStatus.MATCHED if matched_variant else PurchaseOrderItemStatus.UNMATCHED,
-            }
-        )
-        items_replaced += 1
-
-    await db.commit()
-
-    return ZohoSinglePurchaseImportResponse(
-        vendors_created=vendors_created,
-        vendors_updated=vendors_updated,
-        purchase_orders_created=purchase_orders_created,
-        purchase_orders_updated=purchase_orders_updated,
-        purchase_order_items_replaced=items_replaced,
-        source_vendors_seen=1 if vendor_zoho_id else 0,
-        source_purchase_orders_seen=1,
-        selected_source_page=selected_page,
-        selected_zoho_purchase_order_id=zoho_po_id,
-        selected_po_number=po_number,
-    )
 
 
 async def _resolve_vendor_id(
@@ -1034,17 +849,24 @@ async def _upsert_purchase_item(
         )
         existing_item = (await db.execute(stmt)).scalar_one_or_none()
 
+    line_total = unit_price * quantity
+    normalized_purchase_item_link = (purchase_item_link or "").strip() or None
+    if normalized_purchase_item_link:
+        normalized_purchase_item_link = normalized_purchase_item_link[:500]
+
+    if existing_item is None and normalized_purchase_item_link:
+        stmt = select(PurchaseOrderItem).where(
+            PurchaseOrderItem.purchase_order_id == local_po_id,
+            PurchaseOrderItem.purchase_item_link == normalized_purchase_item_link,
+        )
+        existing_item = (await db.execute(stmt)).scalar_one_or_none()
+
     if existing_item is None:
         stmt = select(PurchaseOrderItem).where(
             PurchaseOrderItem.purchase_order_id == local_po_id,
             PurchaseOrderItem.external_item_name == item_name,
         )
         existing_item = (await db.execute(stmt)).scalar_one_or_none()
-
-    line_total = unit_price * quantity
-    normalized_purchase_item_link = (purchase_item_link or "").strip() or None
-    if normalized_purchase_item_link:
-        normalized_purchase_item_link = normalized_purchase_item_link[:500]
 
     item_payload = {
         "purchase_order_id": local_po_id,

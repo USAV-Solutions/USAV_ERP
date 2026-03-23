@@ -109,7 +109,6 @@ export const PURCHASING = {
   PURCHASE_ITEMS: (id: number) => `/purchases/${id}/items`,
   PURCHASE_ITEM: (itemId: number) => `/purchases/items/${itemId}`,
   IMPORT_ZOHO: '/purchases/import/zoho',
-  IMPORT_ZOHO_RANDOM_ONE: '/purchases/import/zoho/random-one',
   IMPORT_PURCHASE_FILE: '/purchases/import/file',
   IMPORT_GOODWILL_CSV: '/purchases/import/goodwill-csv',
   MATCH_ITEM: (itemId: number) => `/purchases/items/${itemId}/match`,

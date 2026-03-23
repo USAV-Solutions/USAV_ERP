@@ -48,7 +48,6 @@ import {
   createVendor,
   deletePurchaseItem,
   importPurchasesFromFile,
-  importOneRandomPurchaseFromZoho,
   importPurchasesFromZoho,
   listPurchaseOrdersPaged,
   listVendors,
@@ -600,32 +599,6 @@ export default function PurchasingManagement() {
     onError: () => setSnackbar({ open: true, msg: 'Failed to create purchase order.', severity: 'error' }),
   })
 
-  const importZohoMutation = useMutation({
-    mutationFn: () =>
-      importPurchasesFromZoho({
-        orderDateFrom: orderDateFrom || undefined,
-        orderDateTo: orderDateTo || undefined,
-      }),
-    onSuccess: async (res) => {
-      await queryClient.invalidateQueries({ queryKey: ['vendors'] })
-      await queryClient.invalidateQueries({ queryKey: ['purchases'] })
-      const rangeLabel =
-        orderDateFrom || orderDateTo
-          ? ` (range ${orderDateFrom || '...'} to ${orderDateTo || '...'})`
-          : ''
-      setSnackbar({
-        open: true,
-        severity: 'success',
-        msg:
-          `Zoho import done: ${res.purchase_orders_created} PO created, ${res.purchase_orders_updated} PO updated, ` +
-          `${res.vendors_created} vendor created, ${res.vendors_updated} vendor updated.${rangeLabel}`,
-      })
-    },
-    onError: () => {
-      setSnackbar({ open: true, msg: 'Failed to import purchasing list from Zoho.', severity: 'error' })
-    },
-  })
-
   const importZohoRangeMutation = useMutation({
     mutationFn: (params: { orderDateFrom: string; orderDateTo: string }) => importPurchasesFromZoho(params),
     onSuccess: async (res, params) => {
@@ -647,27 +620,6 @@ export default function PurchasingManagement() {
         msg: error.response?.data?.detail || 'Failed to import Zoho purchases by date range.',
         severity: 'error',
       })
-    },
-  })
-
-  const importRandomZohoMutation = useMutation({
-    mutationFn: () => {
-      const randomSourcePage = Math.floor(Math.random() * 10) + 1
-      return importOneRandomPurchaseFromZoho({ sourcePage: randomSourcePage, perPage: 200 })
-    },
-    onSuccess: async (res) => {
-      await queryClient.invalidateQueries({ queryKey: ['vendors'] })
-      await queryClient.invalidateQueries({ queryKey: ['purchases'] })
-      setSnackbar({
-        open: true,
-        severity: 'success',
-        msg:
-          `Imported 1 random Zoho PO: ${res.selected_po_number} (Zoho ID ${res.selected_zoho_purchase_order_id}) ` +
-          `from page ${res.selected_source_page}.`,
-      })
-    },
-    onError: () => {
-      setSnackbar({ open: true, msg: 'Failed to import a random purchase order from Zoho.', severity: 'error' })
     },
   })
 
@@ -771,40 +723,14 @@ export default function PurchasingManagement() {
           </Button>
           <Button
             variant="outlined"
-            onClick={() => importZohoMutation.mutate()}
-            disabled={
-              importZohoMutation.isPending ||
-              importZohoRangeMutation.isPending ||
-              importRandomZohoMutation.isPending
-            }
-          >
-            {importZohoMutation.isPending ? 'Importing...' : 'Import from Zoho'}
-          </Button>
-          <Button
-            variant="outlined"
             onClick={() => {
               setImportZohoRangeFrom(orderDateFrom)
               setImportZohoRangeTo(orderDateTo)
               setImportZohoRangeOpen(true)
             }}
-            disabled={
-              importZohoMutation.isPending ||
-              importZohoRangeMutation.isPending ||
-              importRandomZohoMutation.isPending
-            }
+            disabled={importZohoRangeMutation.isPending}
           >
             {importZohoRangeMutation.isPending ? 'Importing range...' : 'Import Range from Zoho'}
-          </Button>
-          <Button
-            variant="outlined"
-            onClick={() => importRandomZohoMutation.mutate()}
-            disabled={
-              importZohoMutation.isPending ||
-              importZohoRangeMutation.isPending ||
-              importRandomZohoMutation.isPending
-            }
-          >
-            {importRandomZohoMutation.isPending ? 'Importing random PO...' : 'Import 1 Random PO'}
           </Button>
           <Button
             variant="outlined"
@@ -1154,7 +1080,7 @@ export default function PurchasingManagement() {
                 }}
                 onInputChange={(_event, nextInput, reason) => {
                   // Prevent losing typed vendor names when focus shifts to "Create Vendor".
-                  if ((reason === 'reset' || reason === 'blur') && !nextInput && !selectedVendor) {
+                  if (reason === 'reset' && !nextInput && !selectedVendor) {
                     return
                   }
                   setVendorSearchInput(nextInput)

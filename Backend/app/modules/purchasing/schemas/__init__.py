@@ -18,7 +18,6 @@ from app.modules.purchasing.schemas.purchasing import (
     VendorResponse,
     VendorUpdate,
     ZohoPurchaseImportResponse,
-    ZohoSinglePurchaseImportResponse,
 )
 
 __all__ = [
@@ -36,7 +35,6 @@ __all__ = [
     "PurchaseOrderReceiveRequest",
     "PurchaseOrderReceiveResponse",
     "ZohoPurchaseImportResponse",
-    "ZohoSinglePurchaseImportResponse",
     "PurchaseFileImportSource",
     "PurchaseFileImportResponse",
     "GoodwillCsvImportResponse",
