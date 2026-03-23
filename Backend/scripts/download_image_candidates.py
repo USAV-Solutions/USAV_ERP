@@ -18,7 +18,6 @@ Temporary output layout:
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import re
 import time
@@ -47,79 +46,28 @@ def _guess_ext(url: str, content_type: str | None) -> str:
     return ".jpg"
 
 
-def _iter_batches(items: list[dict], batch_size: int) -> list[list[dict]]:
-    size = max(1, int(batch_size))
-    return [items[i:i + size] for i in range(0, len(items), size)]
-
-
-def _download_one(
-    *,
-    request_label: str,
-    url: str,
-    dst: Path,
-    timeout: int,
-    retries: int,
-    backoff_seconds: float,
-) -> tuple[bool, str | None]:
+def _download_one(url: str, dst: Path, timeout: int, retries: int, backoff_seconds: float) -> tuple[bool, str | None]:
     attempts = max(1, retries + 1)
     last_error: str | None = None
 
     for attempt in range(1, attempts + 1):
-        started_at = time.perf_counter()
         try:
-            print(f"[{request_label}] START attempt={attempt}/{attempts} url={url}")
             with requests.get(url, stream=True, timeout=timeout) as resp:
-                elapsed_ms = int((time.perf_counter() - started_at) * 1000)
-                print(
-                    f"[{request_label}] RESPONSE attempt={attempt}/{attempts} "
-                    f"status={resp.status_code} elapsed_ms={elapsed_ms}"
-                )
                 resp.raise_for_status()
                 ext = _guess_ext(url, resp.headers.get("content-type"))
                 dst = dst.with_suffix(ext)
                 dst.parent.mkdir(parents=True, exist_ok=True)
-                total_bytes = 0
                 with dst.open("wb") as f:
                     for chunk in resp.iter_content(chunk_size=65536):
                         if chunk:
                             f.write(chunk)
-                            total_bytes += len(chunk)
-            total_elapsed_ms = int((time.perf_counter() - started_at) * 1000)
-            print(
-                f"[{request_label}] SUCCESS path={dst} bytes={total_bytes} elapsed_ms={total_elapsed_ms}"
-            )
             return True, None
         except Exception as exc:
             last_error = str(exc)
-            elapsed_ms = int((time.perf_counter() - started_at) * 1000)
-            print(
-                f"[{request_label}] ERROR attempt={attempt}/{attempts} "
-                f"elapsed_ms={elapsed_ms} error={last_error}"
-            )
             if attempt < attempts:
                 time.sleep(backoff_seconds * attempt)
 
     return False, last_error
-
-
-def _download_task(job: dict, timeout: int, retries: int, backoff_seconds: float) -> dict:
-    request_label = str(job["request_label"])
-    ok, err = _download_one(
-        request_label=request_label,
-        url=str(job["url"]),
-        dst=Path(job["base_dst"]),
-        timeout=timeout,
-        retries=retries,
-        backoff_seconds=backoff_seconds,
-    )
-    return {
-        "ok": ok,
-        "error": err,
-        "sku": job["sku"],
-        "platform": job["platform"],
-        "external_id": job["external_id"],
-        "url": job["url"],
-    }
 
 
 def main() -> None:
@@ -128,8 +76,6 @@ def main() -> None:
     parser.add_argument("--images-root", default="/mnt/product_images", help="Base image root")
     parser.add_argument("--timeout", type=int, default=30, help="HTTP timeout seconds")
     parser.add_argument("--max-per-task", type=int, default=20, help="Max images downloaded per task")
-    parser.add_argument("--batch-size", type=int, default=50, help="Number of URL downloads submitted per batch")
-    parser.add_argument("--workers", type=int, default=8, help="Max concurrent download workers per batch")
     parser.add_argument("--retries", type=int, default=2, help="Retries per URL after initial attempt")
     parser.add_argument("--backoff-seconds", type=float, default=0.5, help="Base backoff delay between retries")
     parser.add_argument(
@@ -181,71 +127,44 @@ def main() -> None:
                         "platform": platform,
                         "external_id": external_id,
                         "url": clean_url,
-                        jobs: list[dict] = []
-                        for row_idx, row in enumerate(rows, start=1):
-                            sku = (row.get("sku") or "").strip()
-                            platform = _safe_platform(row.get("platform") or "unknown")
-                            external_id = (row.get("external_id") or "").strip()
-                            urls = row.get("image_urls") or []
-                            if not sku or not isinstance(urls, list):
-                                continue
+                        "error": err,
+                    }
+                )
 
-                            temp_dir = Path(args.images_root) / "sku" / sku / f"temp-{platform}"
-                            for image_idx, url in enumerate(urls[: args.max_per_task], start=1):
-                                if not isinstance(url, str) or not url.strip():
-                                    continue
-                                request_label = f"REQ row={row_idx} sku={sku} idx={image_idx}"
-                                jobs.append(
-                                    {
-                                        "request_label": request_label,
-                                        "sku": sku,
-                                        "platform": platform,
-                                        "external_id": external_id,
-                                        "url": url.strip(),
-                                        "base_dst": str(temp_dir / f"img-{image_idx - 1}"),
-                                    }
-                                )
+    if args.failed_output:
+        failed_output_path = Path(args.failed_output)
+        failed_output_path.parent.mkdir(parents=True, exist_ok=True)
+        with failed_output_path.open("w", encoding="utf-8") as f:
+            for record in failed_records:
+                f.write(json.dumps(record) + "\n")
 
-                        print(
-                            f"Starting downloads: total_jobs={len(jobs)} batch_size={max(1, args.batch_size)} workers={max(1, args.workers)}"
-                        )
+    if args.retry_input_output:
+        grouped: dict[tuple[str, str, str], list[str]] = defaultdict(list)
+        for record in failed_records:
+            key = (
+                record.get("sku") or "",
+                record.get("platform") or "unknown",
+                record.get("external_id") or "",
+            )
+            grouped[key].append(record.get("url") or "")
 
-                        success = 0
-                        failed = 0
-                        failed_records: list[dict] = []
-                        batches = _iter_batches(jobs, batch_size=args.batch_size)
-                        for batch_index, batch in enumerate(batches, start=1):
-                            print(f"Batch {batch_index}/{len(batches)} START jobs={len(batch)}")
-                            with ThreadPoolExecutor(max_workers=max(1, args.workers)) as executor:
-                                futures = [
-                                    executor.submit(
-                                        _download_task,
-                                        job,
-                                        args.timeout,
-                                        args.retries,
-                                        args.backoff_seconds,
-                                    )
-                                    for job in batch
-                                ]
+        retry_rows = []
+        for (sku, platform, external_id), image_urls in sorted(grouped.items()):
+            deduped_urls = sorted({u for u in image_urls if u})
+            if not sku or not deduped_urls:
+                continue
+            retry_rows.append(
+                {
+                    "sku": sku,
+                    "platform": platform.upper(),
+                    "external_id": external_id,
+                    "image_urls": deduped_urls,
+                }
+            )
 
-                                for future in as_completed(futures):
-                                    result = future.result()
-                                    if result["ok"]:
-                                        success += 1
-                                    else:
-                                        failed += 1
-                                        failed_records.append(
-                                            {
-                                                "sku": result["sku"],
-                                                "platform": result["platform"],
-                                                "external_id": result["external_id"],
-                                                "url": result["url"],
-                                                "error": result["error"],
-                                            }
-                                        )
-                            print(
-                                f"Batch {batch_index}/{len(batches)} DONE cumulative_success={success} cumulative_failed={failed}"
-                            )
+        retry_input_path = Path(args.retry_input_output)
+        retry_input_path.parent.mkdir(parents=True, exist_ok=True)
+        retry_input_path.write_text(json.dumps(retry_rows, indent=2), encoding="utf-8")
 
     print(f"Download complete: success={success} failed={failed}")
     if args.failed_output:
