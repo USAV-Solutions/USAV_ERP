@@ -14,6 +14,7 @@ from app.modules.purchasing.routes import (
     import_purchasing_from_zoho,
 )
 from app.modules.purchasing.schemas import PurchaseFileImportResponse, PurchaseFileImportSource
+from app.models import PurchaseOrderItemStatus
 
 
 def test_extract_zoho_po_charges_supports_non_cf_aliases_in_custom_field_hash():
@@ -140,7 +141,12 @@ class _ScalarResult:
 )
 async def test_upsert_purchase_item_updates_existing_name_when_different(source):
     local_po = SimpleNamespace(zoho_sync_status=None, zoho_sync_error="old-error")
-    existing_item = SimpleNamespace(id=77, external_item_name="Old Imported Name")
+    existing_item = SimpleNamespace(
+        id=77,
+        external_item_name="Old Imported Name",
+        variant_id=321,
+        status=PurchaseOrderItemStatus.MATCHED,
+    )
 
     db = AsyncMock()
     db.get = AsyncMock(return_value=local_po)
@@ -165,6 +171,8 @@ async def test_upsert_purchase_item_updates_existing_name_when_different(source)
     po_item_repo.update.assert_awaited_once()
     payload = po_item_repo.update.await_args.args[1]
     assert payload["external_item_name"] == "New Imported Name"
+    assert payload["variant_id"] == 321
+    assert payload["status"] == PurchaseOrderItemStatus.MATCHED
     assert result.purchase_order_items_updated == 1
     assert result.purchase_order_items_created == 0
 

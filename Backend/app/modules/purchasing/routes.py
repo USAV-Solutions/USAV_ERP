@@ -870,20 +870,23 @@ async def _upsert_purchase_item(
 
     item_payload = {
         "purchase_order_id": local_po_id,
-        "variant_id": None,
         "external_item_id": item_id,
         "purchase_item_link": normalized_purchase_item_link,
         "external_item_name": item_name[:255],
         "quantity": quantity,
         "unit_price": unit_price,
         "total_price": line_total,
-        "status": PurchaseOrderItemStatus.UNMATCHED,
     }
 
     if existing_item is None:
+        item_payload["variant_id"] = None
+        item_payload["status"] = PurchaseOrderItemStatus.UNMATCHED
         await po_item_repo.create(item_payload)
         result.purchase_order_items_created += 1
     else:
+        # Preserve prior matching state and variant linkage on re-import.
+        item_payload["variant_id"] = existing_item.variant_id
+        item_payload["status"] = existing_item.status
         await po_item_repo.update(existing_item, item_payload)
         result.purchase_order_items_updated += 1
 
