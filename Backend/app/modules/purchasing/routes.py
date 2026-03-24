@@ -1417,7 +1417,7 @@ async def _import_ebay_purchase_api(
             "shipping_amount": shipping_amount,
             "handling_amount": handling_amount,
             "source": "EBAY_BUYING_API",
-            "notes": f"Imported via eBay GetMyeBayBuying ({source.value}).",
+            "notes": f"Imported via eBay GetOrders (Buyer) ({source.value}).",
             "zoho_sync_status": ZohoSyncStatus.DIRTY,
             "zoho_sync_error": None,
         }
