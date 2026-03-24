@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AdminOrWarehouseUser, CurrentUser
@@ -61,6 +61,23 @@ def _to_decimal(value: object, default: str = "0") -> Decimal:
         return Decimal(normalized)
     except Exception:
         return Decimal(default)
+
+
+def _normalize_external_po_number(value: object) -> str:
+    return str(value or "").strip()
+
+
+async def _find_existing_po_by_external_id(db: AsyncSession, po_number: str) -> PurchaseOrder | None:
+    normalized_po = _normalize_external_po_number(po_number)
+    if not normalized_po:
+        return None
+
+    stmt = (
+        select(PurchaseOrder)
+        .where(func.lower(func.trim(PurchaseOrder.po_number)) == normalized_po.lower())
+        .limit(1)
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
 
 
 def _to_date(value: object) -> date:
@@ -619,7 +636,7 @@ async def import_purchasing_from_zoho(
 
         for zoho_po in purchase_orders:
             zoho_po_id = str(zoho_po.get("purchaseorder_id") or "").strip()
-            po_number = str(zoho_po.get("purchaseorder_number") or "").strip()
+            po_number = _normalize_external_po_number(zoho_po.get("purchaseorder_number"))
             vendor_zoho_id = str(zoho_po.get("vendor_id") or "").strip()
 
             # Apply period filter early using list payload date to avoid importing out-of-range
@@ -656,9 +673,7 @@ async def import_purchasing_from_zoho(
             if vendor_id is None:
                 continue
 
-            existing_po = await po_repo.get_by_field("zoho_id", zoho_po_id) if zoho_po_id else None
-            if existing_po is None:
-                existing_po = await po_repo.get_by_field("po_number", po_number)
+            existing_po = await _find_existing_po_by_external_id(db, po_number)
 
             tax_amount, shipping_amount, handling_amount = _extract_zoho_po_charges(zoho_po_detail)
             order_date_value = _to_date_or_none(
@@ -946,7 +961,7 @@ async def _import_goodwill_csv(
     for row in reader:
         result.source_rows_seen += 1
 
-        po_number = str(_pick(row, header_aliases["order_number"]) or "").strip()
+        po_number = _normalize_external_po_number(_pick(row, header_aliases["order_number"]))
         item_id = str(_pick(row, header_aliases["item_id"]) or "").strip() or None
         purchase_item_link = _build_purchase_item_link(
             PurchaseFileImportSource.GOODWILL,
@@ -970,7 +985,7 @@ async def _import_goodwill_csv(
         tracking_number = str(_pick(row, header_aliases["tracking_number"]) or "").strip() or None
         total_amount = (unit_price * quantity) + tax_amount + shipping_amount + handling_amount
 
-        existing_po = await po_repo.get_by_field("po_number", po_number)
+        existing_po = await _find_existing_po_by_external_id(db, po_number)
         po_payload = {
             "po_number": po_number,
             "vendor_id": goodwill_vendor_id,
@@ -1045,7 +1060,7 @@ async def _import_amazon_csv(
             result.source_rows_skipped += 1
             continue
 
-        po_number = str(row.get("Order ID") or "").strip()
+        po_number = _normalize_external_po_number(row.get("Order ID"))
         item_name = str(row.get("Title") or "").strip()
         quantity = _to_int(row.get("Item Quantity"), default=0)
         if not po_number or not item_name or quantity <= 0:
@@ -1119,7 +1134,7 @@ async def _import_amazon_csv(
         ) + order_data["tax_amount"] + order_data["shipping_amount"] + order_data["handling_amount"]
         total_amount = order_data["total_amount"] if order_data["total_amount"] > 0 else computed_total
 
-        existing_po = await po_repo.get_by_field("po_number", po_number)
+        existing_po = await _find_existing_po_by_external_id(db, po_number)
         po_payload = {
             "po_number": po_number,
             "vendor_id": vendor_id,
@@ -1187,7 +1202,7 @@ async def _import_aliexpress_json(
             result.source_rows_skipped += 1
             continue
 
-        po_number = str(order.get("orderId") or "").strip()
+        po_number = _normalize_external_po_number(order.get("orderId"))
         items = order.get("items") or []
         if not po_number or not isinstance(items, list) or not items:
             result.source_rows_skipped += 1
@@ -1243,7 +1258,7 @@ async def _import_aliexpress_json(
         tracking_number = str((tracking_data or {}).get("trackingNumber") or "").strip() or None
         order_date = _to_date(order.get("orderDate") or order.get("orderDateTimestampFormat"))
 
-        existing_po = await po_repo.get_by_field("po_number", po_number)
+        existing_po = await _find_existing_po_by_external_id(db, po_number)
         po_payload = {
             "po_number": po_number,
             "vendor_id": vendor_id,
@@ -1381,7 +1396,7 @@ async def _import_ebay_purchase_api(
     for order in ebay_orders:
         result.source_rows_seen += 1
 
-        po_number = str(order.get("po_number") or "").strip()
+        po_number = _normalize_external_po_number(order.get("po_number"))
         items = order.get("items") or []
         if not po_number or not isinstance(items, list) or not items:
             result.source_rows_skipped += 1
@@ -1422,7 +1437,7 @@ async def _import_ebay_purchase_api(
             "zoho_sync_error": None,
         }
 
-        existing_po = await po_repo.get_by_field("po_number", po_number)
+        existing_po = await _find_existing_po_by_external_id(db, po_number)
         if existing_po is None:
             local_po = await po_repo.create(po_payload)
             await db.flush()
