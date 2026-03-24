@@ -947,52 +947,106 @@ export default function PurchasingManagement() {
                             <TableCell colSpan={9} sx={{ py: 0 }}>
                               <Collapse in={expanded} timeout="auto" unmountOnExit>
                                 <Box sx={{ p: 1.5, bgcolor: 'action.hover' }}>
-                                  <Grid container spacing={1.5} sx={{ mb: 1.25 }}>
-                                    <Grid item xs={12} md={3}>
-                                      <Typography variant="caption" color="text.secondary">Vendor</Typography>
-                                      <Typography variant="body2">{po.vendor?.name || po.vendor_id}</Typography>
-                                    </Grid>
-                                    <Grid item xs={12} md={2}>
-                                      <Typography variant="caption" color="text.secondary">Zoho ID</Typography>
-                                      <Typography variant="body2">{po.zoho_id || '-'}</Typography>
-                                    </Grid>
-                                    <Grid item xs={12} md={2}>
-                                      <Typography variant="caption" color="text.secondary">Source</Typography>
-                                      <Typography variant="body2">{po.source || '-'}</Typography>
-                                    </Grid>
-                                    <Grid item xs={12} md={2}>
-                                      <Typography variant="caption" color="text.secondary">Tax</Typography>
-                                      <Typography variant="body2">{po.tax_amount ?? 0}</Typography>
-                                    </Grid>
-                                    <Grid item xs={12} md={2}>
-                                      <Typography variant="caption" color="text.secondary">Shipping</Typography>
-                                      <Typography variant="body2">{po.shipping_amount ?? 0}</Typography>
-                                    </Grid>
-                                    <Grid item xs={12} md={2}>
-                                      <Typography variant="caption" color="text.secondary">Handling</Typography>
-                                      <Typography variant="body2">{po.handling_amount ?? 0}</Typography>
-                                    </Grid>
-                                    <Grid item xs={12} md={6}>
-                                      <Typography variant="caption" color="text.secondary">Notes</Typography>
-                                      <Typography variant="body2">{po.notes || '-'}</Typography>
-                                    </Grid>
-                                    <Grid item xs={12} md={6}>
-                                      <Stack direction="row" justifyContent={{ xs: 'flex-start', md: 'flex-end' }}>
-                                        <Button
-                                          size="small"
-                                          variant="outlined"
-                                          startIcon={syncingPoId === po.id ? <CircularProgress size={14} /> : <CloudSync />}
-                                          disabled={!canSyncPo(po) || syncingPoId === po.id}
-                                          onClick={(e) => {
-                                            e.stopPropagation()
-                                            forceSyncPoMutation.mutate(po.id)
-                                          }}
-                                        >
-                                          Zoho Sync
-                                        </Button>
-                                      </Stack>
-                                    </Grid>
-                                  </Grid>
+                                  <Stack
+                                    direction="row"
+                                    spacing={2}
+                                    alignItems="center"
+                                    sx={{ mb: 1.25, flexWrap: 'nowrap', overflow: 'hidden' }}
+                                  >
+                                    <Box sx={{ minWidth: 110, maxWidth: 170, flexShrink: 1, overflow: 'hidden' }}>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                        Vendor
+                                      </Typography>
+                                      <Typography
+                                        variant="body2"
+                                        sx={{ fontSize: '0.82rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                                      >
+                                        {po.vendor?.name || po.vendor_id}
+                                      </Typography>
+                                    </Box>
+
+                                    <Box sx={{ minWidth: 150, maxWidth: 200, flexShrink: 1, overflow: 'hidden' }}>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                        Zoho ID
+                                      </Typography>
+                                      <Typography
+                                        variant="body2"
+                                        sx={{ fontSize: '0.82rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                                      >
+                                        {po.zoho_id || '-'}
+                                      </Typography>
+                                    </Box>
+
+                                    <Box sx={{ minWidth: 95, maxWidth: 140, flexShrink: 1, overflow: 'hidden' }}>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                        Source
+                                      </Typography>
+                                      <Typography
+                                        variant="body2"
+                                        sx={{ fontSize: '0.82rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                                      >
+                                        {po.source || '-'}
+                                      </Typography>
+                                    </Box>
+
+                                    <Box sx={{ minWidth: 56, flexShrink: 0 }}>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                        Tax
+                                      </Typography>
+                                      <Typography variant="body2" sx={{ fontSize: '0.82rem' }}>
+                                        {po.tax_amount ?? 0}
+                                      </Typography>
+                                    </Box>
+
+                                    <Box sx={{ minWidth: 64, flexShrink: 0 }}>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                        Shipping
+                                      </Typography>
+                                      <Typography variant="body2" sx={{ fontSize: '0.82rem' }}>
+                                        {po.shipping_amount ?? 0}
+                                      </Typography>
+                                    </Box>
+
+                                    <Box sx={{ minWidth: 64, flexShrink: 0 }}>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                        Handling
+                                      </Typography>
+                                      <Typography variant="body2" sx={{ fontSize: '0.82rem' }}>
+                                        {po.handling_amount ?? 0}
+                                      </Typography>
+                                    </Box>
+
+                                    <Box sx={{ minWidth: 140, flex: 1, overflow: 'hidden' }}>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                        Notes
+                                      </Typography>
+                                      <Typography
+                                        variant="body2"
+                                        sx={{
+                                          fontSize: '0.82rem',
+                                          whiteSpace: 'nowrap',
+                                          overflow: 'hidden',
+                                          textOverflow: 'ellipsis',
+                                        }}
+                                      >
+                                        {po.notes || '-'}
+                                      </Typography>
+                                    </Box>
+
+                                    <Button
+                                      size="small"
+                                      variant="outlined"
+                                      sx={{ flexShrink: 0 }}
+                                      startIcon={syncingPoId === po.id ? <CircularProgress size={14} /> : <CloudSync />}
+                                      disabled={!canSyncPo(po) || syncingPoId === po.id}
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        forceSyncPoMutation.mutate(po.id)
+                                      }}
+                                    >
+                                      Zoho Sync
+                                    </Button>
+                                  </Stack>
                                   <Typography variant="subtitle2" sx={{ mb: 1 }}>
                                     Line Items
                                   </Typography>
