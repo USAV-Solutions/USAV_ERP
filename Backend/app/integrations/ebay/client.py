@@ -4,9 +4,10 @@ eBay Trading API Client.
 Implements the BasePlatformClient interface for eBay stores.
 """
 import asyncio
-from datetime import datetime, date, timedelta
-from typing import List, Optional
+from datetime import datetime, date, timedelta, timezone
+from typing import Any, List, Optional
 import logging
+import xml.etree.ElementTree as ET
 import httpx
 
 from app.integrations.base import (
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 _TRANSPORT_RETRIES = 3          # retries at the httpcore transport layer
 _TOKEN_REFRESH_ATTEMPTS = 3     # higher-level retries around OAuth token refresh
 _TOKEN_RETRY_DELAY_SECS = 2     # pause between token-refresh retries
+_TRADING_NS = {"eb": "urn:ebay:apis:eBLBaseComponents"}
 
 
 class EbayClient(BasePlatformClient):
@@ -158,6 +160,259 @@ class EbayClient(BasePlatformClient):
             exc_info=True,
         )
         return False
+
+    async def fetch_buying_orders_xml(
+        self,
+        since: datetime,
+        until: datetime,
+        *,
+        max_pages: int = 50,
+        per_page: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Fetch bought orders via Trading API GetMyeBayBuying (XML) and normalize for purchasing import."""
+        if not self.is_configured:
+            raise RuntimeError(f"eBay {self.store_name} credentials not configured")
+
+        # Normalize caller-supplied boundaries for safe comparison with API timestamps.
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=timezone.utc)
+        else:
+            since = since.astimezone(timezone.utc)
+
+        if until.tzinfo is None:
+            until = until.replace(tzinfo=timezone.utc)
+        else:
+            until = until.astimezone(timezone.utc)
+
+        access_token = await self._get_access_token()
+        if not access_token:
+            raise RuntimeError(f"eBay {self.store_name} unable to obtain access token")
+
+        orders_by_id: dict[str, dict[str, Any]] = {}
+        order_item_keys: dict[str, set[tuple[str, str, int, float]]] = {}
+        trading_url = f"{self.base_url}/ws/api.dll"
+        last_page_signature: tuple[str, ...] | None = None
+
+        for page in range(1, max_pages + 1):
+            request_xml = f"""<?xml version=\"1.0\" encoding=\"utf-8\"?>
+<GetMyeBayBuyingRequest xmlns=\"urn:ebay:apis:eBLBaseComponents\">
+  <DetailLevel>ReturnAll</DetailLevel>
+  <Pagination>
+    <EntriesPerPage>{per_page}</EntriesPerPage>
+    <PageNumber>{page}</PageNumber>
+  </Pagination>
+  <WonList>
+    <Include>true</Include>
+        <Pagination>
+            <EntriesPerPage>{per_page}</EntriesPerPage>
+            <PageNumber>{page}</PageNumber>
+        </Pagination>
+  </WonList>
+</GetMyeBayBuyingRequest>"""
+
+            headers = {
+                "Content-Type": "text/xml",
+                "X-EBAY-API-CALL-NAME": "GetMyeBayBuying",
+                "X-EBAY-API-COMPATIBILITY-LEVEL": "1231",
+                "X-EBAY-API-SITEID": "0",
+                "X-EBAY-API-IAF-TOKEN": access_token,
+            }
+
+            transport = httpx.AsyncHTTPTransport(retries=_TRANSPORT_RETRIES)
+            async with httpx.AsyncClient(transport=transport, timeout=30.0) as client:
+                response = await client.post(trading_url, headers=headers, content=request_xml)
+                response.raise_for_status()
+
+            root = ET.fromstring(response.text)
+            ack = self._xml_text(root, "./eb:Ack")
+            if ack and ack.lower() in {"failure", "partialfailure"}:
+                short_message = self._xml_text(
+                    root,
+                    "./eb:Errors/eb:ShortMessage",
+                ) or "Unknown eBay Trading API error"
+                raise RuntimeError(f"eBay {self.store_name} GetMyeBayBuying failed: {short_message}")
+
+            order_transactions = root.findall(".//eb:OrderTransaction", _TRADING_NS)
+            if not order_transactions:
+                break
+
+            page_signature = tuple(
+                sorted(
+                    filter(
+                        None,
+                        (
+                            self._xml_text(ot, "./eb:Order/eb:OrderID")
+                            or self._xml_text(ot, "./eb:Transaction/eb:ContainingOrder/eb:OrderID")
+                            or self._xml_text(ot, "./eb:Order/eb:ExtendedOrderID")
+                            or self._xml_text(ot, "./eb:Transaction/eb:ContainingOrder/eb:ExtendedOrderID")
+                            for ot in order_transactions
+                        ),
+                    )
+                )
+            )
+            if page_signature and page_signature == last_page_signature:
+                logger.info(
+                    "eBay %s GetMyeBayBuying repeated page signature at page %s; stopping pagination",
+                    self.store_name,
+                    page,
+                )
+                break
+            last_page_signature = page_signature
+
+            page_added = 0
+            for order_transaction in order_transactions:
+                order_id = (
+                    self._xml_text(order_transaction, "./eb:Order/eb:OrderID")
+                    or self._xml_text(order_transaction, "./eb:Transaction/eb:ContainingOrder/eb:OrderID")
+                    or self._xml_text(order_transaction, "./eb:Order/eb:ExtendedOrderID")
+                    or self._xml_text(order_transaction, "./eb:Transaction/eb:ContainingOrder/eb:ExtendedOrderID")
+                )
+                if not order_id:
+                    continue
+
+                transaction_node = order_transaction.find("./eb:Transaction", _TRADING_NS)
+                order_node = order_transaction.find("./eb:Order", _TRADING_NS)
+                item_node = (
+                    transaction_node.find("./eb:Item", _TRADING_NS)
+                    if transaction_node is not None
+                    else None
+                )
+
+                created_at = self._parse_ebay_datetime(
+                    self._xml_text(transaction_node, "./eb:CreatedDate")
+                    or self._xml_text(order_node, "./eb:CreatedTime")
+                    or self._xml_text(order_node, "./eb:PaidTime")
+                    or self._xml_text(order_node, "./eb:CheckoutStatus/eb:LastModifiedTime")
+                )
+                if created_at is None or created_at < since or created_at > until:
+                    continue
+
+                quantity = self._to_int_safe(
+                    self._xml_text(transaction_node, "./eb:QuantityPurchased")
+                    or self._xml_text(transaction_node, "./eb:QuantityBought")
+                    or "1"
+                )
+                unit_price = self._to_float_safe(
+                    self._xml_text(transaction_node, "./eb:TransactionPrice")
+                    or self._xml_text(transaction_node, "./eb:ConvertedTransactionPrice")
+                    or "0"
+                )
+                if quantity <= 0:
+                    quantity = 1
+
+                item_id = self._xml_text(item_node, "./eb:ItemID")
+                item_title = self._xml_text(item_node, "./eb:Title") or "Unknown eBay item"
+                order_data = orders_by_id.setdefault(
+                    order_id,
+                    {
+                        "po_number": order_id,
+                        "order_date": created_at.date(),
+                        "currency": self._xml_attr(transaction_node, "./eb:TransactionPrice", "currencyID") or "USD",
+                        "tracking_number": self._xml_text(order_node, "./eb:ShipmentTrackingDetails/eb:ShipmentTrackingNumber"),
+                        "tax_amount": self._to_float_safe(
+                            self._xml_text(transaction_node, "./eb:Taxes/eb:TotalTaxAmount")
+                            or self._xml_text(order_node, "./eb:TotalTaxAmount")
+                            or "0"
+                        ),
+                        "shipping_amount": self._to_float_safe(
+                            self._xml_text(transaction_node, "./eb:ActualShippingCost")
+                        ),
+                        "handling_amount": 0.0,
+                        "total_amount": self._to_float_safe(
+                            self._xml_text(order_node, "./eb:Total")
+                            or self._xml_text(order_node, "./eb:AmountPaid")
+                            or "0"
+                        ),
+                        "vendor_name": self._xml_text(item_node, "./eb:Seller/eb:UserID") or f"eBay Seller ({self.store_name})",
+                        "items": [],
+                    },
+                )
+
+                dedupe_key = (
+                    str(item_id or ""),
+                    item_title,
+                    quantity,
+                    unit_price,
+                )
+                existing_item_keys = order_item_keys.setdefault(order_id, set())
+                if dedupe_key in existing_item_keys:
+                    continue
+                existing_item_keys.add(dedupe_key)
+
+                order_data["items"].append(
+                    {
+                        "external_item_id": item_id,
+                        "purchase_item_link": f"https://www.ebay.com/itm/{item_id}" if item_id else None,
+                        "external_item_name": item_title,
+                        "quantity": quantity,
+                        "unit_price": unit_price,
+                    }
+                )
+                page_added += 1
+
+            if page_added == 0:
+                break
+
+            has_more = self._xml_text(root, ".//eb:HasMoreOrders")
+            if has_more and has_more.lower() == "false":
+                break
+
+            total_pages = self._to_int_safe(
+                self._xml_text(root, ".//eb:PaginationResult/eb:TotalNumberOfPages")
+            )
+            if total_pages > 0 and page >= total_pages:
+                break
+
+        for order in orders_by_id.values():
+            if order.get("total_amount", 0) <= 0:
+                order["total_amount"] = sum(
+                    float(item.get("unit_price", 0)) * int(item.get("quantity", 0))
+                    for item in order.get("items", [])
+                ) + float(order.get("shipping_amount", 0))
+
+        return list(orders_by_id.values())
+
+    def _xml_text(self, node: ET.Element | None, path: str) -> str | None:
+        if node is None:
+            return None
+        target = node.find(path, _TRADING_NS)
+        if target is None or target.text is None:
+            return None
+        text = target.text.strip()
+        return text or None
+
+    def _xml_attr(self, node: ET.Element | None, path: str, attr_name: str) -> str | None:
+        if node is None:
+            return None
+        target = node.find(path, _TRADING_NS)
+        if target is None:
+            return None
+        value = str(target.attrib.get(attr_name) or "").strip()
+        return value or None
+
+    def _parse_ebay_datetime(self, value: str | None) -> datetime | None:
+        if not value:
+            return None
+        text = str(value).strip()
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+        except Exception:
+            return None
+
+    def _to_float_safe(self, value: str | None) -> float:
+        try:
+            return float(value or 0)
+        except Exception:
+            return 0.0
+
+    def _to_int_safe(self, value: str | None) -> int:
+        try:
+            return int(float(value or 0))
+        except Exception:
+            return 0
     
     async def _get_access_token(self) -> Optional[str]:
         """

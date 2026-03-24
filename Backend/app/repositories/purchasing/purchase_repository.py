@@ -2,7 +2,7 @@
 from datetime import date
 from typing import Optional, Sequence
 
-from sqlalchemy import and_, desc, exists, not_, select
+from sqlalchemy import and_, desc, exists, func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -48,6 +48,7 @@ class PurchaseOrderRepository(BaseRepository[PurchaseOrder]):
         *,
         skip: int = 0,
         limit: int = 100,
+        po_number: str | None = None,
         order_date_from: date | None = None,
         order_date_to: date | None = None,
         deliver_status: PurchaseDeliverStatus | None = None,
@@ -63,6 +64,10 @@ class PurchaseOrderRepository(BaseRepository[PurchaseOrder]):
                 selectinload(PurchaseOrder.items).selectinload(PurchaseOrderItem.variant),
             )
         )
+
+        po_query = str(po_number or "").strip()
+        if po_query:
+            stmt = stmt.where(func.lower(PurchaseOrder.po_number).like(f"%{po_query.lower()}%"))
 
         if order_date_from is not None:
             stmt = stmt.where(PurchaseOrder.order_date >= order_date_from)

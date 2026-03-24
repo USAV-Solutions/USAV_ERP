@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     
     # eBay OAuth Refresh Tokens (per store)
     ebay_refresh_token_mekong: str = ""
+    ebay_refresh_token_purchasing: str = ""
     ebay_refresh_token_usav: str = ""
     ebay_refresh_token_dragon: str = ""
     

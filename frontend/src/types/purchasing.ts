@@ -131,7 +131,12 @@ export interface ZohoPurchaseImportResponse {
   source_purchase_orders_seen: number
 }
 
-export type PurchaseFileImportSource = 'goodwill' | 'amazon' | 'aliexpress'
+export type PurchaseFileImportSource =
+  | 'goodwill'
+  | 'amazon'
+  | 'aliexpress'
+  | 'ebay_mekong'
+  | 'ebay_purchasing'
 
 export interface PurchaseFileImportResponse {
   source: PurchaseFileImportSource

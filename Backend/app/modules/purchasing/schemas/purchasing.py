@@ -160,6 +160,8 @@ class PurchaseFileImportSource(str, Enum):
     GOODWILL = "goodwill"
     AMAZON = "amazon"
     ALIEXPRESS = "aliexpress"
+    EBAY_MEKONG = "ebay_mekong"
+    EBAY_PURCHASING = "ebay_purchasing"
 
 
 class PurchaseFileImportResponse(BaseModel):

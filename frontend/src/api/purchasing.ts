@@ -40,6 +40,7 @@ export async function listPurchaseOrders(): Promise<PurchaseOrder[]> {
 export async function listPurchaseOrdersPaged(params: {
   skip?: number
   limit?: number
+  poNumber?: string
   deliverStatus?: 'CREATED' | 'BILLED' | 'DELIVERED'
   itemMatchStatus?: 'matched' | 'unmatched'
   zohoSyncStatus?: 'PENDING' | 'SYNCED' | 'ERROR' | 'DIRTY'
@@ -51,6 +52,7 @@ export async function listPurchaseOrdersPaged(params: {
   const query = new URLSearchParams()
   if (params.skip !== undefined) query.set('skip', String(params.skip))
   if (params.limit !== undefined) query.set('limit', String(params.limit))
+  if (params.poNumber) query.set('po_number', params.poNumber)
   if (params.deliverStatus) query.set('deliver_status', params.deliverStatus)
   if (params.itemMatchStatus) query.set('item_match_status', params.itemMatchStatus)
   if (params.zohoSyncStatus) query.set('zoho_sync_status', params.zohoSyncStatus)
@@ -153,6 +155,22 @@ export async function importPurchasesFromFile(
     {
       headers: { 'Content-Type': 'multipart/form-data' },
     },
+  )
+  return data
+}
+
+export async function importPurchasesFromEbay(params: {
+  source: 'ebay_mekong' | 'ebay_purchasing'
+  orderDateFrom: string
+  orderDateTo: string
+}): Promise<PurchaseFileImportResponse> {
+  const query = new URLSearchParams()
+  query.set('source', params.source)
+  query.set('order_date_from', params.orderDateFrom)
+  query.set('order_date_to', params.orderDateTo)
+
+  const { data } = await axiosClient.post<PurchaseFileImportResponse>(
+    `${PURCHASING.IMPORT_EBAY}?${query.toString()}`,
   )
   return data
 }

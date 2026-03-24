@@ -11,7 +11,9 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AdminOrWarehouseUser, CurrentUser
+from app.core.config import settings
 from app.core.database import get_db
+from app.integrations.ebay.client import EbayClient
 from app.integrations.zoho.client import ZohoClient
 from app.models import PurchaseDeliverStatus, PurchaseOrderItemStatus, ZohoSyncStatus
 from app.models.entities import ProductVariant
@@ -164,9 +166,8 @@ def _build_purchase_item_link(source: PurchaseFileImportSource, *, asin: str | N
         return f"https://amazon.com/dp/{normalized_asin}"
     if source == PurchaseFileImportSource.GOODWILL and normalized_item_id:
         return f"https://shopgoodwill.com/item/{normalized_item_id}"
-    # Future eBay import mapping:
-    # if source == PurchaseFileImportSource.EBAY and normalized_item_id:
-    #     return f"https://www.ebay.com/itm/{normalized_item_id}"
+    if source in {PurchaseFileImportSource.EBAY_MEKONG, PurchaseFileImportSource.EBAY_PURCHASING} and normalized_item_id:
+        return f"https://www.ebay.com/itm/{normalized_item_id}"
 
     return None
 
@@ -319,6 +320,7 @@ async def update_vendor(
 async def list_purchase_orders(
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    po_number: Annotated[str | None, Query()] = None,
     order_date_from: Annotated[date | None, Query()] = None,
     order_date_to: Annotated[date | None, Query()] = None,
     deliver_status: Annotated[PurchaseDeliverStatus | None, Query()] = None,
@@ -331,6 +333,7 @@ async def list_purchase_orders(
     rows = await repo.get_multi_with_date_filters(
         skip=skip,
         limit=limit,
+        po_number=po_number,
         order_date_from=order_date_from,
         order_date_to=order_date_to,
         deliver_status=deliver_status,
@@ -1283,6 +1286,12 @@ async def _import_purchase_file_by_source(
 
     content = _decode_upload_text(raw)
 
+    if source in {PurchaseFileImportSource.EBAY_MEKONG, PurchaseFileImportSource.EBAY_PURCHASING}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="eBay sources require date-range API import endpoint, not file upload",
+        )
+
     if source == PurchaseFileImportSource.GOODWILL:
         return await _import_goodwill_csv(content, vendor_repo, po_repo, po_item_repo, db)
     if source == PurchaseFileImportSource.AMAZON:
@@ -1291,6 +1300,149 @@ async def _import_purchase_file_by_source(
         return await _import_aliexpress_json(content, vendor_repo, po_repo, po_item_repo, db)
 
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported import source")
+
+
+def _build_ebay_purchase_client(source: PurchaseFileImportSource) -> EbayClient:
+    refresh_token_map = {
+        PurchaseFileImportSource.EBAY_MEKONG: settings.ebay_refresh_token_mekong,
+        PurchaseFileImportSource.EBAY_PURCHASING: settings.ebay_refresh_token_purchasing,
+    }
+    store_name_map = {
+        PurchaseFileImportSource.EBAY_MEKONG: "MEKONG",
+        PurchaseFileImportSource.EBAY_PURCHASING: "PURCHASING",
+    }
+
+    refresh_token = refresh_token_map.get(source)
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Missing refresh token for source '{source.value}'",
+        )
+
+    if not settings.ebay_app_id or not settings.ebay_cert_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="eBay app credentials are not configured",
+        )
+
+    return EbayClient(
+        store_name=store_name_map[source],
+        app_id=settings.ebay_app_id,
+        cert_id=settings.ebay_cert_id,
+        refresh_token=refresh_token,
+        sandbox=settings.ebay_sandbox,
+    )
+
+
+async def _import_ebay_purchase_api(
+    source: PurchaseFileImportSource,
+    order_date_from: date,
+    order_date_to: date,
+    vendor_repo: VendorRepository,
+    po_repo: PurchaseOrderRepository,
+    po_item_repo: PurchaseOrderItemRepository,
+    db: AsyncSession,
+) -> PurchaseFileImportResponse:
+    if source not in {PurchaseFileImportSource.EBAY_MEKONG, PurchaseFileImportSource.EBAY_PURCHASING}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported eBay source")
+
+    client = _build_ebay_purchase_client(source)
+    since_dt = datetime.combine(order_date_from, datetime.min.time())
+    until_dt = datetime.combine(order_date_to, datetime.max.time())
+
+    try:
+        ebay_orders = await client.fetch_buying_orders_xml(since=since_dt, until=until_dt)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to import from eBay source '{source.value}': {exc}",
+        )
+
+    vendor_cache: dict[str, int] = {}
+    result = PurchaseFileImportResponse(source=source)
+
+    for order in ebay_orders:
+        result.source_rows_seen += 1
+
+        po_number = str(order.get("po_number") or "").strip()
+        items = order.get("items") or []
+        if not po_number or not isinstance(items, list) or not items:
+            result.source_rows_skipped += 1
+            continue
+
+        vendor_name = str(order.get("vendor_name") or f"eBay {source.value}").strip() or f"eBay {source.value}"
+        vendor_id = await _resolve_vendor_id(vendor_name, vendor_repo, db, vendor_cache)
+
+        order_date_value = order.get("order_date")
+        if not isinstance(order_date_value, date):
+            order_date_value = order_date_from
+
+        total_amount = _to_decimal(order.get("total_amount"), default="0")
+        tax_amount = _to_decimal(order.get("tax_amount"), default="0")
+        shipping_amount = _to_decimal(order.get("shipping_amount"), default="0")
+        handling_amount = _to_decimal(order.get("handling_amount"), default="0")
+        if total_amount <= 0:
+            total_amount = sum(
+                (_to_decimal(i.get("unit_price"), default="0") * _to_int(i.get("quantity"), default=0) for i in items),
+                Decimal("0"),
+            ) + tax_amount + shipping_amount + handling_amount
+
+        po_payload = {
+            "po_number": po_number,
+            "vendor_id": vendor_id,
+            "deliver_status": PurchaseDeliverStatus.CREATED,
+            "order_date": order_date_value,
+            "expected_delivery_date": None,
+            "total_amount": total_amount,
+            "currency": _normalize_currency(order.get("currency") or "USD"),
+            "tracking_number": str(order.get("tracking_number") or "").strip() or None,
+            "tax_amount": tax_amount,
+            "shipping_amount": shipping_amount,
+            "handling_amount": handling_amount,
+            "source": "EBAY_BUYING_API",
+            "notes": f"Imported via eBay GetMyeBayBuying ({source.value}).",
+            "zoho_sync_status": ZohoSyncStatus.DIRTY,
+            "zoho_sync_error": None,
+        }
+
+        existing_po = await po_repo.get_by_field("po_number", po_number)
+        if existing_po is None:
+            local_po = await po_repo.create(po_payload)
+            await db.flush()
+            result.purchase_orders_created += 1
+        else:
+            local_po = await po_repo.update(existing_po, po_payload)
+            await db.flush()
+            result.purchase_orders_updated += 1
+
+        for item in items:
+            item_id = str(item.get("external_item_id") or "").strip() or None
+            purchase_item_link = (
+                str(item.get("purchase_item_link") or "").strip()
+                or _build_purchase_item_link(source, item_id=item_id)
+            )
+            item_name = str(item.get("external_item_name") or "").strip()
+            quantity = _to_int(item.get("quantity"), default=0)
+            unit_price = _to_decimal(item.get("unit_price"), default="0")
+            if not item_name or quantity <= 0:
+                result.source_rows_skipped += 1
+                continue
+
+            await _upsert_purchase_item(
+                local_po_id=local_po.id,
+                item_id=item_id,
+                purchase_item_link=purchase_item_link,
+                item_name=item_name,
+                quantity=quantity,
+                unit_price=unit_price,
+                po_item_repo=po_item_repo,
+                db=db,
+                result=result,
+            )
+
+    return result
 
 
 @router.post("/purchases/import/file", response_model=PurchaseFileImportResponse)
@@ -1313,6 +1465,44 @@ async def import_purchasing_from_file(
     )
     await db.commit()
     await file.close()
+    return result
+
+
+@router.post("/purchases/import/ebay", response_model=PurchaseFileImportResponse)
+async def import_purchasing_from_ebay_api(
+    _current_user: CurrentUser,
+    source: PurchaseFileImportSource = Query(...),
+    order_date_from: Annotated[date | None, Query()] = None,
+    order_date_to: Annotated[date | None, Query()] = None,
+    vendor_repo: VendorRepository = Depends(get_vendor_repo),
+    po_repo: PurchaseOrderRepository = Depends(get_purchase_order_repo),
+    po_item_repo: PurchaseOrderItemRepository = Depends(get_purchase_order_item_repo),
+    db: AsyncSession = Depends(get_db),
+):
+    if source not in {PurchaseFileImportSource.EBAY_MEKONG, PurchaseFileImportSource.EBAY_PURCHASING}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported eBay import source")
+
+    if order_date_from is None or order_date_to is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="order_date_from and order_date_to are required",
+        )
+    if order_date_from > order_date_to:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="order_date_from must be less than or equal to order_date_to",
+        )
+
+    result = await _import_ebay_purchase_api(
+        source=source,
+        order_date_from=order_date_from,
+        order_date_to=order_date_to,
+        vendor_repo=vendor_repo,
+        po_repo=po_repo,
+        po_item_repo=po_item_repo,
+        db=db,
+    )
+    await db.commit()
     return result
 
 

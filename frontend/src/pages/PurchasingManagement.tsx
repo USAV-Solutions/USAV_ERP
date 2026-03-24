@@ -47,6 +47,7 @@ import {
   createPurchaseOrder,
   createVendor,
   deletePurchaseItem,
+  importPurchasesFromEbay,
   importPurchasesFromFile,
   importPurchasesFromZoho,
   listPurchaseOrdersPaged,
@@ -486,6 +487,7 @@ export default function PurchasingManagement() {
   const [deliverStatusFilter, setDeliverStatusFilter] = useState<PurchaseDeliverStatus | 'ALL'>('ALL')
   const [itemMatchFilter, setItemMatchFilter] = useState<'ALL' | 'MATCHED' | 'UNMATCHED'>('ALL')
   const [zohoSyncFilter, setZohoSyncFilter] = useState<ZohoSyncStatus | 'ALL'>('ALL')
+  const [poNumberSearch, setPoNumberSearch] = useState('')
   const [orderDateFrom, setOrderDateFrom] = useState('')
   const [orderDateTo, setOrderDateTo] = useState('')
   const [selectedPoId, setSelectedPoId] = useState<number | null>(null)
@@ -500,6 +502,9 @@ export default function PurchasingManagement() {
   const [addingItemPoId, setAddingItemPoId] = useState<number | null>(null)
   const purchaseFileInputRef = useRef<HTMLInputElement | null>(null)
   const [importPurchaseOpen, setImportPurchaseOpen] = useState(false)
+  const [importPurchaseEbayRangeOpen, setImportPurchaseEbayRangeOpen] = useState(false)
+  const [importPurchaseEbayRangeFrom, setImportPurchaseEbayRangeFrom] = useState('')
+  const [importPurchaseEbayRangeTo, setImportPurchaseEbayRangeTo] = useState('')
   const [importZohoRangeOpen, setImportZohoRangeOpen] = useState(false)
   const [importZohoRangeFrom, setImportZohoRangeFrom] = useState('')
   const [importZohoRangeTo, setImportZohoRangeTo] = useState('')
@@ -537,6 +542,7 @@ export default function PurchasingManagement() {
       deliverStatusFilter,
       itemMatchFilter,
       zohoSyncFilter,
+      poNumberSearch,
       orderDateFrom,
       orderDateTo,
     ],
@@ -546,6 +552,7 @@ export default function PurchasingManagement() {
         limit: rowsPerPage + 1,
         sortBy,
         sortDir,
+        poNumber: poNumberSearch || undefined,
         deliverStatus: deliverStatusFilter === 'ALL' ? undefined : deliverStatusFilter,
         itemMatchStatus:
           itemMatchFilter === 'ALL' ? undefined : itemMatchFilter === 'MATCHED' ? 'matched' : 'unmatched',
@@ -630,7 +637,15 @@ export default function PurchasingManagement() {
       await queryClient.invalidateQueries({ queryKey: ['vendors'] })
       await queryClient.invalidateQueries({ queryKey: ['purchases'] })
       const sourceLabel =
-        res.source === 'goodwill' ? 'Goodwill CSV' : res.source === 'amazon' ? 'Amazon CSV' : 'AliExpress JSON'
+        res.source === 'goodwill'
+          ? 'Goodwill CSV'
+          : res.source === 'amazon'
+            ? 'Amazon CSV'
+            : res.source === 'aliexpress'
+              ? 'AliExpress JSON'
+              : res.source === 'ebay_mekong'
+                ? 'eBay Mekong API'
+                : 'eBay Purchasing API'
       setSnackbar({
         open: true,
         severity: 'success',
@@ -645,7 +660,44 @@ export default function PurchasingManagement() {
     },
   })
 
+  const importPurchaseEbayMutation = useMutation({
+    mutationFn: (params: {
+      source: 'ebay_mekong' | 'ebay_purchasing'
+      orderDateFrom: string
+      orderDateTo: string
+    }) => importPurchasesFromEbay(params),
+    onSuccess: async (res) => {
+      await queryClient.invalidateQueries({ queryKey: ['vendors'] })
+      await queryClient.invalidateQueries({ queryKey: ['purchases'] })
+      setImportPurchaseEbayRangeOpen(false)
+      const sourceLabel = res.source === 'ebay_mekong' ? 'eBay Mekong API' : 'eBay Purchasing API'
+      setSnackbar({
+        open: true,
+        severity: 'success',
+        msg:
+          `${sourceLabel} import done: ${res.purchase_orders_created} PO created, ` +
+          `${res.purchase_orders_updated} PO updated, ` +
+          `${res.purchase_order_items_created} items created, ${res.purchase_order_items_updated} items updated.`,
+      })
+    },
+    onError: (error: { response?: { data?: { detail?: string } } }) => {
+      setSnackbar({
+        open: true,
+        msg: error.response?.data?.detail || 'Failed to import eBay purchases.',
+        severity: 'error',
+      })
+    },
+  })
+
+  const isEbayPurchaseSource =
+    purchaseImportSource === 'ebay_mekong' || purchaseImportSource === 'ebay_purchasing'
+
   const handlePurchaseImportSelected = (event: ChangeEvent<HTMLInputElement>) => {
+    if (isEbayPurchaseSource) {
+      event.target.value = ''
+      return
+    }
+
     const file = event.target.files?.[0]
     if (!file) {
       return
@@ -735,9 +787,11 @@ export default function PurchasingManagement() {
           <Button
             variant="outlined"
             onClick={() => setImportPurchaseOpen(true)}
-            disabled={importPurchaseFileMutation.isPending}
+            disabled={importPurchaseFileMutation.isPending || importPurchaseEbayMutation.isPending}
           >
-            {importPurchaseFileMutation.isPending ? 'Importing file...' : 'Import Purchase'}
+            {importPurchaseFileMutation.isPending || importPurchaseEbayMutation.isPending
+              ? 'Importing...'
+              : 'Import Purchase'}
           </Button>
           <Button startIcon={<Add />} variant="contained" onClick={() => setCreatePoOpen(true)}>
             Create PO
@@ -837,6 +891,16 @@ export default function PurchasingManagement() {
               </FormControl>
               <TextField
                 size="small"
+                label="Search PO #"
+                value={poNumberSearch}
+                onChange={(e) => {
+                  setPoNumberSearch(e.target.value)
+                  setPage(0)
+                }}
+                sx={{ minWidth: 180 }}
+              />
+              <TextField
+                size="small"
                 type="date"
                 label="From"
                 InputLabelProps={{ shrink: true }}
@@ -865,6 +929,7 @@ export default function PurchasingManagement() {
                   setDeliverStatusFilter('ALL')
                   setItemMatchFilter('ALL')
                   setZohoSyncFilter('ALL')
+                  setPoNumberSearch('')
                   setSortBy('order_date')
                   setSortDir('desc')
                   setPage(0)
@@ -875,6 +940,7 @@ export default function PurchasingManagement() {
                   deliverStatusFilter === 'ALL' &&
                   itemMatchFilter === 'ALL' &&
                   zohoSyncFilter === 'ALL' &&
+                  !poNumberSearch &&
                   sortBy === 'order_date' &&
                   sortDir === 'desc'
                 }
@@ -891,18 +957,13 @@ export default function PurchasingManagement() {
                     <TableRow>
                       <TableCell sx={{ width: 44 }} />
                       <TableCell>PO #</TableCell>
-                      <TableCell>Vendor</TableCell>
                       <TableCell>Date</TableCell>
                       <TableCell>Tracking #</TableCell>
+                      <TableCell>Expected Delivery</TableCell>
                       <TableCell>Status</TableCell>
-                      <TableCell align="center">Items</TableCell>
                       <TableCell align="center">Unmatched</TableCell>
-                      <TableCell align="right">Tax</TableCell>
-                      <TableCell align="right">Shipping</TableCell>
-                      <TableCell align="right">Handling</TableCell>
                       <TableCell align="right">Total</TableCell>
-                      <TableCell align="center">Zoho Sync</TableCell>
-                      <TableCell align="center">Zoho</TableCell>
+                      <TableCell align="center">Zoho Sync Status</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -926,13 +987,12 @@ export default function PurchasingManagement() {
                               </IconButton>
                             </TableCell>
                             <TableCell>{po.po_number}</TableCell>
-                            <TableCell>{po.vendor?.name || po.vendor_id}</TableCell>
                             <TableCell>{po.order_date}</TableCell>
                             <TableCell>{po.tracking_number || '-'}</TableCell>
+                            <TableCell>{po.expected_delivery_date || '-'}</TableCell>
                             <TableCell>
                               <Chip size="small" color={statusColor[po.deliver_status]} label={po.deliver_status} />
                             </TableCell>
-                            <TableCell align="center">{po.items?.length ?? 0}</TableCell>
                             <TableCell align="center">
                               <Chip
                                 size="small"
@@ -940,9 +1000,6 @@ export default function PurchasingManagement() {
                                 label={unmatchedCount}
                               />
                             </TableCell>
-                            <TableCell align="right">{po.tax_amount ?? 0}</TableCell>
-                            <TableCell align="right">{po.shipping_amount ?? 0}</TableCell>
-                            <TableCell align="right">{po.handling_amount ?? 0}</TableCell>
                             <TableCell align="right">
                               {po.total_amount} {po.currency}
                             </TableCell>
@@ -954,25 +1011,57 @@ export default function PurchasingManagement() {
                                 title={po.zoho_sync_error || ''}
                               />
                             </TableCell>
-                            <TableCell align="center">
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                startIcon={syncingPoId === po.id ? <CircularProgress size={14} /> : <CloudSync />}
-                                disabled={!canSyncPo(po) || syncingPoId === po.id}
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  forceSyncPoMutation.mutate(po.id)
-                                }}
-                              >
-                                Sync
-                              </Button>
-                            </TableCell>
                           </TableRow>
                           <TableRow>
-                            <TableCell colSpan={14} sx={{ py: 0 }}>
+                            <TableCell colSpan={9} sx={{ py: 0 }}>
                               <Collapse in={expanded} timeout="auto" unmountOnExit>
                                 <Box sx={{ p: 1.5, bgcolor: 'action.hover' }}>
+                                  <Grid container spacing={1.5} sx={{ mb: 1.25 }}>
+                                    <Grid item xs={12} md={3}>
+                                      <Typography variant="caption" color="text.secondary">Vendor</Typography>
+                                      <Typography variant="body2">{po.vendor?.name || po.vendor_id}</Typography>
+                                    </Grid>
+                                    <Grid item xs={12} md={2}>
+                                      <Typography variant="caption" color="text.secondary">Zoho ID</Typography>
+                                      <Typography variant="body2">{po.zoho_id || '-'}</Typography>
+                                    </Grid>
+                                    <Grid item xs={12} md={2}>
+                                      <Typography variant="caption" color="text.secondary">Source</Typography>
+                                      <Typography variant="body2">{po.source || '-'}</Typography>
+                                    </Grid>
+                                    <Grid item xs={12} md={2}>
+                                      <Typography variant="caption" color="text.secondary">Tax</Typography>
+                                      <Typography variant="body2">{po.tax_amount ?? 0}</Typography>
+                                    </Grid>
+                                    <Grid item xs={12} md={2}>
+                                      <Typography variant="caption" color="text.secondary">Shipping</Typography>
+                                      <Typography variant="body2">{po.shipping_amount ?? 0}</Typography>
+                                    </Grid>
+                                    <Grid item xs={12} md={2}>
+                                      <Typography variant="caption" color="text.secondary">Handling</Typography>
+                                      <Typography variant="body2">{po.handling_amount ?? 0}</Typography>
+                                    </Grid>
+                                    <Grid item xs={12} md={6}>
+                                      <Typography variant="caption" color="text.secondary">Notes</Typography>
+                                      <Typography variant="body2">{po.notes || '-'}</Typography>
+                                    </Grid>
+                                    <Grid item xs={12} md={6}>
+                                      <Stack direction="row" justifyContent={{ xs: 'flex-start', md: 'flex-end' }}>
+                                        <Button
+                                          size="small"
+                                          variant="outlined"
+                                          startIcon={syncingPoId === po.id ? <CircularProgress size={14} /> : <CloudSync />}
+                                          disabled={!canSyncPo(po) || syncingPoId === po.id}
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            forceSyncPoMutation.mutate(po.id)
+                                          }}
+                                        >
+                                          Zoho Sync
+                                        </Button>
+                                      </Stack>
+                                    </Grid>
+                                  </Grid>
                                   <Typography variant="subtitle2" sx={{ mb: 1 }}>
                                     Line Items
                                   </Typography>
@@ -1316,25 +1405,97 @@ export default function PurchasingManagement() {
                 <MenuItem value="goodwill">Goodwill (CSV)</MenuItem>
                 <MenuItem value="amazon">Amazon (CSV)</MenuItem>
                 <MenuItem value="aliexpress">AliExpress (JSON)</MenuItem>
+                <MenuItem value="ebay_mekong">eBay Mekong (API)</MenuItem>
+                <MenuItem value="ebay_purchasing">eBay Purchasing (API)</MenuItem>
               </Select>
             </FormControl>
             <Alert severity="info">
               {purchaseImportSource === 'aliexpress'
                 ? 'Upload a JSON file exported from AliExpress orders.'
-                : 'Upload a CSV file exported from the selected source.'}
+                : isEbayPurchaseSource
+                  ? 'After continuing, choose the date range to import from eBay API.'
+                  : 'Upload a CSV file exported from the selected source.'}
             </Alert>
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setImportPurchaseOpen(false)} disabled={importPurchaseFileMutation.isPending}>
+          <Button
+            onClick={() => setImportPurchaseOpen(false)}
+            disabled={importPurchaseFileMutation.isPending || importPurchaseEbayMutation.isPending}
+          >
             Cancel
           </Button>
           <Button
             variant="contained"
-            disabled={importPurchaseFileMutation.isPending}
-            onClick={() => purchaseFileInputRef.current?.click()}
+            disabled={importPurchaseFileMutation.isPending || importPurchaseEbayMutation.isPending}
+            onClick={() => {
+              if (isEbayPurchaseSource) {
+                setImportPurchaseEbayRangeFrom(orderDateFrom)
+                setImportPurchaseEbayRangeTo(orderDateTo)
+                setImportPurchaseEbayRangeOpen(true)
+                setImportPurchaseOpen(false)
+                return
+              }
+              purchaseFileInputRef.current?.click()
+            }}
           >
-            Select File
+            {isEbayPurchaseSource ? 'Continue' : 'Select File'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={importPurchaseEbayRangeOpen}
+        onClose={() => setImportPurchaseEbayRangeOpen(false)}
+        fullWidth
+        maxWidth="xs"
+      >
+        <DialogTitle>Import eBay Purchases</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              label="From"
+              type="date"
+              value={importPurchaseEbayRangeFrom}
+              onChange={(e) => setImportPurchaseEbayRangeFrom(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              fullWidth
+            />
+            <TextField
+              label="To"
+              type="date"
+              value={importPurchaseEbayRangeTo}
+              onChange={(e) => setImportPurchaseEbayRangeTo(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              fullWidth
+            />
+            <Alert severity="info">
+              Source: {purchaseImportSource === 'ebay_mekong' ? 'eBay Mekong' : 'eBay Purchasing'}
+            </Alert>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setImportPurchaseEbayRangeOpen(false)} disabled={importPurchaseEbayMutation.isPending}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            disabled={
+              importPurchaseEbayMutation.isPending ||
+              !importPurchaseEbayRangeFrom ||
+              !importPurchaseEbayRangeTo ||
+              importPurchaseEbayRangeFrom > importPurchaseEbayRangeTo ||
+              !isEbayPurchaseSource
+            }
+            onClick={() =>
+              importPurchaseEbayMutation.mutate({
+                source: purchaseImportSource as 'ebay_mekong' | 'ebay_purchasing',
+                orderDateFrom: importPurchaseEbayRangeFrom,
+                orderDateTo: importPurchaseEbayRangeTo,
+              })
+            }
+          >
+            {importPurchaseEbayMutation.isPending ? 'Importing...' : 'Import'}
           </Button>
         </DialogActions>
       </Dialog>

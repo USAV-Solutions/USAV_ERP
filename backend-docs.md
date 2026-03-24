@@ -218,13 +218,9 @@ Backend/
 │   ├── backfill_variant_name_from_listings.py   # Populate variant_name from listings
 │   ├── backfill_bundle_default_variants.py      # Repairs missing default bundle variants
 │   ├── create_admin_user.sql                    # SQL to seed admin user
-│   ├── download_image_candidates.py             # Downloads extracted image URLs into temp platform folders
-│   ├── flatten_and_dedupe.py                    # pHash-based visual dedupe + flattening per SKU
 │   ├── generate_hash.py                         # bcrypt password hash utility
-│   ├── generate_image_tasks.py                  # Exports listing-backed SKU image tasks from DB
 │   ├── import_csv_to_database.py               # CSV→API product import pipeline
 │   ├── import_databasework_restart.py           # Direct DB restart importer (products/parts/bundles)
-│   ├── sync_thumbnails_to_db.py                 # Writes flattened primary image URLs to ProductVariant.thumbnail_url
 │   └── test_api_manual.py                       # Manual API smoke tests
 │
 └── tests/
