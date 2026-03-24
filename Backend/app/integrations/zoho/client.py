@@ -775,18 +775,92 @@ class ZohoClient:
         result = await self._request("GET", f"/bills/{bill_id}")
         return result.get("bill", {})
 
+    async def list_bills(
+        self,
+        *,
+        date_start: Optional[str] = None,
+        date_end: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 200,
+    ) -> List[dict]:
+        """List bills from Zoho Books with optional date range and pagination."""
+        params: dict[str, Any] = {
+            "page": page,
+            "per_page": per_page,
+            "filter_by": "Status.All",
+        }
+        if date_start:
+            params["date_start"] = date_start
+        if date_end:
+            params["date_end"] = date_end
+        result = await self._request("GET", "/bills", api="books", params=params)
+        return result.get("bills", [])
+
+    async def list_bill_payments(self, bill_id: str) -> List[dict]:
+        """List payments applied to a bill from Zoho Books."""
+        result = await self._request("GET", f"/bills/{bill_id}/payments", api="books")
+        return result.get("payments", [])
+
+    async def delete_bill_payment(self, bill_id: str, bill_payment_id: str) -> dict:
+        """Delete a bill payment in Zoho Books."""
+        return await self._request(
+            "DELETE",
+            f"/bills/{bill_id}/payments/{bill_payment_id}",
+            api="books",
+        )
+
+    async def delete_bill_payment_reference(self, payment: dict) -> dict:
+        """Delete a bill payment from a payment payload object.
+
+        Accepts payloads with keys commonly returned by Zoho (`bill_id`, `bill_payment_id`).
+        """
+        bill_id = str((payment or {}).get("bill_id") or "").strip()
+        bill_payment_id = str((payment or {}).get("bill_payment_id") or "").strip()
+        if not bill_id or not bill_payment_id:
+            raise ValueError("payment payload must include bill_id and bill_payment_id")
+        return await self.delete_bill_payment(bill_id=bill_id, bill_payment_id=bill_payment_id)
+
     async def delete_bill(self, bill_id: str) -> dict:
         """Delete a bill in Zoho Inventory."""
-        return await self._request("DELETE", f"/bills/{bill_id}")
+        return await self._request("DELETE", f"/bills/{bill_id}", api="books")
 
     async def create_bill(self, bill_data: dict) -> dict:
         """Create a bill in Zoho Inventory."""
         result = await self._request(
             "POST",
             "/bills",
+            api="books",
             data={"JSONString": json.dumps(bill_data)},
         )
         return result.get("bill", {})
+
+    async def list_purchase_receives(
+        self,
+        *,
+        purchaseorder_id: Optional[str] = None,
+        date_start: Optional[str] = None,
+        date_end: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 200,
+    ) -> List[dict]:
+        """List purchase receives with optional PO/date filters."""
+        params: dict[str, Any] = {"page": page, "per_page": per_page}
+        if purchaseorder_id:
+            params["purchaseorder_id"] = purchaseorder_id
+        if date_start:
+            params["date_start"] = date_start
+        if date_end:
+            params["date_end"] = date_end
+
+        result = await self._request("GET", "/purchasereceives", params=params)
+        receives = result.get("purchase_receives")
+        if receives is None:
+            receives = result.get("purchasereceives", [])
+        return receives or []
+
+    async def delete_purchase_receive(self, purchase_receive_id: str) -> dict:
+        """Delete a purchase receive in Zoho Inventory."""
+        return await self._request("DELETE", f"/purchasereceives/{purchase_receive_id}")
 
     async def ensure_item_by_sku(
         self,
