@@ -7,7 +7,7 @@
  * Match action uses an Autocomplete that searches variants by product
  * name or SKU via GET /variants/search?q=...
  */
-import React, { useState, type MouseEvent } from 'react'
+import { useState, type MouseEvent } from 'react'
 import {
   Box,
   Typography,
@@ -16,7 +16,6 @@ import {
   TableCell,
   TableHead,
   TableRow,
-  TextField,
   IconButton,
   Tooltip,
   CircularProgress,

@@ -33,7 +33,6 @@ import {
 } from '@mui/material'
 import {
   Add,
-  Search,
   Refresh,
   Error as ErrorIcon,
   CheckCircle,
@@ -366,12 +365,6 @@ export default function ProductListings() {
       ])
     })
   }, [enhancedListings, debouncedSearch])
-
-  // Paginated data
-  const paginatedData = filteredListings.slice(
-    page * rowsPerPage,
-    page * rowsPerPage + rowsPerPage
-  )
 
   // Group listings by product family
   interface FamilyGroup {

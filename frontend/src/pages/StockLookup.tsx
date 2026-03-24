@@ -59,8 +59,8 @@ export default function StockLookup() {
   }
 
   const rows = (data?.items || []).map((item: InventoryItem, index: number) => ({
-    id: item.id || index,
     ...item,
+    id: item.id || index,
   }))
 
   return (

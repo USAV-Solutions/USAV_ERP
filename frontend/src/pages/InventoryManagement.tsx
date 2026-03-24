@@ -47,6 +47,7 @@ import { CATALOG, IMAGES, ZOHO } from '../api/endpoints'
 import { Variant, ProductIdentity, ProductFamily, ProductType } from '../types/inventory'
 import { useAuth } from '../hooks/useAuth'
 import CreateProductDialog from '../components/inventory/CreateProductDialog'
+import CreateCatalogItemDialog from '../components/inventory/CreateCatalogItemDialog'
 import ProductThumbnail from '../components/inventory/ProductThumbnail'
 import ImageGalleryModal from '../components/inventory/ImageGalleryModal'
 import VariantImageDialog from '../components/inventory/VariantImageDialog'
@@ -91,20 +92,6 @@ interface ThumbnailBackfillResponse {
   updated: number
   failed: number
   remaining_null_thumbnail_url: number
-}
-
-interface ZohoSyncProgressResponse {
-  job_id: string
-  status: 'idle' | 'queued' | 'running' | 'stopping' | 'stopped' | 'completed' | 'failed'
-  started_at?: string | null
-  finished_at?: string | null
-  total_target: number
-  total_processed: number
-  total_success: number
-  total_failed: number
-  current_sku?: string | null
-  cancel_requested: boolean
-  last_error?: string | null
 }
 
 interface ZohoBulkSyncItemResult {
@@ -322,6 +309,7 @@ export default function InventoryManagement() {
   const [searchInput, setSearchInput] = useState('')
   const debouncedSearch = useDebouncedValue(searchInput, 200)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [createCatalogDialogOpen, setCreateCatalogDialogOpen] = useState(false)
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(25)
@@ -771,6 +759,13 @@ export default function InventoryManagement() {
               {backfillThumbnailsMutation.isPending ? 'Backfilling...' : 'Backfill Thumbnails'}
             </Button>
             <Button
+              variant="outlined"
+              startIcon={<Add />}
+              onClick={() => setCreateCatalogDialogOpen(true)}
+            >
+              Add Product
+            </Button>
+            <Button
               variant="contained"
               startIcon={<Add />}
               onClick={() => setCreateDialogOpen(true)}
@@ -1179,6 +1174,11 @@ export default function InventoryManagement() {
         open={createDialogOpen}
         onClose={() => setCreateDialogOpen(false)}
         onCreated={(sku) => setManageImagesSku(sku)}
+      />
+
+      <CreateCatalogItemDialog
+        open={createCatalogDialogOpen}
+        onClose={() => setCreateCatalogDialogOpen(false)}
       />
 
       {/* Image Gallery Modal (read-only preview) */}

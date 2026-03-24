@@ -7,7 +7,7 @@
  *   - Paginated MUI Table of OrderBrief rows with expandable item rows
  *   - OrderSyncButton in the header
  */
-import { useState, Fragment, SyntheticEvent } from 'react'
+import { useState, Fragment } from 'react'
 import {
   Box,
   Typography,
@@ -55,7 +55,6 @@ import { forceSyncOrder } from '../api/sync'
 import type {
   OrderBrief,
   OrderListResponse,
-  OrderDetail,
   OrderPlatform,
   OrderStatus,
   OrderItemStatus,
@@ -115,15 +114,6 @@ const SHIPPING_STATUS_OPTIONS: ShippingStatus[] = [
   'DELIVERED',
 ]
 
-const SHIPPING_STATUS_COLOR: Record<ShippingStatus, 'default' | 'warning' | 'error' | 'info' | 'primary' | 'success'> = {
-  PENDING: 'default',
-  ON_HOLD: 'warning',
-  CANCELLED: 'error',
-  PACKED: 'info',
-  SHIPPING: 'primary',
-  DELIVERED: 'success',
-}
-
 const ZOHO_SYNC_COLOR: Record<ZohoSyncStatus, 'default' | 'success' | 'error' | 'warning'> = {
   PENDING: 'warning',
   DIRTY: 'warning',
@@ -156,7 +146,6 @@ export default function OrdersManagement() {
   const [snackbarOpen, setSnackbarOpen] = useState(false)
   const [snackbarMessage, setSnackbarMessage] = useState('')
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success')
-  const [statusUpdatingId, setStatusUpdatingId] = useState<number | null>(null)
   const [shippingUpdatingId, setShippingUpdatingId] = useState<number | null>(null)
   const [holdPromptOpen, setHoldPromptOpen] = useState(false)
   const [selectedOrder, setSelectedOrder] = useState<OrderBrief | null>(null)
@@ -176,7 +165,6 @@ export default function OrdersManagement() {
 
   const {
     data: syncStatus,
-    isLoading: syncLoading,
   } = useQuery<SyncStatusResponse>({
     queryKey: ['syncStatus'],
     queryFn: getSyncStatus,
@@ -217,25 +205,6 @@ export default function OrdersManagement() {
       setSnackbarOpen(true)
       setSyncingOrderId(null)
     },
-  })
-
-  const updateStatusMutation = useMutation({
-    mutationFn: ({ orderId, status }: { orderId: number; status: OrderStatus }) =>
-      updateOrderStatus(orderId, { status }),
-    onMutate: ({ orderId }) => setStatusUpdatingId(orderId),
-    onSuccess: () => {
-      setSnackbarSeverity('success')
-      setSnackbarMessage('Order status updated.')
-      setSnackbarOpen(true)
-      queryClient.invalidateQueries({ queryKey: ['orders'] })
-    },
-    onError: (error: { response?: { data?: { detail?: string } }; message?: string }) => {
-      const detail = error.response?.data?.detail || error.message || 'Update failed.'
-      setSnackbarSeverity('error')
-      setSnackbarMessage(detail)
-      setSnackbarOpen(true)
-    },
-    onSettled: () => setStatusUpdatingId(null),
   })
 
   const updateShippingMutation = useMutation({
@@ -396,12 +365,11 @@ export default function OrdersManagement() {
   const bulkPercent = bulkTotal ? Math.min(Math.round((bulkProgress.queued / bulkTotal) * 100), 100) : 0
   const columnCount = hasRole(['ADMIN']) ? 10 : 9
 
-  const handleStatusChange = (orderId: number, status: OrderStatus, e: SyntheticEvent) => {
-    e.stopPropagation()
-    updateStatusMutation.mutate({ orderId, status })
-  }
-
-  const handleShippingStatusChange = (orderId: number, shipping_status: ShippingStatus, e: SyntheticEvent) => {
+  const handleShippingStatusChange = (
+    orderId: number,
+    shipping_status: ShippingStatus,
+    e: { stopPropagation: () => void },
+  ) => {
     e.stopPropagation()
     updateShippingMutation.mutate({ orderId, shipping_status })
   }
@@ -703,7 +671,7 @@ export default function OrdersManagement() {
                             >
                               {SHIPPING_STATUS_OPTIONS.map((s) => (
                                 <MenuItem key={s} value={s}>
-                                  {s.replaceAll('_', ' ')}
+                                  {s.replace(/_/g, ' ')}
                                 </MenuItem>
                               ))}
                             </Select>
@@ -891,7 +859,7 @@ export default function OrdersManagement() {
             >
               {ORDER_STATUS_OPTIONS.map((s) => (
                 <MenuItem key={s} value={s}>
-                  {s.replaceAll('_', ' ')}
+                  {s.replace(/_/g, ' ')}
                 </MenuItem>
               ))}
             </Select>
@@ -905,7 +873,7 @@ export default function OrdersManagement() {
             >
               {SHIPPING_STATUS_OPTIONS.map((s) => (
                 <MenuItem key={s} value={s}>
-                  {s.replaceAll('_', ' ')}
+                  {s.replace(/_/g, ' ')}
                 </MenuItem>
               ))}
             </Select>
