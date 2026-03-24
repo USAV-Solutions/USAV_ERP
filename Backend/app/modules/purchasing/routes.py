@@ -905,19 +905,32 @@ async def _import_goodwill_csv(
     if not reader.fieldnames:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="CSV header row is missing")
 
-    required_headers = [
-        "Order #",
-        "Item Id",
-        "Item",
-        "Quantity",
-        "Price",
-        "Date",
-        "Tracking #",
-        "Tax",
-        "Shipping",
-        "Handling",
-    ]
-    missing_headers = [h for h in required_headers if h not in reader.fieldnames]
+    header_aliases: dict[str, list[str]] = {
+        "order_number": ["Order #"],
+        "item_id": ["Item Id"],
+        "item_name": ["Item"],
+        "quantity": ["Quantity"],
+        # Legacy goodwill export: Price / Date / Shipping / Handling
+        # Newer goodwill export: Item Price / Order Date / Shipping Price / Handling Price
+        "unit_price": ["Price", "Item Price"],
+        "order_date": ["Date", "Order Date"],
+        "tracking_number": ["Tracking #"],
+        "tax": ["Tax"],
+        "shipping": ["Shipping", "Shipping Price"],
+        "handling": ["Handling", "Handling Price"],
+    }
+
+    def _pick(row_data: dict[str, object], keys: list[str]) -> object:
+        for key in keys:
+            if key in row_data:
+                return row_data.get(key)
+        return None
+
+    missing_headers: list[str] = []
+    for logical_name, aliases in header_aliases.items():
+        if not any(alias in (reader.fieldnames or []) for alias in aliases):
+            missing_headers.append(f"{logical_name} ({'/'.join(aliases)})")
+
     if missing_headers:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -931,28 +944,28 @@ async def _import_goodwill_csv(
     for row in reader:
         result.source_rows_seen += 1
 
-        po_number = str(row.get("Order #") or "").strip()
-        item_id = str(row.get("Item Id") or "").strip() or None
+        po_number = str(_pick(row, header_aliases["order_number"]) or "").strip()
+        item_id = str(_pick(row, header_aliases["item_id"]) or "").strip() or None
         purchase_item_link = _build_purchase_item_link(
             PurchaseFileImportSource.GOODWILL,
             item_id=item_id,
         )
-        item_name = str(row.get("Item") or "").strip()
+        item_name = str(_pick(row, header_aliases["item_name"]) or "").strip()
         if not po_number or not item_name:
             result.source_rows_skipped += 1
             continue
 
-        quantity = _to_int(row.get("Quantity"), default=0)
+        quantity = _to_int(_pick(row, header_aliases["quantity"]), default=0)
         if quantity <= 0:
             result.source_rows_skipped += 1
             continue
 
-        unit_price = _to_decimal(row.get("Price"), default="0")
-        tax_amount = _to_decimal(row.get("Tax"), default="0")
-        shipping_amount = _to_decimal(row.get("Shipping"), default="0")
-        handling_amount = _to_decimal(row.get("Handling"), default="0")
-        order_date = _to_date(row.get("Date"))
-        tracking_number = str(row.get("Tracking #") or "").strip() or None
+        unit_price = _to_decimal(_pick(row, header_aliases["unit_price"]), default="0")
+        tax_amount = _to_decimal(_pick(row, header_aliases["tax"]), default="0")
+        shipping_amount = _to_decimal(_pick(row, header_aliases["shipping"]), default="0")
+        handling_amount = _to_decimal(_pick(row, header_aliases["handling"]), default="0")
+        order_date = _to_date(_pick(row, header_aliases["order_date"]))
+        tracking_number = str(_pick(row, header_aliases["tracking_number"]) or "").strip() or None
         total_amount = (unit_price * quantity) + tax_amount + shipping_amount + handling_amount
 
         existing_po = await po_repo.get_by_field("po_number", po_number)
