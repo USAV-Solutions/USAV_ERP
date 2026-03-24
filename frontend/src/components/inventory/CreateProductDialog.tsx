@@ -12,27 +12,25 @@ import {
   DialogTitle,
   Divider,
   IconButton,
-  InputAdornment,
   Paper,
   Snackbar,
   Stack,
   TextField,
   Typography,
 } from '@mui/material'
-import { Add, Search } from '@mui/icons-material'
+import { Add } from '@mui/icons-material'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import axiosClient from '../../api/axiosClient'
 import { CATALOG, LOOKUPS } from '../../api/endpoints'
-import type { Color, Condition, ProductFamily, ProductIdentity, Variant } from '../../types/inventory'
+import IdentitySearchAutocomplete from '../common/IdentitySearchAutocomplete'
+import type { Color, Condition, IdentitySearchResult, Variant } from '../../types/inventory'
 
 interface CreateProductDialogProps {
   open: boolean
   onClose: () => void
   onCreated?: (fullSku: string) => void
 }
-
-type EnhancedIdentity = ProductIdentity & { family?: ProductFamily }
 
 const normalizeConditionCode = (code: string | undefined): string | undefined => {
   const normalized = (code || '').trim().toUpperCase()
@@ -43,7 +41,7 @@ const normalizeConditionCode = (code: string | undefined): string | undefined =>
 export default function CreateProductDialog({ open, onClose, onCreated }: CreateProductDialogProps) {
   const queryClient = useQueryClient()
 
-  const [selectedParent, setSelectedParent] = useState<EnhancedIdentity | null>(null)
+  const [selectedParent, setSelectedParent] = useState<IdentitySearchResult | null>(null)
   const [variantName, setVariantName] = useState('')
 
   const [selectedColor, setSelectedColor] = useState<Color | null>(null)
@@ -90,24 +88,6 @@ export default function CreateProductDialog({ open, onClose, onCreated }: Create
     enabled: open,
   })
 
-  const { data: identities = [] } = useQuery({
-    queryKey: ['identities'],
-    queryFn: async () => {
-      const response = await axiosClient.get(CATALOG.IDENTITIES, { params: { limit: 1000 } })
-      return response.data.items || []
-    },
-    enabled: open,
-  })
-
-  const { data: families = [] } = useQuery({
-    queryKey: ['families'],
-    queryFn: async () => {
-      const response = await axiosClient.get(CATALOG.FAMILIES, { params: { limit: 1000 } })
-      return response.data.items || []
-    },
-    enabled: open,
-  })
-
   const { data: variants = [] } = useQuery({
     queryKey: ['variants'],
     queryFn: async () => {
@@ -117,19 +97,22 @@ export default function CreateProductDialog({ open, onClose, onCreated }: Create
     enabled: open,
   })
 
-  const enhancedIdentities = useMemo<EnhancedIdentity[]>(() => {
-    const familyMap = new Map<number, ProductFamily>()
-    ;(families as ProductFamily[]).forEach((family) => familyMap.set(family.product_id, family))
-
-    return (identities as ProductIdentity[])
-      .map((identity) => ({ ...identity, family: familyMap.get(identity.product_id) }))
-      .filter((identity) => identity.type === 'Product' || identity.type === 'P')
-  }, [identities, families])
-
   const existingVariantsForParent = useMemo(() => {
     if (!selectedParent) return []
     return (variants as Variant[]).filter((variant) => variant.identity_id === selectedParent.id)
   }, [variants, selectedParent])
+
+  const normalizedColorNameInput = colorNameInput.trim().toLowerCase()
+  const matchingColorByName = (colors as Color[]).find(
+    (color) => color.name.trim().toLowerCase() === normalizedColorNameInput,
+  )
+  const canCreateColor = normalizedColorNameInput.length > 0 && !matchingColorByName
+
+  const normalizedConditionNameInput = conditionNameInput.trim().toLowerCase()
+  const matchingConditionByName = (conditions as Condition[]).find(
+    (condition) => condition.name.trim().toLowerCase() === normalizedConditionNameInput,
+  )
+  const canCreateCondition = normalizedConditionNameInput.length > 0 && !matchingConditionByName
 
   const createColorMutation = useMutation({
     mutationFn: async () => {
@@ -221,6 +204,12 @@ export default function CreateProductDialog({ open, onClose, onCreated }: Create
       return response.data
     },
     onSuccess: async (data) => {
+      queryClient.setQueryData(['variants'], (previous: Variant[] | undefined) => {
+        if (!previous) return previous
+        const exists = previous.some((variant) => variant.id === data?.id)
+        if (exists) return previous
+        return [data as Variant, ...previous]
+      })
       await queryClient.invalidateQueries({ queryKey: ['variants'] })
       await queryClient.invalidateQueries({ queryKey: ['identities'] })
       onClose()
@@ -257,42 +246,15 @@ export default function CreateProductDialog({ open, onClose, onCreated }: Create
             <Typography variant="subtitle2" sx={{ mb: 1 }}>
               Parent Identity (Product / Part)
             </Typography>
-            <Autocomplete
-              options={enhancedIdentities}
+            <IdentitySearchAutocomplete
               value={selectedParent}
-              onChange={(_, value) => {
+              onChange={(value) => {
                 setSelectedParent(value)
-                setVariantName(value?.family?.base_name || '')
+                setVariantName(value?.family_name || '')
               }}
-              getOptionLabel={(option) =>
-                `${option.generated_upis_h} - ${option.family?.base_name || 'Unknown'} (${option.type})`
-              }
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  placeholder="Search by UPIS-H, name, Product or Part..."
-                  InputProps={{
-                    ...params.InputProps,
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <Search />
-                      </InputAdornment>
-                    ),
-                  }}
-                />
-              )}
-              renderOption={(props, option) => (
-                <li {...props} key={option.id}>
-                  <Box>
-                    <Typography variant="body2" fontFamily="monospace">
-                      {option.generated_upis_h}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {(option.family?.base_name || 'Unknown') + ` • ${option.type}`}
-                    </Typography>
-                  </Box>
-                </li>
-              )}
+              includeTypes={['Product', 'P']}
+              placeholder="Search by UPIS-H, identity name, or product family..."
+              width="100%"
             />
 
             {selectedParent && existingVariantsForParent.length > 0 && (
@@ -328,7 +290,15 @@ export default function CreateProductDialog({ open, onClose, onCreated }: Create
                   options={colors as Color[]}
                   value={selectedColor}
                   inputValue={colorNameInput}
-                  onInputChange={(_, value) => setColorNameInput(value)}
+                  onInputChange={(_, value, reason) => {
+                    // Keep free-typed input stable when focus leaves the field.
+                    if (reason === 'input' || reason === 'clear') {
+                      setColorNameInput(value)
+                      if (reason === 'input' && selectedColor && selectedColor.name !== value) {
+                        setSelectedColor(null)
+                      }
+                    }
+                  }}
                   onChange={(_, value) => {
                     setSelectedColor(value)
                     setColorNameInput(value?.name || '')
@@ -342,12 +312,13 @@ export default function CreateProductDialog({ open, onClose, onCreated }: Create
                   value={newColorCode}
                   onChange={(e) => setNewColorCode(e.target.value.toUpperCase().slice(0, 2))}
                   sx={{ width: 90 }}
+                  disabled={!canCreateColor}
                   inputProps={{ maxLength: 2 }}
                 />
                 <IconButton
                   color="primary"
                   onClick={() => createColorMutation.mutate()}
-                  disabled={createColorMutation.isPending}
+                  disabled={!canCreateColor || newColorCode.trim().length !== 2 || createColorMutation.isPending}
                 >
                   {createColorMutation.isPending ? <CircularProgress size={16} /> : <Add />}
                 </IconButton>
@@ -360,7 +331,15 @@ export default function CreateProductDialog({ open, onClose, onCreated }: Create
                   options={conditions as Condition[]}
                   value={selectedCondition}
                   inputValue={conditionNameInput}
-                  onInputChange={(_, value) => setConditionNameInput(value)}
+                  onInputChange={(_, value, reason) => {
+                    // Keep free-typed input stable when focus leaves the field.
+                    if (reason === 'input' || reason === 'clear') {
+                      setConditionNameInput(value)
+                      if (reason === 'input' && selectedCondition && selectedCondition.name !== value) {
+                        setSelectedCondition(null)
+                      }
+                    }
+                  }}
                   onChange={(_, value) => {
                     setSelectedCondition(value)
                     setConditionNameInput(value?.name || '')
@@ -374,12 +353,15 @@ export default function CreateProductDialog({ open, onClose, onCreated }: Create
                   value={newConditionCode}
                   onChange={(e) => setNewConditionCode(e.target.value.toUpperCase().slice(0, 1))}
                   sx={{ width: 90 }}
+                  disabled={!canCreateCondition}
                   inputProps={{ maxLength: 1 }}
                 />
                 <IconButton
                   color="primary"
                   onClick={() => createConditionMutation.mutate()}
-                  disabled={createConditionMutation.isPending}
+                  disabled={
+                    !canCreateCondition || newConditionCode.trim().length !== 1 || createConditionMutation.isPending
+                  }
                 >
                   {createConditionMutation.isPending ? <CircularProgress size={16} /> : <Add />}
                 </IconButton>

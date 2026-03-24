@@ -331,6 +331,12 @@ export default function InventoryManagement() {
   const [syncingVariantId, setSyncingVariantId] = useState<number | null>(null)
   const [holdPromptOpen, setHoldPromptOpen] = useState(false)
   const [selectedVariant, setSelectedVariant] = useState<EnhancedVariant | null>(null)
+  const [editBaseName, setEditBaseName] = useState('')
+  const [editIdentityName, setEditIdentityName] = useState('')
+  const [editDimensionLength, setEditDimensionLength] = useState('')
+  const [editDimensionWidth, setEditDimensionWidth] = useState('')
+  const [editDimensionHeight, setEditDimensionHeight] = useState('')
+  const [editWeight, setEditWeight] = useState('')
   const [editVariantName, setEditVariantName] = useState('')
   const [editColorCode, setEditColorCode] = useState('')
   const [editConditionCode, setEditConditionCode] = useState('')
@@ -346,6 +352,12 @@ export default function InventoryManagement() {
     }
 
     setSelectedVariant(variant)
+    setEditBaseName(variant.identity?.family?.base_name || '')
+    setEditIdentityName(variant.identity?.identity_name || '')
+    setEditDimensionLength(variant.identity?.dimension_length?.toString() || '')
+    setEditDimensionWidth(variant.identity?.dimension_width?.toString() || '')
+    setEditDimensionHeight(variant.identity?.dimension_height?.toString() || '')
+    setEditWeight(variant.identity?.weight?.toString() || '')
     setEditVariantName(variant.variant_name || '')
     setEditColorCode(variant.color_code || '')
     setEditConditionCode(variant.condition_code || '')
@@ -361,6 +373,46 @@ export default function InventoryManagement() {
   const updateVariantMutation = useMutation({
     mutationFn: async () => {
       if (!selectedVariant) throw new Error('No variant selected')
+
+      const parseNumberOrNull = (raw: string): number | null => {
+        const trimmed = raw.trim()
+        if (!trimmed) return null
+        const value = Number(trimmed)
+        if (!Number.isFinite(value) || value < 0) {
+          throw new Error('Length, width, height, and weight must be non-negative numbers.')
+        }
+        return value
+      }
+
+      const family = selectedVariant.identity?.family
+      if (family && editBaseName.trim() && editBaseName.trim() !== family.base_name) {
+        await axiosClient.patch(CATALOG.FAMILY(family.product_id), {
+          base_name: editBaseName.trim(),
+        })
+      }
+
+      const identity = selectedVariant.identity
+      if (identity) {
+        const identityPayload = {
+          identity_name: editIdentityName.trim() || null,
+          dimension_length: parseNumberOrNull(editDimensionLength),
+          dimension_width: parseNumberOrNull(editDimensionWidth),
+          dimension_height: parseNumberOrNull(editDimensionHeight),
+          weight: parseNumberOrNull(editWeight),
+        }
+
+        const hasIdentityChanges =
+          (identityPayload.identity_name || '') !== (identity.identity_name || '') ||
+          (identityPayload.dimension_length ?? null) !== (identity.dimension_length ?? null) ||
+          (identityPayload.dimension_width ?? null) !== (identity.dimension_width ?? null) ||
+          (identityPayload.dimension_height ?? null) !== (identity.dimension_height ?? null) ||
+          (identityPayload.weight ?? null) !== (identity.weight ?? null)
+
+        if (hasIdentityChanges) {
+          await axiosClient.patch(CATALOG.IDENTITY(identity.id), identityPayload)
+        }
+      }
+
       const response = await axiosClient.patch(CATALOG.VARIANT(selectedVariant.id), {
         variant_name: editVariantName.trim() || null,
         color_code: editColorCode.trim().toUpperCase() || null,
@@ -375,6 +427,8 @@ export default function InventoryManagement() {
       setSnackbarOpen(true)
       closeHoldPrompt()
       await queryClient.invalidateQueries({ queryKey: ['variants'] })
+      await queryClient.invalidateQueries({ queryKey: ['identities'] })
+      await queryClient.invalidateQueries({ queryKey: ['families'] })
     },
     onError: (error: AxiosError<{ detail?: string }>) => {
       const detail = error.response?.data?.detail || 'Failed to update variant.'
@@ -1326,6 +1380,56 @@ export default function InventoryManagement() {
             fullWidth
             disabled
           />
+          <TextField
+            label="Product Name"
+            value={editBaseName}
+            onChange={(e) => setEditBaseName(e.target.value)}
+            fullWidth
+          />
+          <TextField
+            label="Identity Name"
+            value={editIdentityName}
+            onChange={(e) => setEditIdentityName(e.target.value)}
+            fullWidth
+          />
+          <Grid container spacing={1.5}>
+            <Grid item xs={12} md={6}>
+              <TextField
+                label="Length"
+                value={editDimensionLength}
+                onChange={(e) => setEditDimensionLength(e.target.value)}
+                type="number"
+                fullWidth
+              />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <TextField
+                label="Width"
+                value={editDimensionWidth}
+                onChange={(e) => setEditDimensionWidth(e.target.value)}
+                type="number"
+                fullWidth
+              />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <TextField
+                label="Height"
+                value={editDimensionHeight}
+                onChange={(e) => setEditDimensionHeight(e.target.value)}
+                type="number"
+                fullWidth
+              />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <TextField
+                label="Weight"
+                value={editWeight}
+                onChange={(e) => setEditWeight(e.target.value)}
+                type="number"
+                fullWidth
+              />
+            </Grid>
+          </Grid>
           <TextField
             label="Display Name"
             value={editVariantName}

@@ -4,11 +4,13 @@ Product Identity API endpoints.
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import String, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models import IdentityType
-from app.repositories import ProductFamilyRepository, ProductIdentityRepository
+from app.models.entities import ProductFamily, ProductIdentity
+from app.repositories import ProductFamilyRepository, ProductIdentityRepository, ProductVariantRepository
 from app.modules.inventory.schemas import (
     PaginatedResponse,
     ProductIdentityCreate,
@@ -18,6 +20,113 @@ from app.modules.inventory.schemas import (
 )
 
 router = APIRouter(prefix="/identities", tags=["Product Identities"])
+
+
+def _parse_identity_types(raw_value: str | None, field_name: str) -> list[IdentityType] | None:
+    """Parse comma-separated identity types into enum values."""
+    if not raw_value:
+        return None
+
+    allowed_values = {identity_type.value for identity_type in IdentityType}
+    parsed: list[IdentityType] = []
+    seen: set[IdentityType] = set()
+
+    for token in raw_value.split(","):
+        value = token.strip()
+        if not value:
+            continue
+        if value not in allowed_values:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid {field_name} value '{value}'. Allowed values: {', '.join(sorted(allowed_values))}.",
+            )
+        enum_value = IdentityType(value)
+        if enum_value not in seen:
+            parsed.append(enum_value)
+            seen.add(enum_value)
+
+    return parsed or None
+
+
+@router.get("/search", summary="Search identities by UPIS-H, name, or family")
+async def search_identities(
+    q: Annotated[str, Query(min_length=1, description="Search term for UPIS-H, identity name, or family name")],
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    include_types: Annotated[
+        str | None,
+        Query(description="Comma-separated identity types to include, e.g. 'Product,P'"),
+    ] = None,
+    exclude_types: Annotated[
+        str | None,
+        Query(description="Comma-separated identity types to exclude, e.g. 'B,K'"),
+    ] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return compact identity search rows for autocomplete UIs."""
+    included = _parse_identity_types(include_types, "include_types")
+    excluded = _parse_identity_types(exclude_types, "exclude_types")
+
+    if included and excluded and set(included).intersection(set(excluded)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="include_types and exclude_types cannot overlap.",
+        )
+
+    ts_query = func.websearch_to_tsquery("simple", q)
+    family_vector = func.to_tsvector("simple", func.coalesce(ProductFamily.base_name, ""))
+    upis_vector = func.to_tsvector("simple", func.coalesce(ProductIdentity.generated_upis_h, ""))
+    identity_name_vector = func.to_tsvector("simple", func.coalesce(ProductIdentity.identity_name, ""))
+    product_id_vector = func.to_tsvector("simple", cast(ProductIdentity.product_id, String))
+    rank = func.greatest(
+        func.ts_rank_cd(family_vector, ts_query),
+        func.ts_rank_cd(upis_vector, ts_query),
+        func.ts_rank_cd(identity_name_vector, ts_query),
+        func.ts_rank_cd(product_id_vector, ts_query),
+    ).label("rank")
+
+    stmt = (
+        select(
+            ProductIdentity.id,
+            ProductIdentity.product_id,
+            ProductIdentity.type,
+            ProductIdentity.lci,
+            ProductIdentity.generated_upis_h,
+            ProductIdentity.identity_name,
+            ProductFamily.base_name.label("family_name"),
+            rank,
+        )
+        .join(ProductFamily, ProductIdentity.product_id == ProductFamily.product_id)
+        .where(
+            family_vector.op("@@")(ts_query)
+            | upis_vector.op("@@")(ts_query)
+            | identity_name_vector.op("@@")(ts_query)
+            | product_id_vector.op("@@")(ts_query)
+        )
+    )
+
+    if included:
+        stmt = stmt.where(ProductIdentity.type.in_(included))
+    if excluded:
+        stmt = stmt.where(~ProductIdentity.type.in_(excluded))
+
+    rows = (
+        await db.execute(
+            stmt.order_by(rank.desc(), ProductIdentity.generated_upis_h).limit(limit)
+        )
+    ).all()
+
+    return [
+        {
+            "id": row.id,
+            "product_id": row.product_id,
+            "type": row.type.value if hasattr(row.type, "value") else row.type,
+            "lci": row.lci,
+            "generated_upis_h": row.generated_upis_h,
+            "identity_name": row.identity_name,
+            "family_name": row.family_name or "",
+        }
+        for row in rows
+    ]
 
 
 @router.get("", response_model=PaginatedResponse)
@@ -90,6 +199,18 @@ async def create_identity(
         )
     
     identity = await identity_repo.create_identity(data.model_dump())
+
+    # Ensure newly created Product/Part/Bundle identities are immediately sellable/searchable.
+    if identity.type in {IdentityType.PRODUCT, IdentityType.P, IdentityType.B}:
+        variant_repo = ProductVariantRepository(db)
+        await variant_repo.create_variant(
+            {
+                "identity_id": identity.id,
+                "variant_name": identity.identity_name or family.base_name,
+            },
+            identity,
+        )
+
     return ProductIdentityResponse.model_validate(identity)
 
 

@@ -335,11 +335,11 @@ def _build_item_payload(variant: ProductVariant) -> dict:
     if listing_prices:
         payload["rate"] = float(listing_prices[0])
 
-    if family:
-        payload["weight"] = float(family.weight) if family.weight is not None else None
-        payload["length"] = float(family.dimension_length) if family.dimension_length is not None else None
-        payload["width"] = float(family.dimension_width) if family.dimension_width is not None else None
-        payload["height"] = float(family.dimension_height) if family.dimension_height is not None else None
+    if identity:
+        payload["weight"] = float(identity.weight) if identity.weight is not None else None
+        payload["length"] = float(identity.dimension_length) if identity.dimension_length is not None else None
+        payload["width"] = float(identity.dimension_width) if identity.dimension_width is not None else None
+        payload["height"] = float(identity.dimension_height) if identity.dimension_height is not None else None
 
     return {key: value for key, value in payload.items() if value is not None}
 
@@ -359,15 +359,15 @@ def _debug_sync_context(variant: ProductVariant, payload: dict, include_images: 
     )
     if family:
         logger.info(
-            "Zoho single-sync family context | variant_id=%s product_id=%s base_name=%s description_len=%s dimensions=(%s,%s,%s) weight=%s",
+            "Zoho single-sync family/identity context | variant_id=%s product_id=%s base_name=%s description_len=%s dimensions=(%s,%s,%s) weight=%s",
             variant.id,
             family.product_id,
             family.base_name,
             len(family.description or ""),
-            family.dimension_length,
-            family.dimension_width,
-            family.dimension_height,
-            family.weight,
+            identity.dimension_length if identity else None,
+            identity.dimension_width if identity else None,
+            identity.dimension_height if identity else None,
+            identity.weight if identity else None,
         )
 
 

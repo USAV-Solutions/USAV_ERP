@@ -5,7 +5,7 @@ Handles database operations for ProductFamily, ProductIdentity, and ProductVaria
 import hashlib
 from typing import Any, Optional, Sequence
 
-from sqlalchemy import select, func
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -47,10 +47,17 @@ class ProductFamilyRepository(BaseRepository[ProductFamily]):
         skip: int = 0,
         limit: int = 100
     ) -> Sequence[ProductFamily]:
-        """Search families by name (case-insensitive)."""
+        """Search families by name or product_id (case-insensitive)."""
+        pattern = f"%{query}%"
         stmt = (
             select(ProductFamily)
-            .where(ProductFamily.base_name.ilike(f"%{query}%"))
+            .where(
+                or_(
+                    ProductFamily.base_name.ilike(pattern),
+                    cast(ProductFamily.product_id, String).ilike(pattern),
+                )
+            )
+            .order_by(ProductFamily.product_id)
             .offset(skip)
             .limit(limit)
         )

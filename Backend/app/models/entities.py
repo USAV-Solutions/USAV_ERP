@@ -334,26 +334,6 @@ class ProductFamily(Base, TimestampMixin):
         nullable=True,
         comment="Links to Brand.",
     )
-    dimension_length: Mapped[Optional[Decimal]] = mapped_column(
-        Numeric(10, 2),
-        nullable=True,
-        comment="Product length in inches.",
-    )
-    dimension_width: Mapped[Optional[Decimal]] = mapped_column(
-        Numeric(10, 2),
-        nullable=True,
-        comment="Product width in inches.",
-    )
-    dimension_height: Mapped[Optional[Decimal]] = mapped_column(
-        Numeric(10, 2),
-        nullable=True,
-        comment="Product height in inches.",
-    )
-    weight: Mapped[Optional[Decimal]] = mapped_column(
-        Numeric(10, 2),
-        nullable=True,
-        comment="Product weight in pounds.",
-    )
     kit_included_products: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
@@ -428,6 +408,26 @@ class ProductIdentity(Base, TimestampMixin):
         String(255),
         nullable=True,
         comment="Human-friendly identity name (e.g., group or component identity name).",
+    )
+    dimension_length: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(10, 2),
+        nullable=True,
+        comment="Identity length in inches.",
+    )
+    dimension_width: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(10, 2),
+        nullable=True,
+        comment="Identity width in inches.",
+    )
+    dimension_height: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(10, 2),
+        nullable=True,
+        comment="Identity height in inches.",
+    )
+    weight: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(10, 2),
+        nullable=True,
+        comment="Identity weight in pounds.",
     )
     generated_upis_h: Mapped[str] = mapped_column(
         String(50),

@@ -70,15 +70,15 @@ def variant_to_zoho_payload(variant: ProductVariant) -> dict[str, Any]:
     if listing_prices:
         payload["rate"] = listing_prices[0]
 
-    if family:
-        if family.weight is not None:
-            payload["weight"] = float(family.weight)
-        if family.dimension_length is not None:
-            payload["length"] = float(family.dimension_length)
-        if family.dimension_width is not None:
-            payload["width"] = float(family.dimension_width)
-        if family.dimension_height is not None:
-            payload["height"] = float(family.dimension_height)
+    if identity:
+        if identity.weight is not None:
+            payload["weight"] = float(identity.weight)
+        if identity.dimension_length is not None:
+            payload["length"] = float(identity.dimension_length)
+        if identity.dimension_width is not None:
+            payload["width"] = float(identity.dimension_width)
+        if identity.dimension_height is not None:
+            payload["height"] = float(identity.dimension_height)
 
     return {k: v for k, v in payload.items() if v is not None}
 

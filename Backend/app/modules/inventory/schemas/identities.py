@@ -2,6 +2,7 @@
 Product Identity schemas.
 """
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -15,6 +16,10 @@ class ProductIdentityBase(BaseModel):
     lci: Optional[int] = Field(None, ge=1, le=99, description="Local Component Index (1-99, only for Parts)")
     physical_class: Optional[PhysicalClass] = Field(None, description="Physical classification: E, C, P, S, W, A")
     identity_name: Optional[str] = Field(None, max_length=255, description="Human-friendly identity name")
+    dimension_length: Optional[Decimal] = Field(None, ge=0, description="Length in inches")
+    dimension_width: Optional[Decimal] = Field(None, ge=0, description="Width in inches")
+    dimension_height: Optional[Decimal] = Field(None, ge=0, description="Height in inches")
+    weight: Optional[Decimal] = Field(None, ge=0, description="Weight in pounds")
 
 
 class ProductIdentityCreate(ProductIdentityBase):
@@ -26,6 +31,10 @@ class ProductIdentityUpdate(BaseModel):
     """Schema for updating a product identity."""
     identity_name: Optional[str] = Field(None, max_length=255)
     physical_class: Optional[PhysicalClass] = Field(None)
+    dimension_length: Optional[Decimal] = Field(None, ge=0)
+    dimension_width: Optional[Decimal] = Field(None, ge=0)
+    dimension_height: Optional[Decimal] = Field(None, ge=0)
+    weight: Optional[Decimal] = Field(None, ge=0)
 
 
 class ProductIdentityResponse(ProductIdentityBase):

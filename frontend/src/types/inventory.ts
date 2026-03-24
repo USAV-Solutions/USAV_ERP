@@ -43,10 +43,6 @@ export interface ProductFamily {
   description?: string
   brand_id?: number
   brand?: Brand
-  dimension_length?: number
-  dimension_width?: number
-  dimension_height?: number
-  weight?: number
   kit_included_products?: string
   created_at: string
   updated_at: string
@@ -57,12 +53,33 @@ export interface ProductIdentity {
   product_id: number
   type: ProductType
   lci?: number
+  identity_name?: string
+  dimension_length?: number
+  dimension_width?: number
+  dimension_height?: number
+  weight?: number
   generated_upis_h: string
   hex_signature: string
   physical_class?: string
   created_at: string
   updated_at: string
   family?: ProductFamily
+}
+
+export interface IdentitySearchResult {
+  id: number
+  product_id: number
+  type: ProductType
+  lci?: number | null
+  generated_upis_h: string
+  identity_name?: string | null
+  family_name: string
+}
+
+export interface FamilySearchResult {
+  product_id: number
+  family_code: string
+  base_name: string
 }
 
 export interface Variant {

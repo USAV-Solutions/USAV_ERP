@@ -192,8 +192,21 @@ class EbayClient(BasePlatformClient):
         order_item_keys: dict[str, set[tuple[str, str, int, float]]] = {}
         trading_url = f"{self.base_url}/ws/api.dll"
         last_page_signature: tuple[str, ...] | None = None
+        total_transactions_seen = 0
+        total_items_added = 0
+        total_skipped_missing_order_id = 0
+        total_skipped_missing_created_at = 0
+        total_skipped_out_of_range = 0
+        total_skipped_deduped = 0
 
         for page in range(1, max_pages + 1):
+            page_transactions_seen = 0
+            page_items_added = 0
+            page_skipped_missing_order_id = 0
+            page_skipped_missing_created_at = 0
+            page_skipped_out_of_range = 0
+            page_skipped_deduped = 0
+
             request_xml = f"""<?xml version=\"1.0\" encoding=\"utf-8\"?>
 <GetMyeBayBuyingRequest xmlns=\"urn:ebay:apis:eBLBaseComponents\">
   <DetailLevel>ReturnAll</DetailLevel>
@@ -234,7 +247,14 @@ class EbayClient(BasePlatformClient):
 
             order_transactions = root.findall(".//eb:OrderTransaction", _TRADING_NS)
             if not order_transactions:
+                logger.info(
+                    "eBay %s GetMyeBayBuying page=%s has no OrderTransaction nodes; stopping pagination",
+                    self.store_name,
+                    page,
+                )
                 break
+            page_transactions_seen = len(order_transactions)
+            total_transactions_seen += page_transactions_seen
 
             page_signature = tuple(
                 sorted(
@@ -243,8 +263,13 @@ class EbayClient(BasePlatformClient):
                         (
                             self._xml_text(ot, "./eb:Order/eb:OrderID")
                             or self._xml_text(ot, "./eb:Transaction/eb:ContainingOrder/eb:OrderID")
+                            or self._xml_text(ot, "./eb:Transaction/eb:OrderID")
                             or self._xml_text(ot, "./eb:Order/eb:ExtendedOrderID")
                             or self._xml_text(ot, "./eb:Transaction/eb:ContainingOrder/eb:ExtendedOrderID")
+                            or self._xml_text(ot, "./eb:Transaction/eb:ExtendedOrderID")
+                            or self._normalize_order_line_item_id(
+                                self._xml_text(ot, "./eb:Transaction/eb:OrderLineItemID")
+                            )
                             for ot in order_transactions
                         ),
                     )
@@ -264,10 +289,17 @@ class EbayClient(BasePlatformClient):
                 order_id = (
                     self._xml_text(order_transaction, "./eb:Order/eb:OrderID")
                     or self._xml_text(order_transaction, "./eb:Transaction/eb:ContainingOrder/eb:OrderID")
+                    or self._xml_text(order_transaction, "./eb:Transaction/eb:OrderID")
                     or self._xml_text(order_transaction, "./eb:Order/eb:ExtendedOrderID")
                     or self._xml_text(order_transaction, "./eb:Transaction/eb:ContainingOrder/eb:ExtendedOrderID")
+                    or self._xml_text(order_transaction, "./eb:Transaction/eb:ExtendedOrderID")
+                    or self._normalize_order_line_item_id(
+                        self._xml_text(order_transaction, "./eb:Transaction/eb:OrderLineItemID")
+                    )
                 )
                 if not order_id:
+                    page_skipped_missing_order_id += 1
+                    total_skipped_missing_order_id += 1
                     continue
 
                 transaction_node = order_transaction.find("./eb:Transaction", _TRADING_NS)
@@ -278,13 +310,21 @@ class EbayClient(BasePlatformClient):
                     else None
                 )
 
-                created_at = self._parse_ebay_datetime(
+                created_at_raw = (
                     self._xml_text(transaction_node, "./eb:CreatedDate")
+                    or self._xml_text(transaction_node, "./eb:PaidTime")
                     or self._xml_text(order_node, "./eb:CreatedTime")
                     or self._xml_text(order_node, "./eb:PaidTime")
                     or self._xml_text(order_node, "./eb:CheckoutStatus/eb:LastModifiedTime")
                 )
-                if created_at is None or created_at < since or created_at > until:
+                created_at = self._parse_ebay_datetime(created_at_raw)
+                if created_at is None:
+                    page_skipped_missing_created_at += 1
+                    total_skipped_missing_created_at += 1
+                    continue
+                if created_at < since or created_at > until:
+                    page_skipped_out_of_range += 1
+                    total_skipped_out_of_range += 1
                     continue
 
                 quantity = self._to_int_safe(
@@ -336,6 +376,8 @@ class EbayClient(BasePlatformClient):
                 )
                 existing_item_keys = order_item_keys.setdefault(order_id, set())
                 if dedupe_key in existing_item_keys:
+                    page_skipped_deduped += 1
+                    total_skipped_deduped += 1
                     continue
                 existing_item_keys.add(dedupe_key)
 
@@ -349,8 +391,32 @@ class EbayClient(BasePlatformClient):
                     }
                 )
                 page_added += 1
+                page_items_added += 1
+                total_items_added += 1
+
+            logger.info(
+                (
+                    "eBay %s GetMyeBayBuying page=%s stats: transactions=%s, items_added=%s, "
+                    "skip_missing_order_id=%s, skip_missing_created_at=%s, skip_out_of_range=%s, "
+                    "skip_deduped=%s, unique_orders_so_far=%s"
+                ),
+                self.store_name,
+                page,
+                page_transactions_seen,
+                page_items_added,
+                page_skipped_missing_order_id,
+                page_skipped_missing_created_at,
+                page_skipped_out_of_range,
+                page_skipped_deduped,
+                len(orders_by_id),
+            )
 
             if page_added == 0:
+                logger.info(
+                    "eBay %s GetMyeBayBuying page=%s added zero items; stopping pagination",
+                    self.store_name,
+                    page,
+                )
                 break
 
             has_more = self._xml_text(root, ".//eb:HasMoreOrders")
@@ -369,6 +435,24 @@ class EbayClient(BasePlatformClient):
                     float(item.get("unit_price", 0)) * int(item.get("quantity", 0))
                     for item in order.get("items", [])
                 ) + float(order.get("shipping_amount", 0))
+
+        logger.info(
+            (
+                "eBay %s GetMyeBayBuying summary: unique_orders=%s, items_added=%s, "
+                "transactions_seen=%s, skip_missing_order_id=%s, skip_missing_created_at=%s, "
+                "skip_out_of_range=%s, skip_deduped=%s, since=%s, until=%s"
+            ),
+            self.store_name,
+            len(orders_by_id),
+            total_items_added,
+            total_transactions_seen,
+            total_skipped_missing_order_id,
+            total_skipped_missing_created_at,
+            total_skipped_out_of_range,
+            total_skipped_deduped,
+            since.isoformat(),
+            until.isoformat(),
+        )
 
         return list(orders_by_id.values())
 
@@ -413,6 +497,22 @@ class EbayClient(BasePlatformClient):
             return int(float(value or 0))
         except Exception:
             return 0
+
+    def _normalize_order_line_item_id(self, value: str | None) -> str | None:
+        """Convert eBay OrderLineItemID (itemId-transactionId) into a single stable ID segment."""
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+
+        if "-" not in raw:
+            return raw
+
+        segments = [segment.strip() for segment in raw.split("-") if segment.strip()]
+        if not segments:
+            return None
+
+        # Prefer transaction ID segment to avoid very long combined identifiers in PO numbers.
+        return segments[-1]
     
     async def _get_access_token(self) -> Optional[str]:
         """

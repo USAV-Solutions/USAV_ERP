@@ -71,6 +71,9 @@ export interface OrderItemDetail extends OrderItemBrief {
 
 export interface VariantSearchResult {
   id: number
+  identity_id?: number
+  identity_type?: 'Product' | 'P' | 'B' | 'K'
+  generated_upis_h?: string
   full_sku: string
   variant_name?: string | null
   product_name: string

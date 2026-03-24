@@ -17,6 +17,7 @@ export const CATALOG = {
   FAMILIES: '/families',
   FAMILY: (id: number) => `/families/${id}`,
   IDENTITIES: '/identities',
+  IDENTITY_SEARCH: '/identities/search',
   IDENTITY: (id: number) => `/identities/${id}`,
   VARIANTS: '/variants',
   VARIANT: (id: number) => `/variants/${id}`,

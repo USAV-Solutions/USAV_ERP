@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.models import ZohoSyncStatus
+from app.models import IdentityType, ZohoSyncStatus
 from sqlalchemy import func, select
 
 from app.models.entities import ProductFamily, ProductIdentity, ProductVariant
@@ -22,6 +22,32 @@ from app.modules.inventory.schemas import (
 )
 
 router = APIRouter(prefix="/variants", tags=["Product Variants"])
+
+
+def _parse_identity_types(raw_value: str | None, field_name: str) -> list[IdentityType] | None:
+    """Parse comma-separated identity types into enum values."""
+    if not raw_value:
+        return None
+
+    allowed_values = {identity_type.value for identity_type in IdentityType}
+    parsed: list[IdentityType] = []
+    seen: set[IdentityType] = set()
+
+    for token in raw_value.split(","):
+        value = token.strip()
+        if not value:
+            continue
+        if value not in allowed_values:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid {field_name} value '{value}'. Allowed values: {', '.join(sorted(allowed_values))}.",
+            )
+        enum_value = IdentityType(value)
+        if enum_value not in seen:
+            parsed.append(enum_value)
+            seen.add(enum_value)
+
+    return parsed or None
 
 
 async def _build_unique_deleted_sku(
@@ -50,6 +76,14 @@ async def _build_unique_deleted_sku(
 async def search_variants(
     q: Annotated[str, Query(min_length=1, description="Search term for product name or SKU")],
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    include_identity_types: Annotated[
+        str | None,
+        Query(description="Comma-separated identity types to include, e.g. 'Product,P'"),
+    ] = None,
+    exclude_identity_types: Annotated[
+        str | None,
+        Query(description="Comma-separated identity types to exclude, e.g. 'B,K'"),
+    ] = None,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -57,6 +91,15 @@ async def search_variants(
 
     Returns compact results suitable for autocomplete / typeahead UIs.
     """
+    included = _parse_identity_types(include_identity_types, "include_identity_types")
+    excluded = _parse_identity_types(exclude_identity_types, "exclude_identity_types")
+
+    if included and excluded and set(included).intersection(set(excluded)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="include_identity_types and exclude_identity_types cannot overlap.",
+        )
+
     ts_query = func.websearch_to_tsquery("simple", q)
     family_vector = func.to_tsvector("simple", func.coalesce(ProductFamily.base_name, ""))
     sku_vector = func.to_tsvector("simple", func.coalesce(ProductVariant.full_sku, ""))
@@ -70,10 +113,13 @@ async def search_variants(
     stmt = (
         select(
             ProductVariant.id,
+            ProductVariant.identity_id,
             ProductVariant.full_sku,
             ProductVariant.variant_name,
             ProductVariant.color_code,
             ProductVariant.condition_code,
+            ProductIdentity.type.label("identity_type"),
+            ProductIdentity.generated_upis_h,
             ProductFamily.base_name.label("product_name"),
             rank,
         )
@@ -85,14 +131,23 @@ async def search_variants(
             | variant_name_vector.op("@@")(ts_query)
         )
         .where(ProductVariant.is_active == True)
-        .order_by(rank.desc(), ProductVariant.full_sku)
-        .limit(limit)
     )
+
+    if included:
+        stmt = stmt.where(ProductIdentity.type.in_(included))
+    if excluded:
+        stmt = stmt.where(~ProductIdentity.type.in_(excluded))
+
+    stmt = stmt.order_by(rank.desc(), ProductVariant.full_sku).limit(limit)
+
     rows = (await db.execute(stmt)).all()
 
     return [
         {
             "id": row.id,
+            "identity_id": row.identity_id,
+            "identity_type": row.identity_type.value if hasattr(row.identity_type, "value") else row.identity_type,
+            "generated_upis_h": row.generated_upis_h,
             "full_sku": row.full_sku,
             "variant_name": row.variant_name or row.product_name or row.full_sku,
             "product_name": row.product_name or "",

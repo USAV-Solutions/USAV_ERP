@@ -11,8 +11,10 @@ interface VariantSearchAutocompleteProps {
   onChange: (value: VariantSearchResult | null) => void
   label?: string
   placeholder?: string
-  width?: number
+  width?: number | string
   disabled?: boolean
+  includeIdentityTypes?: Array<'Product' | 'P' | 'B' | 'K'>
+  excludeIdentityTypes?: Array<'Product' | 'P' | 'B' | 'K'>
 }
 
 export default function VariantSearchAutocomplete({
@@ -22,14 +24,25 @@ export default function VariantSearchAutocomplete({
   placeholder = 'Type to search...',
   width = 360,
   disabled = false,
+  includeIdentityTypes,
+  excludeIdentityTypes,
 }: VariantSearchAutocompleteProps) {
   const [inputValue, setInputValue] = useState('')
   const debouncedInput = useDebouncedValue(inputValue, 200)
   const getDisplayName = (option: VariantSearchResult) => option.variant_name || option.product_name
 
   const { data: options = [], isFetching } = useQuery<VariantSearchResult[]>({
-    queryKey: ['variantSearch', debouncedInput],
-    queryFn: () => searchVariants(debouncedInput),
+    queryKey: [
+      'variantSearch',
+      debouncedInput,
+      (includeIdentityTypes || []).join(','),
+      (excludeIdentityTypes || []).join(','),
+    ],
+    queryFn: () =>
+      searchVariants(debouncedInput, 20, {
+        includeIdentityTypes,
+        excludeIdentityTypes,
+      }),
     enabled: debouncedInput.length >= 1,
     staleTime: 30_000,
   })
@@ -59,6 +72,11 @@ export default function VariantSearchAutocomplete({
               {option.color_code && ` · ${option.color_code}`}
               {option.condition_code && ` · ${option.condition_code}`}
             </Typography>
+            {option.generated_upis_h && (
+              <Typography variant="caption" color="text.secondary" display="block" fontFamily="monospace">
+                {option.generated_upis_h}
+              </Typography>
+            )}
           </Box>
         </li>
       )}

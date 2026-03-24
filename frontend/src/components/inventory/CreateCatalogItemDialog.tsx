@@ -20,18 +20,17 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import axiosClient from '../../api/axiosClient'
 import { CATALOG, LOOKUPS } from '../../api/endpoints'
-import type { Brand, ProductFamily, ProductIdentity } from '../../types/inventory'
+import IdentitySearchAutocomplete from '../common/IdentitySearchAutocomplete'
+import VariantSearchAutocomplete from '../common/VariantSearchAutocomplete'
+import type { VariantSearchResult } from '../../types/orders'
+import type { Brand, IdentitySearchResult, LCIDefinition, ProductIdentity } from '../../types/inventory'
 
 type Mode = 'product' | 'part' | 'bundle'
 type BundleRole = 'Primary' | 'Accessory' | 'Satellite'
 
-interface EnhancedIdentity extends ProductIdentity {
-  family?: ProductFamily
-}
-
 interface BundleLine {
   key: string
-  identity: EnhancedIdentity | null
+  variant: VariantSearchResult | null
   quantity: number
   role: BundleRole
 }
@@ -47,14 +46,19 @@ export default function CreateCatalogItemDialog({ open, onClose }: CreateCatalog
   const [mode, setMode] = useState<Mode>('product')
   const [name, setName] = useState('')
   const [selectedBrand, setSelectedBrand] = useState<Brand | null>(null)
+  const [brandNameInput, setBrandNameInput] = useState('')
 
-  const [partParentFamily, setPartParentFamily] = useState<ProductFamily | null>(null)
-  const [partIdentityName, setPartIdentityName] = useState('')
-  const [partLciIndex, setPartLciIndex] = useState('')
-  const [partLciComponentName, setPartLciComponentName] = useState('')
+  const [dimensionLength, setDimensionLength] = useState('')
+  const [dimensionWidth, setDimensionWidth] = useState('')
+  const [dimensionHeight, setDimensionHeight] = useState('')
+  const [weight, setWeight] = useState('')
+
+  const [partParentIdentity, setPartParentIdentity] = useState<IdentitySearchResult | null>(null)
+  const [selectedLciDefinition, setSelectedLciDefinition] = useState<LCIDefinition | null>(null)
+  const [partLciNameInput, setPartLciNameInput] = useState('')
 
   const [bundleLines, setBundleLines] = useState<BundleLine[]>([
-    { key: 'line-1', identity: null, quantity: 1, role: 'Primary' },
+    { key: 'line-1', variant: null, quantity: 1, role: 'Primary' },
   ])
 
   const [snackbar, setSnackbar] = useState<{ open: boolean; msg: string; severity: 'success' | 'error' }>({
@@ -68,11 +72,15 @@ export default function CreateCatalogItemDialog({ open, onClose }: CreateCatalog
     setMode('product')
     setName('')
     setSelectedBrand(null)
-    setPartParentFamily(null)
-    setPartIdentityName('')
-    setPartLciIndex('')
-    setPartLciComponentName('')
-    setBundleLines([{ key: `line-${Date.now()}`, identity: null, quantity: 1, role: 'Primary' }])
+    setBrandNameInput('')
+    setDimensionLength('')
+    setDimensionWidth('')
+    setDimensionHeight('')
+    setWeight('')
+    setPartParentIdentity(null)
+    setSelectedLciDefinition(null)
+    setPartLciNameInput('')
+    setBundleLines([{ key: `line-${Date.now()}`, variant: null, quantity: 1, role: 'Primary' }])
   }, [open])
 
   const { data: brands = [] } = useQuery({
@@ -84,37 +92,121 @@ export default function CreateCatalogItemDialog({ open, onClose }: CreateCatalog
     enabled: open,
   })
 
-  const { data: families = [] } = useQuery({
-    queryKey: ['families'],
+  const { data: lciDefinitions = [] } = useQuery({
+    queryKey: ['lci-definitions', partParentIdentity?.product_id],
     queryFn: async () => {
-      const response = await axiosClient.get(CATALOG.FAMILIES, { params: { limit: 1000 } })
+      if (!partParentIdentity) return []
+      const response = await axiosClient.get(LOOKUPS.LCI_DEFINITIONS, {
+        params: { product_id: partParentIdentity.product_id, limit: 1000 },
+      })
       return response.data.items || []
     },
-    enabled: open,
+    enabled: open && mode === 'part' && !!partParentIdentity,
   })
 
-  const { data: identities = [] } = useQuery({
-    queryKey: ['identities'],
-    queryFn: async () => {
-      const response = await axiosClient.get(CATALOG.IDENTITIES, { params: { limit: 1000 } })
-      return response.data.items || []
+  const normalizedBrandNameInput = brandNameInput.trim().toLowerCase()
+  const matchingBrandByName = (brands as Brand[]).find(
+    (brand) => brand.name.trim().toLowerCase() === normalizedBrandNameInput,
+  )
+  const canCreateBrand = normalizedBrandNameInput.length > 0 && !matchingBrandByName
+
+  const normalizedLciNameInput = partLciNameInput.trim().toLowerCase()
+  const matchingLciByName = (lciDefinitions as LCIDefinition[]).find(
+    (definition) => definition.component_name.trim().toLowerCase() === normalizedLciNameInput,
+  )
+  const canCreateLci = !!partParentIdentity && normalizedLciNameInput.length > 0 && !matchingLciByName
+
+  const skuPreview = useMemo(() => {
+    const normalizedName = name.trim()
+    if (!normalizedName) return 'Enter a name to preview SKU'
+
+    const padFamilyId = (id: number) => String(id).padStart(5, '0')
+
+    if (mode === 'product') {
+      return 'UPIS-H: [auto family id], Default Variant SKU: [same as UPIS-H]'
+    }
+
+    if (mode === 'bundle') {
+      return 'UPIS-H: [auto family id]-B'
+    }
+
+    if (!partParentIdentity) {
+      return 'Select parent product to preview part SKU'
+    }
+
+    return `UPIS-H: ${padFamilyId(partParentIdentity.product_id)}-P-[auto], Default Variant SKU: same as UPIS-H`
+  }, [mode, name, partParentIdentity])
+
+  const createBrandMutation = useMutation({
+    mutationFn: async () => {
+      const brandName = brandNameInput.trim()
+      if (!brandName) {
+        throw new Error('Brand name is required.')
+      }
+      const response = await axiosClient.post(LOOKUPS.BRANDS, { name: brandName })
+      return response.data as Brand
     },
-    enabled: open,
+    onSuccess: async (brand) => {
+      setSelectedBrand(brand)
+      setBrandNameInput(brand.name)
+      await queryClient.invalidateQueries({ queryKey: ['brands'] })
+      setSnackbar({ open: true, msg: `Brand '${brand.name}' created.`, severity: 'success' })
+    },
+    onError: (error: any) => {
+      const detail = error?.response?.data?.detail || error?.message || 'Failed to create brand.'
+      setSnackbar({ open: true, msg: detail, severity: 'error' })
+    },
   })
 
-  const enhancedIdentities = useMemo<EnhancedIdentity[]>(() => {
-    const familyMap = new Map<number, ProductFamily>()
-    ;(families as ProductFamily[]).forEach((family) => familyMap.set(family.product_id, family))
-    return (identities as ProductIdentity[]).map((identity) => ({
-      ...identity,
-      family: familyMap.get(identity.product_id),
-    }))
-  }, [families, identities])
+  const createLciMutation = useMutation({
+    mutationFn: async () => {
+      if (!partParentIdentity) {
+        throw new Error('Select a parent product first.')
+      }
+      const componentName = partLciNameInput.trim()
+      if (!componentName) {
+        throw new Error('LCI name is required.')
+      }
+
+      const response = await axiosClient.post(LOOKUPS.LCI_DEFINITIONS, {
+        product_id: partParentIdentity.product_id,
+        component_name: componentName,
+      })
+      return response.data as LCIDefinition
+    },
+    onSuccess: async (definition) => {
+      setSelectedLciDefinition(definition)
+      setPartLciNameInput(definition.component_name)
+      await queryClient.invalidateQueries({ queryKey: ['lci-definitions', partParentIdentity?.product_id] })
+      setSnackbar({ open: true, msg: `LCI '${definition.component_name}' created.`, severity: 'success' })
+    },
+    onError: (error: any) => {
+      const detail = error?.response?.data?.detail || error?.message || 'Failed to create LCI definition.'
+      setSnackbar({ open: true, msg: detail, severity: 'error' })
+    },
+  })
 
   const createMutation = useMutation({
     mutationFn: async () => {
       if (!name.trim()) {
         throw new Error('Name is required.')
+      }
+
+      const parseNumberOrUndefined = (raw: string): number | undefined => {
+        const normalized = raw.trim()
+        if (!normalized) return undefined
+        const value = Number(normalized)
+        if (!Number.isFinite(value) || value < 0) {
+          throw new Error('Length, width, height, and weight must be non-negative numbers.')
+        }
+        return value
+      }
+
+      const dimensionsPayload = {
+        dimension_length: parseNumberOrUndefined(dimensionLength),
+        dimension_width: parseNumberOrUndefined(dimensionWidth),
+        dimension_height: parseNumberOrUndefined(dimensionHeight),
+        weight: parseNumberOrUndefined(weight),
       }
 
       if (mode === 'product') {
@@ -127,38 +219,41 @@ export default function CreateCatalogItemDialog({ open, onClose }: CreateCatalog
           product_id: familyResponse.data.product_id,
           type: 'Product',
           identity_name: name.trim(),
+          ...dimensionsPayload,
         })
         return
       }
 
       if (mode === 'part') {
-        if (!partParentFamily) throw new Error('Please select a parent product family.')
+        if (!partParentIdentity) throw new Error('Please select a parent product identity.')
+        const lciComponentName = partLciNameInput.trim() || selectedLciDefinition?.component_name?.trim() || ''
 
         const identityPayload: Record<string, unknown> = {
-          product_id: partParentFamily.product_id,
+          product_id: partParentIdentity.product_id,
           type: 'P',
-          identity_name: partIdentityName.trim() || name.trim() || undefined,
-        }
-        const parsedLci = Number(partLciIndex)
-        if (partLciIndex && Number.isFinite(parsedLci) && parsedLci > 0) {
-          identityPayload.lci = parsedLci
+          identity_name: name.trim() || undefined,
+          ...dimensionsPayload,
         }
 
         const identityResponse = await axiosClient.post(CATALOG.IDENTITIES, identityPayload)
         const createdIdentity = identityResponse.data as ProductIdentity
 
-        if (partLciComponentName.trim()) {
+        const definitionExists = (lciDefinitions as LCIDefinition[]).some(
+          (definition) => definition.component_name.trim().toLowerCase() === lciComponentName.toLowerCase(),
+        )
+
+        if (lciComponentName && !definitionExists) {
           await axiosClient.post(LOOKUPS.LCI_DEFINITIONS, {
-            product_id: partParentFamily.product_id,
+            product_id: partParentIdentity.product_id,
             lci_index: createdIdentity.lci,
-            component_name: partLciComponentName.trim(),
+            component_name: lciComponentName,
           })
         }
         return
       }
 
       // bundle
-      const validLines = bundleLines.filter((line) => line.identity && line.quantity > 0)
+      const validLines = bundleLines.filter((line) => line.variant && line.quantity > 0)
       if (validLines.length === 0) {
         throw new Error('Bundle needs at least one valid line item.')
       }
@@ -175,9 +270,13 @@ export default function CreateCatalogItemDialog({ open, onClose }: CreateCatalog
       const bundleIdentity = identityResponse.data as ProductIdentity
 
       for (const line of validLines) {
+        const childIdentityId = line.variant?.identity_id
+        if (!childIdentityId) {
+          throw new Error('Selected variant is missing identity mapping.')
+        }
         await axiosClient.post(CATALOG.BUNDLES, {
           parent_identity_id: bundleIdentity.id,
-          child_identity_id: line.identity!.id,
+          child_identity_id: childIdentityId,
           quantity_required: line.quantity,
           role: line.role,
         })
@@ -197,7 +296,7 @@ export default function CreateCatalogItemDialog({ open, onClose }: CreateCatalog
   })
 
   const addBundleLine = () => {
-    setBundleLines((prev) => [...prev, { key: `line-${Date.now()}-${prev.length}`, identity: null, quantity: 1, role: 'Accessory' }])
+    setBundleLines((prev) => [...prev, { key: `line-${Date.now()}-${prev.length}`, variant: null, quantity: 1, role: 'Accessory' }])
   }
 
   const updateBundleLine = (key: string, updater: (line: BundleLine) => BundleLine) => {
@@ -234,44 +333,137 @@ export default function CreateCatalogItemDialog({ open, onClose }: CreateCatalog
             />
 
             {mode === 'product' && (
-              <Autocomplete
-                options={brands as Brand[]}
-                value={selectedBrand}
-                onChange={(_, value) => setSelectedBrand(value)}
-                getOptionLabel={(option) => option.name}
-                renderInput={(params) => <TextField {...params} label="Brand (optional)" />}
-              />
+              <>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Autocomplete
+                    sx={{ flex: 1 }}
+                    options={brands as Brand[]}
+                    value={selectedBrand}
+                    inputValue={brandNameInput}
+                    onInputChange={(_, value, reason) => {
+                      if (reason === 'input' || reason === 'clear') {
+                        setBrandNameInput(value)
+                      }
+                    }}
+                    onChange={(_, value) => {
+                      setSelectedBrand(value)
+                      setBrandNameInput(value?.name || '')
+                    }}
+                    getOptionLabel={(option) => option.name}
+                    renderInput={(params) => <TextField {...params} label="Brand (optional)" />}
+                  />
+                  <IconButton
+                    color="primary"
+                    onClick={() => createBrandMutation.mutate()}
+                    disabled={!canCreateBrand || createBrandMutation.isPending}
+                  >
+                    {createBrandMutation.isPending ? <CircularProgress size={16} /> : <Add />}
+                  </IconButton>
+                </Stack>
+                <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5}>
+                  <TextField
+                    label="Length"
+                    type="number"
+                    value={dimensionLength}
+                    onChange={(e) => setDimensionLength(e.target.value)}
+                    fullWidth
+                  />
+                  <TextField
+                    label="Width"
+                    type="number"
+                    value={dimensionWidth}
+                    onChange={(e) => setDimensionWidth(e.target.value)}
+                    fullWidth
+                  />
+                  <TextField
+                    label="Height"
+                    type="number"
+                    value={dimensionHeight}
+                    onChange={(e) => setDimensionHeight(e.target.value)}
+                    fullWidth
+                  />
+                  <TextField
+                    label="Weight"
+                    type="number"
+                    value={weight}
+                    onChange={(e) => setWeight(e.target.value)}
+                    fullWidth
+                  />
+                </Stack>
+              </>
             )}
 
             {mode === 'part' && (
               <>
-                <Autocomplete
-                  options={families as ProductFamily[]}
-                  value={partParentFamily}
-                  onChange={(_, value) => setPartParentFamily(value)}
-                  getOptionLabel={(option) => `${option.product_id} - ${option.base_name}`}
-                  renderInput={(params) => <TextField {...params} label="Select Parent Product" />}
-                />
-                <TextField
-                  label="Part Identity Name (optional)"
-                  value={partIdentityName}
-                  onChange={(e) => setPartIdentityName(e.target.value)}
-                  fullWidth
+                <IdentitySearchAutocomplete
+                  value={partParentIdentity}
+                  onChange={(value) => {
+                    setPartParentIdentity(value)
+                    setName((current) => (current.trim().length === 0 ? value?.family_name || '' : current))
+                    setSelectedLciDefinition(null)
+                    setPartLciNameInput('')
+                  }}
+                  includeTypes={['Product']}
+                  label="Select Parent Product"
+                  placeholder="Search by UPIS-H or product name..."
+                  width="100%"
                 />
                 <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5}>
                   <TextField
-                    label="LCI Index (optional)"
+                    label="Length"
                     type="number"
-                    value={partLciIndex}
-                    onChange={(e) => setPartLciIndex(e.target.value)}
+                    value={dimensionLength}
+                    onChange={(e) => setDimensionLength(e.target.value)}
                     fullWidth
                   />
                   <TextField
-                    label="LCI Component Name"
-                    value={partLciComponentName}
-                    onChange={(e) => setPartLciComponentName(e.target.value)}
+                    label="Width"
+                    type="number"
+                    value={dimensionWidth}
+                    onChange={(e) => setDimensionWidth(e.target.value)}
                     fullWidth
                   />
+                  <TextField
+                    label="Height"
+                    type="number"
+                    value={dimensionHeight}
+                    onChange={(e) => setDimensionHeight(e.target.value)}
+                    fullWidth
+                  />
+                  <TextField
+                    label="Weight"
+                    type="number"
+                    value={weight}
+                    onChange={(e) => setWeight(e.target.value)}
+                    fullWidth
+                  />
+                </Stack>
+                <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5}>
+                  <Autocomplete
+                    sx={{ flex: 1 }}
+                    options={lciDefinitions as LCIDefinition[]}
+                    value={selectedLciDefinition}
+                    inputValue={partLciNameInput}
+                    onInputChange={(_, value, reason) => {
+                      if (reason === 'input' || reason === 'clear') {
+                        setPartLciNameInput(value)
+                      }
+                    }}
+                    onChange={(_, value) => {
+                      setSelectedLciDefinition(value)
+                      setPartLciNameInput(value ? value.component_name : '')
+                    }}
+                    getOptionLabel={(option) => `${option.lci_index} - ${option.component_name}`}
+                    renderInput={(params) => <TextField {...params} label="LCI Name" />}
+                    disabled={!partParentIdentity}
+                  />
+                  <IconButton
+                    color="primary"
+                    onClick={() => createLciMutation.mutate()}
+                    disabled={!canCreateLci || createLciMutation.isPending}
+                  >
+                    {createLciMutation.isPending ? <CircularProgress size={16} /> : <Add />}
+                  </IconButton>
                 </Stack>
               </>
             )}
@@ -281,15 +473,13 @@ export default function CreateCatalogItemDialog({ open, onClose }: CreateCatalog
                 <Typography variant="subtitle2">Bundle Items</Typography>
                 {bundleLines.map((line) => (
                   <Stack key={line.key} direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems="center">
-                    <Autocomplete
-                      sx={{ flex: 1 }}
-                      options={enhancedIdentities}
-                      value={line.identity}
-                      onChange={(_, value) => updateBundleLine(line.key, (current) => ({ ...current, identity: value }))}
-                      getOptionLabel={(option) =>
-                        `${option.generated_upis_h} - ${option.family?.base_name || 'Unknown'}`
-                      }
-                      renderInput={(params) => <TextField {...params} label="Search item" />}
+                    <VariantSearchAutocomplete
+                      value={line.variant}
+                      onChange={(value) => updateBundleLine(line.key, (current) => ({ ...current, variant: value }))}
+                      label="Search variant"
+                      placeholder="Search by SKU, variant name, or product name..."
+                      excludeIdentityTypes={['B', 'K']}
+                      width="100%"
                     />
                     <TextField
                       label="Qty"
@@ -327,6 +517,15 @@ export default function CreateCatalogItemDialog({ open, onClose }: CreateCatalog
                 <Alert severity="info">Bundle creation here creates family + bundle identity + bundle component lines only.</Alert>
               </>
             )}
+
+            <Stack>
+              <Typography variant="subtitle2" color="text.secondary">
+                SKU Preview
+              </Typography>
+              <Typography variant="body2" fontFamily="monospace">
+                {skuPreview}
+              </Typography>
+            </Stack>
           </Stack>
         </DialogContent>
         <DialogActions>

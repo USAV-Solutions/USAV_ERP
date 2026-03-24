@@ -2,7 +2,6 @@
 Product Family schemas.
 """
 from datetime import datetime
-from decimal import Decimal
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -15,10 +14,6 @@ class ProductFamilyBase(BaseModel):
     base_name: str = Field(..., min_length=1, max_length=255, description="Product family name")
     description: Optional[str] = Field(None, max_length=2000, description="Product family description")
     brand_id: Optional[int] = Field(None, description="Link to brand")
-    dimension_length: Optional[Decimal] = Field(None, ge=0, description="Length in inches")
-    dimension_width: Optional[Decimal] = Field(None, ge=0, description="Width in inches")
-    dimension_height: Optional[Decimal] = Field(None, ge=0, description="Height in inches")
-    weight: Optional[Decimal] = Field(None, ge=0, description="Weight in pounds")
     kit_included_products: Optional[str] = Field(None, max_length=2000, description="Comma-separated list of included products for Kit type")
 
 
@@ -32,10 +27,6 @@ class ProductFamilyUpdate(BaseModel):
     base_name: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=2000)
     brand_id: Optional[int] = Field(None)
-    dimension_length: Optional[Decimal] = Field(None, ge=0)
-    dimension_width: Optional[Decimal] = Field(None, ge=0)
-    dimension_height: Optional[Decimal] = Field(None, ge=0)
-    weight: Optional[Decimal] = Field(None, ge=0)
     kit_included_products: Optional[str] = Field(None, max_length=2000)
 
 

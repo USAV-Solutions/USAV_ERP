@@ -123,9 +123,26 @@ export async function rejectItem(itemId: number): Promise<OrderItemDetail> {
 
 // ── Variant Search (for SKU resolution) ──────────────────────────────
 
-export async function searchVariants(query: string, limit = 20): Promise<VariantSearchResult[]> {
+interface SearchVariantsOptions {
+  includeIdentityTypes?: Array<'Product' | 'P' | 'B' | 'K'>
+  excludeIdentityTypes?: Array<'Product' | 'P' | 'B' | 'K'>
+}
+
+export async function searchVariants(
+  query: string,
+  limit = 20,
+  options: SearchVariantsOptions = {},
+): Promise<VariantSearchResult[]> {
+  const params: Record<string, string | number> = { q: query, limit }
+  if (options.includeIdentityTypes?.length) {
+    params.include_identity_types = options.includeIdentityTypes.join(',')
+  }
+  if (options.excludeIdentityTypes?.length) {
+    params.exclude_identity_types = options.excludeIdentityTypes.join(',')
+  }
+
   const { data } = await axiosClient.get<VariantSearchResult[]>(CATALOG.VARIANT_SEARCH, {
-    params: { q: query, limit },
+    params,
   })
   return data
 }
