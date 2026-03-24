@@ -34,6 +34,7 @@ import {
   Add,
   CloudSync,
   DeleteOutline,
+  FilterList,
   KeyboardArrowDown,
   KeyboardArrowUp,
   Visibility,
@@ -319,7 +320,16 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
             <Typography
               variant="caption"
               color="text.secondary"
-              sx={{ fontStyle: 'italic', fontSize: '0.72rem', display: 'block', mt: 0.25 }}
+              sx={{
+                fontStyle: 'italic',
+                fontSize: '0.72rem',
+                display: 'block',
+                mt: 0.25,
+                maxWidth: 380,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
             >
               {item.variant_name}
             </Typography>
@@ -487,9 +497,11 @@ export default function PurchasingManagement() {
   const [deliverStatusFilter, setDeliverStatusFilter] = useState<PurchaseDeliverStatus | 'ALL'>('ALL')
   const [itemMatchFilter, setItemMatchFilter] = useState<'ALL' | 'MATCHED' | 'UNMATCHED'>('ALL')
   const [zohoSyncFilter, setZohoSyncFilter] = useState<ZohoSyncStatus | 'ALL'>('ALL')
+  const [sourceFilter, setSourceFilter] = useState<string>('ALL')
   const [poNumberSearch, setPoNumberSearch] = useState('')
   const [orderDateFrom, setOrderDateFrom] = useState('')
   const [orderDateTo, setOrderDateTo] = useState('')
+  const [filtersDialogOpen, setFiltersDialogOpen] = useState(false)
   const [selectedPoId, setSelectedPoId] = useState<number | null>(null)
   const [createPoOpen, setCreatePoOpen] = useState(false)
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false)
@@ -542,6 +554,7 @@ export default function PurchasingManagement() {
       deliverStatusFilter,
       itemMatchFilter,
       zohoSyncFilter,
+      sourceFilter,
       poNumberSearch,
       orderDateFrom,
       orderDateTo,
@@ -557,6 +570,7 @@ export default function PurchasingManagement() {
         itemMatchStatus:
           itemMatchFilter === 'ALL' ? undefined : itemMatchFilter === 'MATCHED' ? 'matched' : 'unmatched',
         zohoSyncStatus: zohoSyncFilter === 'ALL' ? undefined : zohoSyncFilter,
+        source: sourceFilter === 'ALL' ? undefined : sourceFilter,
         orderDateFrom: orderDateFrom || undefined,
         orderDateTo: orderDateTo || undefined,
       }),
@@ -756,6 +770,30 @@ export default function PurchasingManagement() {
     (vendor) => vendor.name.trim().toLowerCase() === vendorSearchInput.trim().toLowerCase(),
   )
 
+  const activeFilterCount = [
+    deliverStatusFilter !== 'ALL',
+    itemMatchFilter !== 'ALL',
+    zohoSyncFilter !== 'ALL',
+    sourceFilter !== 'ALL',
+    !!orderDateFrom,
+    !!orderDateTo,
+    sortBy !== 'order_date',
+    sortDir !== 'desc',
+  ].filter(Boolean).length
+
+  const clearAllFilters = () => {
+    setOrderDateFrom('')
+    setOrderDateTo('')
+    setDeliverStatusFilter('ALL')
+    setItemMatchFilter('ALL')
+    setZohoSyncFilter('ALL')
+    setSourceFilter('ALL')
+    setPoNumberSearch('')
+    setSortBy('order_date')
+    setSortDir('desc')
+    setPage(0)
+  }
+
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
@@ -806,146 +844,39 @@ export default function PurchasingManagement() {
               Purchase Orders
             </Typography>
             <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ mb: 2 }} alignItems={{ xs: 'stretch', md: 'center' }}>
-              <FormControl size="small" sx={{ minWidth: 190 }}>
-                <InputLabel id="po-sort-by-label">Sort By</InputLabel>
-                <Select
-                  labelId="po-sort-by-label"
-                  label="Sort By"
-                  value={sortBy}
-                  onChange={(e) => {
-                    setSortBy(e.target.value as 'order_date' | 'po_number' | 'total_amount' | 'created_at')
-                    setPage(0)
-                  }}
-                >
-                  <MenuItem value="order_date">Order Date</MenuItem>
-                  <MenuItem value="po_number">PO Number</MenuItem>
-                  <MenuItem value="total_amount">Total Amount</MenuItem>
-                  <MenuItem value="created_at">Created At</MenuItem>
-                </Select>
-              </FormControl>
-              <FormControl size="small" sx={{ minWidth: 170 }}>
-                <InputLabel id="po-sort-dir-label">Sort Direction</InputLabel>
-                <Select
-                  labelId="po-sort-dir-label"
-                  label="Sort Direction"
-                  value={sortDir}
-                  onChange={(e) => {
-                    setSortDir(e.target.value as 'asc' | 'desc')
-                    setPage(0)
-                  }}
-                >
-                  <MenuItem value="desc">Newest first</MenuItem>
-                  <MenuItem value="asc">Oldest first</MenuItem>
-                </Select>
-              </FormControl>
-              <FormControl size="small" sx={{ minWidth: 170 }}>
-                <InputLabel id="po-status-filter-label">PO Status</InputLabel>
-                <Select
-                  labelId="po-status-filter-label"
-                  label="PO Status"
-                  value={deliverStatusFilter}
-                  onChange={(e) => {
-                    setDeliverStatusFilter(e.target.value as PurchaseDeliverStatus | 'ALL')
-                    setPage(0)
-                  }}
-                >
-                  <MenuItem value="ALL">All</MenuItem>
-                  <MenuItem value="CREATED">CREATED</MenuItem>
-                  <MenuItem value="BILLED">BILLED</MenuItem>
-                  <MenuItem value="DELIVERED">DELIVERED</MenuItem>
-                </Select>
-              </FormControl>
-              <FormControl size="small" sx={{ minWidth: 190 }}>
-                <InputLabel id="po-match-filter-label">Match State</InputLabel>
-                <Select
-                  labelId="po-match-filter-label"
-                  label="Match State"
-                  value={itemMatchFilter}
-                  onChange={(e) => {
-                    setItemMatchFilter(e.target.value as 'ALL' | 'MATCHED' | 'UNMATCHED')
-                    setPage(0)
-                  }}
-                >
-                  <MenuItem value="ALL">All</MenuItem>
-                  <MenuItem value="UNMATCHED">Has unmatched items</MenuItem>
-                  <MenuItem value="MATCHED">Fully matched</MenuItem>
-                </Select>
-              </FormControl>
-              <FormControl size="small" sx={{ minWidth: 190 }}>
-                <InputLabel id="po-zoho-filter-label">Zoho Sync Status</InputLabel>
-                <Select
-                  labelId="po-zoho-filter-label"
-                  label="Zoho Sync Status"
-                  value={zohoSyncFilter}
-                  onChange={(e) => {
-                    setZohoSyncFilter(e.target.value as ZohoSyncStatus | 'ALL')
-                    setPage(0)
-                  }}
-                >
-                  <MenuItem value="ALL">All</MenuItem>
-                  <MenuItem value="PENDING">PENDING</MenuItem>
-                  <MenuItem value="SYNCED">SYNCED</MenuItem>
-                  <MenuItem value="ERROR">ERROR</MenuItem>
-                  <MenuItem value="DIRTY">DIRTY</MenuItem>
-                </Select>
-              </FormControl>
               <TextField
                 size="small"
-                label="Search PO #"
+                label="Search PO # / Vendor"
                 value={poNumberSearch}
                 onChange={(e) => {
                   setPoNumberSearch(e.target.value)
                   setPage(0)
                 }}
-                sx={{ minWidth: 180 }}
-              />
-              <TextField
-                size="small"
-                type="date"
-                label="From"
-                InputLabelProps={{ shrink: true }}
-                value={orderDateFrom}
-                onChange={(e) => {
-                  setOrderDateFrom(e.target.value)
-                  setPage(0)
-                }}
-              />
-              <TextField
-                size="small"
-                type="date"
-                label="To"
-                InputLabelProps={{ shrink: true }}
-                value={orderDateTo}
-                onChange={(e) => {
-                  setOrderDateTo(e.target.value)
-                  setPage(0)
-                }}
+                sx={{ minWidth: 280, flex: 1 }}
               />
               <Button
+                variant={activeFilterCount > 0 ? 'contained' : 'outlined'}
+                startIcon={<FilterList />}
+                onClick={() => setFiltersDialogOpen(true)}
+              >
+                Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+              </Button>
+              <Button
                 size="small"
-                onClick={() => {
-                  setOrderDateFrom('')
-                  setOrderDateTo('')
-                  setDeliverStatusFilter('ALL')
-                  setItemMatchFilter('ALL')
-                  setZohoSyncFilter('ALL')
-                  setPoNumberSearch('')
-                  setSortBy('order_date')
-                  setSortDir('desc')
-                  setPage(0)
-                }}
+                onClick={clearAllFilters}
                 disabled={
                   !orderDateFrom &&
                   !orderDateTo &&
                   deliverStatusFilter === 'ALL' &&
                   itemMatchFilter === 'ALL' &&
                   zohoSyncFilter === 'ALL' &&
+                  sourceFilter === 'ALL' &&
                   !poNumberSearch &&
                   sortBy === 'order_date' &&
                   sortDir === 'desc'
                 }
               >
-                Clear Filters
+                Clear
               </Button>
             </Stack>
             {loadingOrders ? (
@@ -1280,6 +1211,159 @@ export default function PurchasingManagement() {
             }
           >
             Create
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={filtersDialogOpen} onClose={() => setFiltersDialogOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>Purchase Filters</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <FormControl size="small" fullWidth>
+              <InputLabel id="po-sort-by-label">Sort By</InputLabel>
+              <Select
+                labelId="po-sort-by-label"
+                label="Sort By"
+                value={sortBy}
+                onChange={(e) => {
+                  setSortBy(e.target.value as 'order_date' | 'po_number' | 'total_amount' | 'created_at')
+                  setPage(0)
+                }}
+              >
+                <MenuItem value="order_date">Order Date</MenuItem>
+                <MenuItem value="po_number">PO Number</MenuItem>
+                <MenuItem value="total_amount">Total Amount</MenuItem>
+                <MenuItem value="created_at">Created At</MenuItem>
+              </Select>
+            </FormControl>
+
+            <FormControl size="small" fullWidth>
+              <InputLabel id="po-sort-dir-label">Sort Direction</InputLabel>
+              <Select
+                labelId="po-sort-dir-label"
+                label="Sort Direction"
+                value={sortDir}
+                onChange={(e) => {
+                  setSortDir(e.target.value as 'asc' | 'desc')
+                  setPage(0)
+                }}
+              >
+                <MenuItem value="desc">Newest first</MenuItem>
+                <MenuItem value="asc">Oldest first</MenuItem>
+              </Select>
+            </FormControl>
+
+            <FormControl size="small" fullWidth>
+              <InputLabel id="po-status-filter-label">PO Status</InputLabel>
+              <Select
+                labelId="po-status-filter-label"
+                label="PO Status"
+                value={deliverStatusFilter}
+                onChange={(e) => {
+                  setDeliverStatusFilter(e.target.value as PurchaseDeliverStatus | 'ALL')
+                  setPage(0)
+                }}
+              >
+                <MenuItem value="ALL">All</MenuItem>
+                <MenuItem value="CREATED">CREATED</MenuItem>
+                <MenuItem value="BILLED">BILLED</MenuItem>
+                <MenuItem value="DELIVERED">DELIVERED</MenuItem>
+              </Select>
+            </FormControl>
+
+            <FormControl size="small" fullWidth>
+              <InputLabel id="po-match-filter-label">Match State</InputLabel>
+              <Select
+                labelId="po-match-filter-label"
+                label="Match State"
+                value={itemMatchFilter}
+                onChange={(e) => {
+                  setItemMatchFilter(e.target.value as 'ALL' | 'MATCHED' | 'UNMATCHED')
+                  setPage(0)
+                }}
+              >
+                <MenuItem value="ALL">All</MenuItem>
+                <MenuItem value="UNMATCHED">Has unmatched items</MenuItem>
+                <MenuItem value="MATCHED">Fully matched</MenuItem>
+              </Select>
+            </FormControl>
+
+            <FormControl size="small" fullWidth>
+              <InputLabel id="po-zoho-filter-label">Zoho Sync Status</InputLabel>
+              <Select
+                labelId="po-zoho-filter-label"
+                label="Zoho Sync Status"
+                value={zohoSyncFilter}
+                onChange={(e) => {
+                  setZohoSyncFilter(e.target.value as ZohoSyncStatus | 'ALL')
+                  setPage(0)
+                }}
+              >
+                <MenuItem value="ALL">All</MenuItem>
+                <MenuItem value="PENDING">PENDING</MenuItem>
+                <MenuItem value="SYNCED">SYNCED</MenuItem>
+                <MenuItem value="ERROR">ERROR</MenuItem>
+                <MenuItem value="DIRTY">DIRTY</MenuItem>
+              </Select>
+            </FormControl>
+
+            <FormControl size="small" fullWidth>
+              <InputLabel id="po-source-filter-label">Source</InputLabel>
+              <Select
+                labelId="po-source-filter-label"
+                label="Source"
+                value={sourceFilter}
+                onChange={(e) => {
+                  setSourceFilter(e.target.value)
+                  setPage(0)
+                }}
+              >
+                <MenuItem value="ALL">All</MenuItem>
+                <MenuItem value="GOODWILL_CSV">GOODWILL_CSV</MenuItem>
+                <MenuItem value="AMAZON_CSV">AMAZON_CSV</MenuItem>
+                <MenuItem value="ALIEXPRESS_JSON">ALIEXPRESS_JSON</MenuItem>
+                <MenuItem value="EBAY_MEKONG_API">EBAY_MEKONG_API</MenuItem>
+                <MenuItem value="EBAY_PURCHASING_API">EBAY_PURCHASING_API</MenuItem>
+                <MenuItem value="ZOHO_IMPORT">ZOHO_IMPORT</MenuItem>
+              </Select>
+            </FormControl>
+
+            <TextField
+              size="small"
+              type="date"
+              label="From"
+              InputLabelProps={{ shrink: true }}
+              value={orderDateFrom}
+              onChange={(e) => {
+                setOrderDateFrom(e.target.value)
+                setPage(0)
+              }}
+            />
+
+            <TextField
+              size="small"
+              type="date"
+              label="To"
+              InputLabelProps={{ shrink: true }}
+              value={orderDateTo}
+              onChange={(e) => {
+                setOrderDateTo(e.target.value)
+                setPage(0)
+              }}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              clearAllFilters()
+              setFiltersDialogOpen(false)
+            }}
+          >
+            Clear All
+          </Button>
+          <Button onClick={() => setFiltersDialogOpen(false)} variant="contained">
+            Apply
           </Button>
         </DialogActions>
       </Dialog>

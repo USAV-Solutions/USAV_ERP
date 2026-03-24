@@ -2,7 +2,7 @@
 from datetime import date
 from typing import Optional, Sequence
 
-from sqlalchemy import and_, desc, exists, func, not_, select
+from sqlalchemy import and_, desc, exists, func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -54,11 +54,13 @@ class PurchaseOrderRepository(BaseRepository[PurchaseOrder]):
         deliver_status: PurchaseDeliverStatus | None = None,
         item_match_status: str | None = None,
         zoho_sync_status: ZohoSyncStatus | None = None,
+        source: str | None = None,
         sort_by: str = "order_date",
         sort_dir: str = "desc",
     ) -> Sequence[PurchaseOrder]:
         stmt = (
             select(PurchaseOrder)
+            .outerjoin(Vendor, Vendor.id == PurchaseOrder.vendor_id)
             .options(
                 selectinload(PurchaseOrder.vendor),
                 selectinload(PurchaseOrder.items).selectinload(PurchaseOrderItem.variant),
@@ -67,7 +69,13 @@ class PurchaseOrderRepository(BaseRepository[PurchaseOrder]):
 
         po_query = str(po_number or "").strip()
         if po_query:
-            stmt = stmt.where(func.lower(PurchaseOrder.po_number).like(f"%{po_query.lower()}%"))
+            like_term = f"%{po_query.lower()}%"
+            stmt = stmt.where(
+                or_(
+                    func.lower(PurchaseOrder.po_number).like(like_term),
+                    func.lower(Vendor.name).like(like_term),
+                )
+            )
 
         if order_date_from is not None:
             stmt = stmt.where(PurchaseOrder.order_date >= order_date_from)
@@ -77,6 +85,9 @@ class PurchaseOrderRepository(BaseRepository[PurchaseOrder]):
             stmt = stmt.where(PurchaseOrder.deliver_status == deliver_status)
         if zoho_sync_status is not None:
             stmt = stmt.where(PurchaseOrder.zoho_sync_status == zoho_sync_status)
+        source_query = str(source or "").strip()
+        if source_query:
+            stmt = stmt.where(func.lower(PurchaseOrder.source).like(f"%{source_query.lower()}%"))
 
         unmatched_exists = exists(
             select(1).where(
