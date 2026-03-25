@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Iterable, Optional
+from collections import defaultdict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -132,6 +133,23 @@ def _read_csv_rows(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(f))
 
 
+def _build_payment_number_lookups(payment_csv: Path) -> tuple[dict[str, str], dict[str, str]]:
+    by_vendor_payment_id: dict[str, str] = {}
+    by_bill_payment_id: dict[str, str] = {}
+
+    for row in _read_csv_rows(payment_csv):
+        payment_number = _clean_id(row.get("Payment Number"))
+        vendor_payment_id = _clean_id(row.get("VendorPayment ID"))
+        bill_payment_id = _clean_id(row.get("PIPayment ID"))
+
+        if payment_number and vendor_payment_id and vendor_payment_id not in by_vendor_payment_id:
+            by_vendor_payment_id[vendor_payment_id] = payment_number
+        if payment_number and bill_payment_id and bill_payment_id not in by_bill_payment_id:
+            by_bill_payment_id[bill_payment_id] = payment_number
+
+    return by_vendor_payment_id, by_bill_payment_id
+
+
 @dataclass
 class CsvUniverse:
     po_numbers: set[str]
@@ -140,6 +158,165 @@ class CsvUniverse:
     payment_vendor_ids: set[str]
     payment_bill_payment_ids: set[str]
     receive_ids: set[str]
+
+
+def _read_csv_headers(path: Path) -> list[str]:
+    with path.open("r", encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        return list(reader.fieldnames or [])
+
+
+def _append_rows_to_csv(path: Path, rows: list[dict[str, str]], id_column: str) -> dict[str, int]:
+    if not rows:
+        return {"attempted": 0, "appended": 0, "already_present": 0}
+
+    headers = _read_csv_headers(path)
+    if not headers:
+        raise ValueError(f"CSV headers not found for {path}")
+
+    existing_ids: set[str] = set()
+    for row in _read_csv_rows(path):
+        value = _clean_id(row.get(id_column))
+        if value:
+            existing_ids.add(value)
+
+    appendable: list[dict[str, str]] = []
+    skipped_existing = 0
+    for row in rows:
+        row_id = _clean_id(row.get(id_column))
+        if row_id and row_id in existing_ids:
+            skipped_existing += 1
+            continue
+
+        normalized = {h: _clean_id(row.get(h, "")) for h in headers}
+        appendable.append(normalized)
+        if row_id:
+            existing_ids.add(row_id)
+
+    if appendable:
+        with path.open("a", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=headers)
+            writer.writerows(appendable)
+
+    return {
+        "attempted": len(rows),
+        "appended": len(appendable),
+        "already_present": skipped_existing,
+    }
+
+
+def _build_bill_append_rows(
+    missing_bill_ids: list[str],
+    bill_details: dict[str, dict[str, str]],
+) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for bill_id in missing_bill_ids:
+        detail = bill_details.get(bill_id, {})
+        rows.append(
+            {
+                "Bill Date": _clean_id(detail.get("date")),
+                "PayInvoice ID": bill_id,
+                "Bill Number": _clean_id(detail.get("bill_number")),
+                "PurchaseOrder": _clean_id(detail.get("purchaseorder_number")),
+                "Bill Status": _clean_id(detail.get("status")),
+                "Vendor Name": _clean_id(detail.get("vendor_name")),
+                "Due Date": _clean_id(detail.get("due_date")),
+                "Currency Code": _clean_id(detail.get("currency_code")),
+                "Exchange Rate": _clean_id(detail.get("exchange_rate")),
+                "SubTotal": _clean_id(detail.get("sub_total")),
+                "Total": _clean_id(detail.get("total")),
+                "Balance": _clean_id(detail.get("balance")),
+            }
+        )
+    return rows
+
+
+def _build_receive_append_rows(
+    missing_receive_ids: list[str],
+    receive_details: dict[str, dict[str, str]],
+) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for receive_id in missing_receive_ids:
+        detail = receive_details.get(receive_id, {})
+        rows.append(
+            {
+                "Purchase Receive ID": receive_id,
+                "Receive Number": _clean_id(detail.get("receive_number")),
+                "Receive Date": _clean_id(detail.get("date")),
+                "Status": _clean_id(detail.get("status")),
+                "Vendor Name": _clean_id(detail.get("vendor_name")),
+                "PO Number": _clean_id(detail.get("purchaseorder_number")),
+                "Bill Number": _clean_id(detail.get("bill_number")),
+                "Item Name": _clean_id(detail.get("item_name")),
+                "SKU": _clean_id(detail.get("sku")),
+                "Item Description": _clean_id(detail.get("description")),
+                "Item unit": _clean_id(detail.get("unit")),
+                "Quantity Received": _clean_id(detail.get("quantity_received")),
+                "Notes": _clean_id(detail.get("notes")),
+            }
+        )
+    return rows
+
+
+def _build_payment_append_rows(
+    missing_vendor_payment_ids: list[str],
+    payment_details_by_vendor_id: dict[str, dict[str, str]],
+) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for payment_id in missing_vendor_payment_ids:
+        detail = payment_details_by_vendor_id.get(payment_id, {})
+        rows.append(
+            {
+                "VendorPayment ID": payment_id,
+                "Date": _clean_id(detail.get("date")),
+                "Vendor Name": _clean_id(detail.get("vendor_name")),
+                "Mode": _clean_id(detail.get("payment_mode")),
+                "Currency Code": _clean_id(detail.get("currency_code")),
+                "Amount": _clean_id(detail.get("amount")),
+                "Paid Through": _clean_id(detail.get("paid_through_account_name")),
+                "Reference Number": _clean_id(detail.get("reference_number")),
+                "PIPayment ID": _clean_id(detail.get("bill_payment_id")),
+                "Bill Date": _clean_id(detail.get("bill_date")),
+                "Bill Number": _clean_id(detail.get("bill_number")),
+                "Bill Amount": _clean_id(detail.get("bill_total")),
+                "Payment Status": _clean_id(detail.get("payment_status")) or "Paid",
+            }
+        )
+    return rows
+
+
+def _append_missing_to_csvs(
+    *,
+    bill_csv: Path,
+    payment_csv: Path,
+    receive_csv: Path,
+    mismatches: dict[str, Any],
+    bill_details: dict[str, dict[str, str]],
+    receive_details: dict[str, dict[str, str]],
+    payment_details_by_vendor_id: dict[str, dict[str, str]],
+) -> dict[str, Any]:
+    missing_bill_ids = list((mismatches.get("bills") or {}).get("zoho_missing_in_csv") or [])
+    missing_receive_ids = list((mismatches.get("receives") or {}).get("zoho_missing_in_csv") or [])
+    missing_vendor_payment_ids = list(
+        (mismatches.get("payments_by_vendor_payment_id") or {}).get("zoho_missing_in_csv") or []
+    )
+
+    bill_rows = _build_bill_append_rows(missing_bill_ids, bill_details)
+    receive_rows = _build_receive_append_rows(missing_receive_ids, receive_details)
+    payment_rows = _build_payment_append_rows(missing_vendor_payment_ids, payment_details_by_vendor_id)
+
+    bill_result = _append_rows_to_csv(bill_csv, bill_rows, "PayInvoice ID")
+    receive_result = _append_rows_to_csv(receive_csv, receive_rows, "Purchase Receive ID")
+    payment_result = _append_rows_to_csv(payment_csv, payment_rows, "VendorPayment ID")
+
+    return {
+        "bill_csv": str(bill_csv),
+        "receive_csv": str(receive_csv),
+        "payment_csv": str(payment_csv),
+        "bills": bill_result,
+        "receives": receive_result,
+        "payments": payment_result,
+    }
 
 
 def _build_csv_universe_for_purchases(
@@ -374,10 +551,12 @@ async def _fetch_po_dependencies(
     target_pos: list[dict[str, Any]],
     progress_every: int,
     debug: bool,
-) -> tuple[set[str], set[str], dict[str, str], dict[str, Any]]:
+) -> tuple[set[str], set[str], dict[str, str], dict[str, dict[str, str]], dict[str, dict[str, str]], dict[str, Any]]:
     bill_ids: set[str] = set()
     receive_ids: set[str] = set()
     bill_id_to_number: dict[str, str] = {}
+    bill_details: dict[str, dict[str, str]] = {}
+    receive_details: dict[str, dict[str, str]] = {}
     diagnostics: dict[str, Any] = {
         "target_purchase_orders": len(target_pos),
         "po_without_id": 0,
@@ -424,6 +603,20 @@ async def _fetch_po_dependencies(
                 bill_ids.add(bill_id)
                 if bill_number:
                     bill_id_to_number[bill_id] = bill_number
+                bill_details[bill_id] = {
+                    "bill_id": bill_id,
+                    "bill_number": bill_number,
+                    "status": _clean_id(bill.get("status")),
+                    "date": _clean_id(bill.get("date")),
+                    "due_date": _clean_id(bill.get("due_date")),
+                    "total": _clean_id(bill.get("total")),
+                    "balance": _clean_id(bill.get("balance")),
+                    "purchaseorder_number": _extract_po_number(po),
+                    "vendor_name": _clean_id(full_po.get("vendor_name") or po.get("vendor_name")),
+                    "currency_code": _clean_id(full_po.get("currency_code") or po.get("currency_code")),
+                    "exchange_rate": _clean_id(full_po.get("exchange_rate") or po.get("exchange_rate")),
+                    "sub_total": _clean_id(full_po.get("sub_total") or full_po.get("subtotal")),
+                }
 
         # Use receives embedded in the purchase-order detail response. This keeps
         # scope strictly bound to the PO and avoids endpoint-level filter drift.
@@ -443,6 +636,21 @@ async def _fetch_po_dependencies(
                 continue
 
             receive_ids.add(receive_id)
+            receive_details[receive_id] = {
+                "receive_id": receive_id,
+                "receive_number": _clean_id(receive.get("receive_number")),
+                "date": _clean_id(receive.get("date")),
+                "status": _clean_id(receive.get("status")),
+                "vendor_name": _clean_id(full_po.get("vendor_name") or po.get("vendor_name")),
+                "purchaseorder_number": _extract_po_number(po),
+                "bill_number": _clean_id(receive.get("bill_number")),
+                "item_name": _clean_id(receive.get("name") or receive.get("item_name")),
+                "sku": _clean_id(receive.get("sku")),
+                "description": _clean_id(receive.get("description")),
+                "unit": _clean_id(receive.get("unit")),
+                "quantity_received": _clean_id(receive.get("quantity") or receive.get("quantity_received")),
+                "notes": _clean_id(receive.get("notes") or receive.get("note")),
+            }
             if debug:
                 _debug(
                     True,
@@ -480,7 +688,7 @@ async def _fetch_po_dependencies(
         ),
     )
 
-    return bill_ids, receive_ids, bill_id_to_number, diagnostics
+    return bill_ids, receive_ids, bill_id_to_number, bill_details, receive_details, diagnostics
 
 
 async def _fetch_bill_payment_refs(
@@ -488,7 +696,7 @@ async def _fetch_bill_payment_refs(
     bill_ids: Iterable[str],
     progress_every: int,
     debug: bool,
-) -> tuple[list[dict[str, str]], dict[str, Any]]:
+) -> tuple[list[dict[str, str]], dict[str, dict[str, str]], dict[str, Any]]:
     refs: list[dict[str, str]] = []
     bills_list = [b for b in bill_ids if b]
     total = len(bills_list)
@@ -498,6 +706,7 @@ async def _fetch_bill_payment_refs(
         "payment_refs_found": 0,
         "payment_refs_missing_bill_payment_id": 0,
     }
+    payment_details_by_vendor_id: dict[str, dict[str, str]] = {}
 
     for idx, bill_id in enumerate(bills_list, start=1):
         try:
@@ -520,6 +729,23 @@ async def _fetch_bill_payment_refs(
                     "date": _clean_id(payment.get("date")),
                 }
             )
+            vendor_payment_id = _clean_id(payment.get("payment_id"))
+            if vendor_payment_id:
+                payment_details_by_vendor_id[vendor_payment_id] = {
+                    "vendor_payment_id": vendor_payment_id,
+                    "bill_payment_id": bill_payment_id,
+                    "date": _clean_id(payment.get("date")),
+                    "payment_mode": _clean_id(payment.get("payment_mode")),
+                    "amount": _clean_id(payment.get("amount")),
+                    "reference_number": _clean_id(payment.get("reference_number")),
+                    "paid_through_account_name": _clean_id(payment.get("paid_through_account_name")),
+                    "bill_number": _clean_id(full_bill.get("bill_number")),
+                    "bill_date": _clean_id(full_bill.get("date")),
+                    "bill_total": _clean_id(full_bill.get("total")),
+                    "vendor_name": _clean_id(full_bill.get("vendor_name")),
+                    "currency_code": _clean_id(full_bill.get("currency_code")),
+                    "payment_status": "Paid",
+                }
             if debug:
                 _debug(
                     True,
@@ -549,7 +775,7 @@ async def _fetch_bill_payment_refs(
         ),
     )
 
-    return valid_refs, diagnostics
+    return valid_refs, payment_details_by_vendor_id, diagnostics
 
 
 def _mismatch(csv_ids: set[str], zoho_ids: set[str]) -> dict[str, list[str]]:
@@ -562,27 +788,41 @@ def _mismatch(csv_ids: set[str], zoho_ids: set[str]) -> dict[str, list[str]]:
 async def _delete_payments(
     client: ZohoClient,
     payment_refs: list[dict[str, str]],
+    payment_labels_by_bill_payment_id: Optional[dict[str, dict[str, str]]],
     dry_run: bool,
     progress_every: int,
 ) -> dict[str, Any]:
     deleted: list[str] = []
+    deleted_labels: list[dict[str, str]] = []
     failed: list[dict[str, str]] = []
+    failed_labels: list[dict[str, str]] = []
     total = len(payment_refs)
 
     for idx, ref in enumerate(payment_refs, start=1):
         bill_id = ref["bill_id"]
         bill_payment_id = ref["bill_payment_id"]
+        label_data = dict((payment_labels_by_bill_payment_id or {}).get(bill_payment_id) or {})
+        label_data.setdefault("bill_payment_id", bill_payment_id)
+        label_data.setdefault("bill_id", bill_id)
         if dry_run:
             deleted.append(bill_payment_id)
+            deleted_labels.append(label_data)
         else:
             try:
                 await client.delete_bill_payment(bill_id=bill_id, bill_payment_id=bill_payment_id)
                 deleted.append(bill_payment_id)
+                deleted_labels.append(label_data)
             except Exception as exc:
                 failed.append(
                     {
                         "bill_id": bill_id,
                         "bill_payment_id": bill_payment_id,
+                        "error": str(exc),
+                    }
+                )
+                failed_labels.append(
+                    {
+                        **label_data,
                         "error": str(exc),
                     }
                 )
@@ -595,29 +835,39 @@ async def _delete_payments(
         "deleted_count": len(deleted),
         "failed_count": len(failed),
         "deleted_ids": deleted,
+        "deleted_labels": deleted_labels,
         "failed": failed,
+        "failed_labels": failed_labels,
     }
 
 
 async def _delete_bills(
     client: ZohoClient,
     bill_ids: list[str],
+    bill_labels_by_id: Optional[dict[str, dict[str, str]]],
     dry_run: bool,
     progress_every: int,
 ) -> dict[str, Any]:
     deleted: list[str] = []
+    deleted_labels: list[dict[str, str]] = []
     failed: list[dict[str, str]] = []
+    failed_labels: list[dict[str, str]] = []
     total = len(bill_ids)
 
     for idx, bill_id in enumerate(bill_ids, start=1):
+        label_data = dict((bill_labels_by_id or {}).get(bill_id) or {})
+        label_data.setdefault("bill_id", bill_id)
         if dry_run:
             deleted.append(bill_id)
+            deleted_labels.append(label_data)
         else:
             try:
                 await client.delete_bill(bill_id)
                 deleted.append(bill_id)
+                deleted_labels.append(label_data)
             except Exception as exc:
                 failed.append({"bill_id": bill_id, "error": str(exc)})
+                failed_labels.append({**label_data, "error": str(exc)})
 
         if progress_every > 0 and idx % progress_every == 0:
             print(f"Deleted bills: {idx}/{total}")
@@ -627,29 +877,39 @@ async def _delete_bills(
         "deleted_count": len(deleted),
         "failed_count": len(failed),
         "deleted_ids": deleted,
+        "deleted_labels": deleted_labels,
         "failed": failed,
+        "failed_labels": failed_labels,
     }
 
 
 async def _delete_receives(
     client: ZohoClient,
     receive_ids: list[str],
+    receive_labels_by_id: Optional[dict[str, dict[str, str]]],
     dry_run: bool,
     progress_every: int,
 ) -> dict[str, Any]:
     deleted: list[str] = []
+    deleted_labels: list[dict[str, str]] = []
     failed: list[dict[str, str]] = []
+    failed_labels: list[dict[str, str]] = []
     total = len(receive_ids)
 
     for idx, receive_id in enumerate(receive_ids, start=1):
+        label_data = dict((receive_labels_by_id or {}).get(receive_id) or {})
+        label_data.setdefault("receive_id", receive_id)
         if dry_run:
             deleted.append(receive_id)
+            deleted_labels.append(label_data)
         else:
             try:
                 await client.delete_purchase_receive(receive_id)
                 deleted.append(receive_id)
+                deleted_labels.append(label_data)
             except Exception as exc:
                 failed.append({"receive_id": receive_id, "error": str(exc)})
+                failed_labels.append({**label_data, "error": str(exc)})
 
         if progress_every > 0 and idx % progress_every == 0:
             print(f"Deleted receives: {idx}/{total}")
@@ -659,7 +919,9 @@ async def _delete_receives(
         "deleted_count": len(deleted),
         "failed_count": len(failed),
         "deleted_ids": deleted,
+        "deleted_labels": deleted_labels,
         "failed": failed,
+        "failed_labels": failed_labels,
     }
 
 
@@ -698,6 +960,11 @@ async def main() -> None:
     parser.add_argument("--progress-every", type=int, default=50)
     parser.add_argument("--debug", action="store_true", help="Print diagnostics for filtering and dependency discovery")
     parser.add_argument("--trace-api", action="store_true", help="Trace each Zoho API call made by this script")
+    parser.add_argument(
+        "--append-missing-to-csv",
+        action="store_true",
+        help="Append Zoho records missing in CSV into Bill/Purchase_Receive/Vendor_Payment CSV files",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Do not delete anything")
     args = parser.parse_args()
 
@@ -747,7 +1014,14 @@ async def main() -> None:
     _debug(args.debug, f"Target purchases selected count={len(target_pos)}")
 
     print("Fetching attached bills and receives from purchase orders...")
-    bill_ids_zoho, receive_ids_zoho, bill_id_to_number, dependency_diagnostics = await _fetch_po_dependencies(
+    (
+        bill_ids_zoho,
+        receive_ids_zoho,
+        bill_id_to_number,
+        bill_details,
+        receive_details,
+        dependency_diagnostics,
+    ) = await _fetch_po_dependencies(
         client,
         target_pos=target_pos,
         progress_every=max(args.progress_every, 0),
@@ -762,12 +1036,53 @@ async def main() -> None:
     )
 
     print("Fetching attached payments from derived bills...")
-    payment_refs, payment_diagnostics = await _fetch_bill_payment_refs(
+    payment_refs, payment_details_by_vendor_id, payment_diagnostics = await _fetch_bill_payment_refs(
         client,
         bill_ids=sorted(bill_ids_zoho),
         progress_every=max(args.progress_every, 0),
         debug=bool(args.debug),
     )
+
+    payment_number_by_vendor_id, payment_number_by_bill_payment_id = _build_payment_number_lookups(payment_csv)
+    payment_labels_by_bill_payment_id: dict[str, dict[str, str]] = {}
+    for ref in payment_refs:
+        bill_payment_id = _clean_id(ref.get("bill_payment_id"))
+        if not bill_payment_id:
+            continue
+        vendor_payment_id = _clean_id(ref.get("payment_id"))
+        bill_id = _clean_id(ref.get("bill_id"))
+        payment_detail = payment_details_by_vendor_id.get(vendor_payment_id, {})
+        payment_number = (
+            payment_number_by_vendor_id.get(vendor_payment_id)
+            or payment_number_by_bill_payment_id.get(bill_payment_id)
+        )
+        payment_labels_by_bill_payment_id[bill_payment_id] = {
+            "bill_payment_id": bill_payment_id,
+            "vendor_payment_id": vendor_payment_id,
+            "payment_number": _clean_id(payment_number),
+            "bill_id": bill_id,
+            "bill_number": _clean_id(payment_detail.get("bill_number") or bill_id_to_number.get(bill_id)),
+            "payment_date": _clean_id(ref.get("date") or payment_detail.get("date")),
+        }
+
+    bill_labels_by_id: dict[str, dict[str, str]] = {}
+    for bill_id in sorted(bill_ids_zoho):
+        detail = bill_details.get(bill_id, {})
+        bill_labels_by_id[bill_id] = {
+            "bill_id": bill_id,
+            "bill_number": _clean_id(detail.get("bill_number") or bill_id_to_number.get(bill_id)),
+            "purchase_order_number": _clean_id(detail.get("purchaseorder_number")),
+        }
+
+    receive_labels_by_id: dict[str, dict[str, str]] = {}
+    for receive_id in sorted(receive_ids_zoho):
+        detail = receive_details.get(receive_id, {})
+        receive_labels_by_id[receive_id] = {
+            "receive_id": receive_id,
+            "receive_number": _clean_id(detail.get("receive_number")),
+            "purchase_order_number": _clean_id(detail.get("purchaseorder_number")),
+            "bill_number": _clean_id(detail.get("bill_number")),
+        }
     payment_bill_ids_zoho = {r["bill_payment_id"] for r in payment_refs if r["bill_payment_id"]}
     payment_vendor_ids_zoho = {r["payment_id"] for r in payment_refs if r["payment_id"]}
 
@@ -790,10 +1105,24 @@ async def main() -> None:
         "receives": _mismatch(csv_universe.receive_ids, receive_ids_zoho),
     }
 
+    csv_append_result: Optional[dict[str, Any]] = None
+    if args.append_missing_to_csv:
+        print("Appending missing Zoho records into CSVs...")
+        csv_append_result = _append_missing_to_csvs(
+            bill_csv=bill_csv,
+            payment_csv=payment_csv,
+            receive_csv=receive_csv,
+            mismatches=mismatches,
+            bill_details=bill_details,
+            receive_details=receive_details,
+            payment_details_by_vendor_id=payment_details_by_vendor_id,
+        )
+
     print("Step 1/3: deleting payments...")
     payment_result = await _delete_payments(
         client,
         payment_refs=payment_refs,
+        payment_labels_by_bill_payment_id=payment_labels_by_bill_payment_id,
         dry_run=args.dry_run,
         progress_every=max(args.progress_every, 0),
     )
@@ -802,6 +1131,7 @@ async def main() -> None:
     bill_result = await _delete_bills(
         client,
         bill_ids=sorted(bill_ids_zoho),
+        bill_labels_by_id=bill_labels_by_id,
         dry_run=args.dry_run,
         progress_every=max(args.progress_every, 0),
     )
@@ -812,6 +1142,7 @@ async def main() -> None:
     receive_result = await _delete_receives(
         client,
         receive_ids=receive_target_ids,
+        receive_labels_by_id=receive_labels_by_id,
         dry_run=args.dry_run,
         progress_every=max(args.progress_every, 0),
     )
@@ -852,6 +1183,9 @@ async def main() -> None:
             ),
             "debug_mode": bool(args.debug),
             "trace_api": bool(args.trace_api),
+            "deleted_labels_added": True,
+            "append_missing_to_csv": bool(args.append_missing_to_csv),
+            "csv_append_result": csv_append_result,
             "diagnostics": {
                 "purchase_order_filter": po_filter_diagnostics,
                 "dependencies": dependency_diagnostics,

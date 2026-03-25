@@ -875,6 +875,54 @@ class ZohoClient:
         """Delete a purchase receive in Zoho Inventory."""
         return await self._request("DELETE", f"/purchasereceives/{purchase_receive_id}")
 
+    async def create_purchase_receive(self, purchase_receive_data: dict) -> dict:
+        """Create a purchase receive in Zoho Inventory."""
+        result = await self._request(
+            "POST",
+            "/purchasereceives",
+            data={"JSONString": json.dumps(purchase_receive_data)},
+        )
+        receive = result.get("purchasereceive")
+        if receive is None:
+            receive = result.get("purchase_receive", {})
+        return receive or {}
+
+    async def list_vendor_payments(
+        self,
+        *,
+        page: int = 1,
+        per_page: int = 200,
+        date_start: Optional[str] = None,
+        date_end: Optional[str] = None,
+    ) -> List[dict]:
+        """List vendor payments in Zoho Inventory."""
+        params: dict[str, Any] = {
+            "page": page,
+            "per_page": per_page,
+        }
+        if date_start:
+            params["date_start"] = date_start
+        if date_end:
+            params["date_end"] = date_end
+
+        result = await self._request("GET", "/vendorpayments", params=params)
+        payments = result.get("vendorpayments")
+        if payments is None:
+            payments = result.get("vendor_payments", [])
+        return payments or []
+
+    async def create_vendor_payment(self, vendor_payment_data: dict) -> dict:
+        """Create a vendor payment in Zoho Inventory."""
+        result = await self._request(
+            "POST",
+            "/vendorpayments",
+            data={"JSONString": json.dumps(vendor_payment_data)},
+        )
+        payment = result.get("vendorpayment")
+        if payment is None:
+            payment = result.get("vendor_payment", {})
+        return payment or {}
+
     async def ensure_item_by_sku(
         self,
         *,

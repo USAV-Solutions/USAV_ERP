@@ -20,6 +20,7 @@ export const CATALOG = {
   IDENTITY_SEARCH: '/identities/search',
   IDENTITY: (id: number) => `/identities/${id}`,
   VARIANTS: '/variants',
+  EXPORT_ZOHO_ITEMS_CSV: '/variants/export/zoho-import.csv',
   VARIANT: (id: number) => `/variants/${id}`,
   VARIANT_SEARCH: '/variants/search',
   BUNDLES: '/bundles',

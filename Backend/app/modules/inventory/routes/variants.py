@@ -1,17 +1,22 @@
 """
 Product Variant API endpoints.
 """
+import csv
+import io
 from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi.responses import StreamingResponse
 
 from app.core.database import get_db
 from app.models import IdentityType, ZohoSyncStatus
 from sqlalchemy import func, select
+from sqlalchemy import inspect
+from sqlalchemy.orm import selectinload
 
-from app.models.entities import ProductFamily, ProductIdentity, ProductVariant
+from app.models.entities import Brand, PlatformListing, ProductFamily, ProductIdentity, ProductVariant
 from app.repositories import ProductIdentityRepository, ProductVariantRepository
 from app.modules.inventory.schemas import (
     PaginatedResponse,
@@ -22,6 +27,41 @@ from app.modules.inventory.schemas import (
 )
 
 router = APIRouter(prefix="/variants", tags=["Product Variants"])
+
+
+ZOHO_IMPORT_HEADERS = [
+    "Item Name",
+    "SKU",
+    "Sales Description",
+    "Selling Price",
+    "Is Returnable Item",
+    "Brand",
+    "Manufacturer",
+    "UPC",
+    "EAN",
+    "ISBN",
+    "Part Number",
+    "Product Type",
+    "Sales Account",
+    "Unit",
+    "Purchase Description",
+    "Purchase Price",
+    "Item Type",
+    "Purchase Account",
+    "Inventory Account",
+    "Reorder Level",
+    "Preferred Vendor",
+    "Opening Stock",
+    "Opening Stock Value",
+    "Package Weight",
+    "Package Length",
+    "Package Width",
+    "Package Height",
+    "Weight unit",
+    "Dimension unit",
+    "Warehouse Name",
+    "Image",
+]
 
 
 def _parse_identity_types(raw_value: str | None, field_name: str) -> list[IdentityType] | None:
@@ -221,6 +261,125 @@ async def create_variant(
     
     variant = await variant_repo.create_variant(data.model_dump(), identity)
     return ProductVariantResponse.model_validate(variant)
+
+
+@router.get("/export/zoho-import.csv")
+async def export_variants_for_zoho_import_csv(
+    include_inactive: Annotated[bool, Query(description="Include inactive variants")] = True,
+    exclude_bundles: Annotated[bool, Query(description="Exclude bundle identities (type B)")] = True,
+    db: AsyncSession = Depends(get_db),
+):
+    """Export variants to Zoho item-import CSV format."""
+    # Some environments may lag model migrations; probe columns to avoid hard failures.
+    def _get_variant_columns(sync_session):
+        inspector = inspect(sync_session.connection())
+        return {column["name"] for column in inspector.get_columns("product_variant")}
+
+    variant_columns = await db.run_sync(_get_variant_columns)
+    has_variant_name = "variant_name" in variant_columns
+    has_thumbnail_url = "thumbnail_url" in variant_columns
+
+    select_columns = [
+        ProductVariant.id.label("variant_id"),
+        ProductVariant.full_sku.label("full_sku"),
+        ProductIdentity.weight.label("weight"),
+        ProductIdentity.dimension_length.label("dimension_length"),
+        ProductIdentity.dimension_width.label("dimension_width"),
+        ProductIdentity.dimension_height.label("dimension_height"),
+        ProductFamily.base_name.label("base_name"),
+        ProductFamily.description.label("family_description"),
+        Brand.name.label("brand_name"),
+        func.max(PlatformListing.listing_price).label("selling_price"),
+    ]
+    group_by_columns = [
+        ProductVariant.id,
+        ProductVariant.full_sku,
+        ProductIdentity.weight,
+        ProductIdentity.dimension_length,
+        ProductIdentity.dimension_width,
+        ProductIdentity.dimension_height,
+        ProductFamily.base_name,
+        ProductFamily.description,
+        Brand.name,
+    ]
+
+    if has_variant_name:
+        select_columns.append(ProductVariant.variant_name.label("variant_name"))
+        group_by_columns.append(ProductVariant.variant_name)
+    if has_thumbnail_url:
+        select_columns.append(ProductVariant.thumbnail_url.label("thumbnail_url"))
+        group_by_columns.append(ProductVariant.thumbnail_url)
+
+    stmt = (
+        select(*select_columns)
+        .join(ProductIdentity, ProductVariant.identity_id == ProductIdentity.id)
+        .join(ProductFamily, ProductIdentity.product_id == ProductFamily.product_id)
+        .outerjoin(Brand, ProductFamily.brand_id == Brand.id)
+        .outerjoin(PlatformListing, PlatformListing.variant_id == ProductVariant.id)
+        .group_by(*group_by_columns)
+        .order_by(ProductVariant.id)
+    )
+
+    if exclude_bundles:
+        stmt = stmt.where(ProductIdentity.type != IdentityType.B)
+    if not include_inactive:
+        stmt = stmt.where(ProductVariant.is_active == True)
+
+    variants = (await db.execute(stmt)).all()
+
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=ZOHO_IMPORT_HEADERS)
+    writer.writeheader()
+
+    for variant in variants:
+        row_data = variant._mapping
+        variant_name = (row_data.get("variant_name") or "").strip()
+        base_name = (variant_name or (row_data.get("base_name") or "") or row_data["full_sku"]).strip()
+        description = ((row_data.get("family_description") or "") or base_name).strip()
+        brand_name = (row_data.get("brand_name") or "").strip()
+        selling_price = row_data.get("selling_price")
+
+        row = {
+            "Item Name": base_name,
+            "SKU": row_data["full_sku"],
+            "Sales Description": description,
+            "Selling Price": str(selling_price) if selling_price is not None else "",
+            "Is Returnable Item": "FALSE",
+            "Brand": brand_name,
+            "Manufacturer": brand_name,
+            "UPC": "",
+            "EAN": "",
+            "ISBN": "",
+            "Part Number": "",
+            "Product Type": "goods",
+            "Sales Account": "Sales",
+            "Unit": "pcs",
+            "Purchase Description": description,
+            "Purchase Price": "",
+            "Item Type": "Inventory",
+            "Purchase Account": "Cost of Goods Sold",
+            "Inventory Account": "Inventory Asset",
+            "Reorder Level": "",
+            "Preferred Vendor": "",
+            "Opening Stock": "",
+            "Opening Stock Value": "",
+            "Package Weight": str(row_data["weight"]) if row_data["weight"] is not None else "",
+            "Package Length": str(row_data["dimension_length"]) if row_data["dimension_length"] is not None else "",
+            "Package Width": str(row_data["dimension_width"]) if row_data["dimension_width"] is not None else "",
+            "Package Height": str(row_data["dimension_height"]) if row_data["dimension_height"] is not None else "",
+            "Weight unit": "kg",
+            "Dimension unit": "cm",
+            "Warehouse Name": "",
+            "Image": (row_data.get("thumbnail_url") or "") if has_thumbnail_url else "",
+        }
+        writer.writerow(row)
+
+    filename = f"zoho_items_import_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/{variant_id}", response_model=ProductVariantWithListings)

@@ -326,6 +326,7 @@ export default function InventoryManagement() {
   const [snackbarOpen, setSnackbarOpen] = useState(false)
   const [snackbarMessage, setSnackbarMessage] = useState('')
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success')
+  const [exportingZohoCsv, setExportingZohoCsv] = useState(false)
   const [readinessDialogOpen, setReadinessDialogOpen] = useState(false)
   const [readinessData, setReadinessData] = useState<ZohoReadinessResponse | null>(null)
   const [syncingVariantId, setSyncingVariantId] = useState<number | null>(null)
@@ -557,6 +558,39 @@ export default function InventoryManagement() {
   }
 
   const isZohoSyncRunning = zohoBulkSyncMutation.isPending
+
+  const handleExportZohoImportCsv = async () => {
+    try {
+      setExportingZohoCsv(true)
+      const response = await axiosClient.get(CATALOG.EXPORT_ZOHO_ITEMS_CSV, {
+        responseType: 'blob',
+      })
+
+      const contentDisposition = response.headers['content-disposition'] || ''
+      const filenameMatch = contentDisposition.match(/filename="?([^";]+)"?/i)
+      const filename = filenameMatch?.[1] || 'zoho_items_import.csv'
+
+      const blobUrl = window.URL.createObjectURL(new Blob([response.data], { type: 'text/csv;charset=utf-8;' }))
+      const link = document.createElement('a')
+      link.href = blobUrl
+      link.setAttribute('download', filename)
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(blobUrl)
+
+      setSnackbarSeverity('success')
+      setSnackbarMessage('Exported Zoho import CSV successfully.')
+      setSnackbarOpen(true)
+    } catch (error) {
+      const detail = (error as AxiosError<{ detail?: string }>)?.response?.data?.detail || 'Failed to export CSV.'
+      setSnackbarSeverity('error')
+      setSnackbarMessage(detail)
+      setSnackbarOpen(true)
+    } finally {
+      setExportingZohoCsv(false)
+    }
+  }
 
   const zohoReadinessMutation = useMutation({
     mutationFn: async () => {
@@ -811,6 +845,13 @@ export default function InventoryManagement() {
               disabled={backfillThumbnailsMutation.isPending}
             >
               {backfillThumbnailsMutation.isPending ? 'Backfilling...' : 'Backfill Thumbnails'}
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={() => void handleExportZohoImportCsv()}
+              disabled={exportingZohoCsv}
+            >
+              {exportingZohoCsv ? 'Exporting CSV...' : 'Export Zoho CSV'}
             </Button>
             <Button
               variant="outlined"
