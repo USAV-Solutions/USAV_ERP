@@ -149,6 +149,21 @@ def purchase_order_to_zoho_payload(
     if getattr(po, "tracking_number", None):
         notes_parts.append(f"Tracking: {po.tracking_number}")
 
+    existing_notes_text = "\n".join(p for p in notes_parts if p)
+    existing_notes_text_lc = existing_notes_text.lower()
+    item_links_to_add: list[str] = []
+    for item in po.items or []:
+        link = str(getattr(item, "purchase_item_link", "") or "").strip()
+        if not link:
+            continue
+        if link.lower() in existing_notes_text_lc:
+            continue
+        item_name = str(getattr(item, "external_item_name", "") or "").strip() or "Item"
+        item_links_to_add.append(f"- {item_name}: {link}")
+
+    if item_links_to_add:
+        notes_parts.append("Item Links:\n" + "\n".join(item_links_to_add))
+
     payload: dict[str, Any] = {
         "purchaseorder_number": po.po_number,
         "date": po.order_date.strftime("%Y-%m-%d"),

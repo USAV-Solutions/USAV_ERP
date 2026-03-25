@@ -16,7 +16,6 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import AdminUser, CurrentUser
 from app.core.database import get_db
 from app.integrations.zoho.sync_engine import (
-    sync_po_outbound_with_unbill_rebill,
     sync_po_outbound,
     sync_customer_outbound,
     sync_order_outbound,
@@ -216,7 +215,7 @@ async def force_sync_purchase_orders_by_period(
         po.zoho_sync_error = None
         po._updated_by_sync = True
         queued_ids.append(po.id)
-        background_tasks.add_task(sync_po_outbound_with_unbill_rebill, po.id)
+        background_tasks.add_task(sync_po_outbound, po.id)
 
     await db.commit()
 

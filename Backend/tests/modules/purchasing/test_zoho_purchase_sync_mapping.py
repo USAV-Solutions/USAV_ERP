@@ -112,6 +112,74 @@ def test_purchase_order_to_zoho_payload_maps_unmatched_lines_to_placeholder_item
     assert payload["line_items"][0]["item_id"] == "it-placeholder"
 
 
+def test_purchase_order_to_zoho_payload_appends_missing_item_links_to_notes():
+    po = SimpleNamespace(
+        po_number="PO-789",
+        order_date=date(2026, 3, 17),
+        expected_delivery_date=None,
+        currency="USD",
+        notes="Please process quickly.",
+        source=None,
+        tracking_number=None,
+        tax_amount=Decimal("0"),
+        shipping_amount=Decimal("0"),
+        handling_amount=Decimal("0"),
+        vendor=SimpleNamespace(zoho_id="999001"),
+        items=[
+            SimpleNamespace(
+                external_item_name="Imported Item A",
+                purchase_item_link="https://example.com/items/A",
+                quantity=1,
+                unit_price=Decimal("12.00"),
+                variant=SimpleNamespace(zoho_item_id="it-200"),
+            ),
+            SimpleNamespace(
+                external_item_name="Imported Item B",
+                purchase_item_link="",
+                quantity=1,
+                unit_price=Decimal("7.00"),
+                variant=SimpleNamespace(zoho_item_id="it-201"),
+            ),
+        ],
+    )
+
+    payload = purchase_order_to_zoho_payload(po)
+
+    assert "Item Links:" in payload["notes"]
+    assert "https://example.com/items/A" in payload["notes"]
+
+
+def test_purchase_order_to_zoho_payload_does_not_duplicate_existing_item_link_in_notes():
+    existing_link = "https://example.com/items/A"
+    po = SimpleNamespace(
+        po_number="PO-790",
+        order_date=date(2026, 3, 17),
+        expected_delivery_date=None,
+        currency="USD",
+        notes=f"Existing context with link: {existing_link}",
+        source=None,
+        tracking_number=None,
+        tax_amount=Decimal("0"),
+        shipping_amount=Decimal("0"),
+        handling_amount=Decimal("0"),
+        vendor=SimpleNamespace(zoho_id="999001"),
+        items=[
+            SimpleNamespace(
+                external_item_name="Imported Item A",
+                purchase_item_link=existing_link,
+                quantity=1,
+                unit_price=Decimal("12.00"),
+                variant=SimpleNamespace(zoho_item_id="it-200"),
+            )
+        ],
+    )
+
+    payload = purchase_order_to_zoho_payload(po)
+
+    assert payload["notes"].count(existing_link) == 1
+    assert "Item Links:" not in payload["notes"]
+
+
 def test_resolve_zoho_external_item_name_prefers_existing_local_name():
     resolved = _resolve_zoho_external_item_name("Existing Local Name")
     assert resolved == "Existing Local Name"
