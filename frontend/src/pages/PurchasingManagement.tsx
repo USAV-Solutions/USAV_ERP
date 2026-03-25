@@ -656,7 +656,7 @@ export default function PurchasingManagement() {
           : res.source === 'amazon'
             ? 'Amazon CSV'
             : res.source === 'aliexpress'
-              ? 'AliExpress JSON'
+              ? 'AliExpress CSV/JSON'
               : res.source === 'ebay_mekong'
                 ? 'eBay Mekong API'
                 : 'eBay Purchasing API'
@@ -1376,6 +1376,7 @@ export default function PurchasingManagement() {
                 <MenuItem value="GOODWILL_CSV">GOODWILL_CSV</MenuItem>
                 <MenuItem value="AMAZON_CSV">AMAZON_CSV</MenuItem>
                 <MenuItem value="ALIEXPRESS_JSON">ALIEXPRESS_JSON</MenuItem>
+                <MenuItem value="ALIEXPRESS_CSV">ALIEXPRESS_CSV</MenuItem>
                 <MenuItem value="EBAY_MEKONG_API">EBAY_MEKONG_API</MenuItem>
                 <MenuItem value="EBAY_PURCHASING_API">EBAY_PURCHASING_API</MenuItem>
                 <MenuItem value="ZOHO_IMPORT">ZOHO_IMPORT</MenuItem>
@@ -1542,14 +1543,14 @@ export default function PurchasingManagement() {
               >
                 <MenuItem value="goodwill">Goodwill (CSV)</MenuItem>
                 <MenuItem value="amazon">Amazon (CSV)</MenuItem>
-                <MenuItem value="aliexpress">AliExpress (JSON)</MenuItem>
+                <MenuItem value="aliexpress">AliExpress (CSV / JSON)</MenuItem>
                 <MenuItem value="ebay_mekong">eBay Mekong (API)</MenuItem>
                 <MenuItem value="ebay_purchasing">eBay Purchasing (API)</MenuItem>
               </Select>
             </FormControl>
             <Alert severity="info">
               {purchaseImportSource === 'aliexpress'
-                ? 'Upload a JSON file exported from AliExpress orders.'
+                ? 'Upload a CSV or JSON file exported from AliExpress orders.'
                 : isEbayPurchaseSource
                   ? 'After continuing, choose the date range to import from eBay API.'
                   : 'Upload a CSV file exported from the selected source.'}
@@ -1651,7 +1652,7 @@ export default function PurchasingManagement() {
       <input
         ref={purchaseFileInputRef}
         type="file"
-        accept={purchaseImportSource === 'aliexpress' ? '.json,application/json' : '.csv,text/csv'}
+        accept={purchaseImportSource === 'aliexpress' ? '.csv,text/csv,.json,application/json' : '.csv,text/csv'}
         onChange={handlePurchaseImportSelected}
         hidden
         aria-label="Upload purchase import file"
