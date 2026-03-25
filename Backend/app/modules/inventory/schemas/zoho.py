@@ -129,3 +129,51 @@ class ZohoSyncProgressResponse(BaseModel):
     current_sku: Optional[str] = None
     cancel_requested: bool = False
     last_error: Optional[str] = None
+
+
+class ZohoRelinkBySkuRequest(BaseModel):
+    """Request payload for relinking local zoho_item_id fields by exact SKU lookup."""
+
+    include_inactive: bool = Field(
+        default=False,
+        description="When true, include inactive variants in relink scan.",
+    )
+    overwrite_existing: bool = Field(
+        default=True,
+        description="When true, update local zoho_item_id even when a value already exists.",
+    )
+    dry_run: bool = Field(
+        default=False,
+        description="When true, compute matches without writing DB updates.",
+    )
+    limit: int = Field(
+        default=5000,
+        ge=1,
+        le=10000,
+        description="Maximum number of variants evaluated in one request.",
+    )
+
+
+class ZohoRelinkBySkuItemResult(BaseModel):
+    """Per-variant outcome for Zoho item-id relink-by-SKU."""
+
+    variant_id: int
+    sku: str
+    previous_zoho_item_id: Optional[str] = None
+    matched_zoho_item_id: Optional[str] = None
+    matched: bool
+    updated: bool
+    message: str
+
+
+class ZohoRelinkBySkuResponse(BaseModel):
+    """Aggregate result for Zoho item-id relink-by-SKU."""
+
+    total_processed: int
+    total_matched: int
+    total_updated: int
+    total_unchanged: int
+    total_not_found: int
+    total_skipped: int
+    dry_run: bool
+    items: list[ZohoRelinkBySkuItemResult]

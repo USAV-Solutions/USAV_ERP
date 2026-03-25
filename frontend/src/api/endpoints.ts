@@ -65,6 +65,7 @@ export const IMAGES = {
 
 export const ZOHO = {
   SYNC_ITEMS: '/zoho/sync/items',
+  RELINK_ITEM_IDS_BY_SKU: '/zoho/sync/items/relink-by-sku',
   SYNC_SINGLE_ITEM: (variantId: number) => `/zoho/sync/items/${variantId}`,
   SYNC_READINESS: '/zoho/sync/readiness',
   SYNC_ITEMS_START: '/zoho/sync/items/start',

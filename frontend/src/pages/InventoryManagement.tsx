@@ -108,6 +108,16 @@ interface ZohoBulkSyncResponse {
   items: ZohoBulkSyncItemResult[]
 }
 
+interface ZohoRelinkBySkuResponse {
+  total_processed: number
+  total_matched: number
+  total_updated: number
+  total_unchanged: number
+  total_not_found: number
+  total_skipped: number
+  dry_run: boolean
+}
+
 interface ZohoReadinessItem {
   variant_id: number
   sku: string
@@ -327,6 +337,7 @@ export default function InventoryManagement() {
   const [snackbarMessage, setSnackbarMessage] = useState('')
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success')
   const [exportingZohoCsv, setExportingZohoCsv] = useState(false)
+  const [relinkingZohoItemIds, setRelinkingZohoItemIds] = useState(false)
   const [readinessDialogOpen, setReadinessDialogOpen] = useState(false)
   const [readinessData, setReadinessData] = useState<ZohoReadinessResponse | null>(null)
   const [syncingVariantId, setSyncingVariantId] = useState<number | null>(null)
@@ -481,12 +492,12 @@ export default function InventoryManagement() {
   })
 
   const zohoBulkSyncMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async ({ includeImages, limit }: { includeImages: boolean; limit: number }) => {
       const response = await axiosClient.post<ZohoBulkSyncResponse>(ZOHO.SYNC_ITEMS, {
-        include_images: true,
+        include_images: includeImages,
         include_composites: true,
         force_resync: true,
-        limit: 5000,
+        limit,
       })
       return response.data
     },
@@ -549,7 +560,15 @@ export default function InventoryManagement() {
   })
 
   const handleStartZohoSync = async () => {
-    await zohoBulkSyncMutation.mutateAsync()
+    await zohoBulkSyncMutation.mutateAsync({ includeImages: true, limit: 5000 })
+  }
+
+  const handleStartZohoSyncNoImages = async () => {
+    await zohoBulkSyncMutation.mutateAsync({ includeImages: false, limit: 5000 })
+  }
+
+  const handleStartZohoSyncNoImagesTest = async () => {
+    await zohoBulkSyncMutation.mutateAsync({ includeImages: false, limit: 2 })
   }
 
   const handleSyncSingleVariant = async (variant: EnhancedVariant) => {
@@ -589,6 +608,33 @@ export default function InventoryManagement() {
       setSnackbarOpen(true)
     } finally {
       setExportingZohoCsv(false)
+    }
+  }
+
+  const handleRelinkZohoItemIdsBySku = async () => {
+    try {
+      setRelinkingZohoItemIds(true)
+      const response = await axiosClient.post<ZohoRelinkBySkuResponse>(ZOHO.RELINK_ITEM_IDS_BY_SKU, {
+        include_inactive: false,
+        overwrite_existing: true,
+        dry_run: false,
+        limit: 5000,
+      })
+
+      const data = response.data
+      setSnackbarSeverity('success')
+      setSnackbarMessage(
+        `Zoho ID relink by SKU completed: ${data.total_updated} updated, ${data.total_unchanged} unchanged, ${data.total_not_found} not found, ${data.total_skipped} skipped.`
+      )
+      setSnackbarOpen(true)
+      await queryClient.invalidateQueries({ queryKey: ['variants'] })
+    } catch (error) {
+      const detail = (error as AxiosError<{ detail?: string }>)?.response?.data?.detail || 'Failed to relink Zoho IDs by SKU.'
+      setSnackbarSeverity('error')
+      setSnackbarMessage(detail)
+      setSnackbarOpen(true)
+    } finally {
+      setRelinkingZohoItemIds(false)
     }
   }
 
@@ -824,7 +870,7 @@ export default function InventoryManagement() {
           <Box sx={{ display: 'flex', gap: 1 }}>
             <Button
               variant="outlined"
-              onClick={() => zohoReadinessMutation.mutate()}
+              onClick={() => void handleStartZohoSync()}
               disabled={
                 zohoReadinessMutation.isPending ||
                 zohoBulkSyncMutation.isPending ||
@@ -841,6 +887,39 @@ export default function InventoryManagement() {
             </Button>
             <Button
               variant="outlined"
+              onClick={() => void handleStartZohoSyncNoImages()}
+              disabled={
+                zohoReadinessMutation.isPending ||
+                zohoBulkSyncMutation.isPending ||
+                isZohoSyncRunning
+              }
+            >
+              {zohoBulkSyncMutation.isPending ? 'Syncing to Zoho...' : 'Sync All to Zoho (No Images)'}
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={() => void handleStartZohoSyncNoImagesTest()}
+              disabled={
+                zohoReadinessMutation.isPending ||
+                zohoBulkSyncMutation.isPending ||
+                isZohoSyncRunning
+              }
+            >
+              {zohoBulkSyncMutation.isPending ? 'Syncing to Zoho...' : 'Sync 2 to Zoho (No Images)'}
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={() => zohoReadinessMutation.mutate()}
+              disabled={
+                zohoReadinessMutation.isPending ||
+                zohoBulkSyncMutation.isPending ||
+                isZohoSyncRunning
+              }
+            >
+              {zohoReadinessMutation.isPending ? 'Checking Readiness...' : 'Zoho Readiness Report'}
+            </Button>
+            <Button
+              variant="outlined"
               onClick={() => backfillThumbnailsMutation.mutate()}
               disabled={backfillThumbnailsMutation.isPending}
             >
@@ -849,9 +928,16 @@ export default function InventoryManagement() {
             <Button
               variant="outlined"
               onClick={() => void handleExportZohoImportCsv()}
-              disabled={exportingZohoCsv}
+              disabled={exportingZohoCsv || relinkingZohoItemIds}
             >
               {exportingZohoCsv ? 'Exporting CSV...' : 'Export Zoho CSV'}
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={() => void handleRelinkZohoItemIdsBySku()}
+              disabled={relinkingZohoItemIds || exportingZohoCsv || zohoBulkSyncMutation.isPending || syncingVariantId !== null}
+            >
+              {relinkingZohoItemIds ? 'Relinking Zoho IDs...' : 'Relink Zoho IDs by SKU'}
             </Button>
             <Button
               variant="outlined"

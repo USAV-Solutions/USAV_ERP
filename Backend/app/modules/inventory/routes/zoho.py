@@ -29,6 +29,9 @@ from app.modules.inventory.schemas import (
     ZohoBulkSyncItemResult,
     ZohoBulkSyncRequest,
     ZohoBulkSyncResponse,
+    ZohoRelinkBySkuItemResult,
+    ZohoRelinkBySkuRequest,
+    ZohoRelinkBySkuResponse,
     ZohoReadinessItem,
     ZohoReadinessRequest,
     ZohoReadinessResponse,
@@ -918,6 +921,161 @@ async def _run_background_job(job: _ZohoSyncJobState) -> None:
             _LAST_JOB = job
             _CURRENT_JOB = None
             _CURRENT_TASK = None
+
+
+@router.post("/sync/items/relink-by-sku", response_model=ZohoRelinkBySkuResponse)
+async def relink_zoho_item_ids_by_sku(
+    data: ZohoRelinkBySkuRequest,
+    _admin: AdminUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Relink local ProductVariant.zoho_item_id using exact Zoho item SKU matches."""
+    if not _has_zoho_credentials():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Zoho credentials are missing (client_id/client_secret/refresh_token/organization_id).",
+        )
+
+    stmt = select(ProductVariant).where(ProductVariant.full_sku.is_not(None)).order_by(ProductVariant.id).limit(data.limit)
+    if not data.include_inactive:
+        stmt = stmt.where(ProductVariant.is_active == True)
+
+    variants = (await db.execute(stmt)).scalars().all()
+    if not variants:
+        return ZohoRelinkBySkuResponse(
+            total_processed=0,
+            total_matched=0,
+            total_updated=0,
+            total_unchanged=0,
+            total_not_found=0,
+            total_skipped=0,
+            dry_run=data.dry_run,
+            items=[],
+        )
+
+    zoho_client = ZohoClient()
+    items: list[ZohoRelinkBySkuItemResult] = []
+    total_matched = 0
+    total_updated = 0
+    total_unchanged = 0
+    total_not_found = 0
+    total_skipped = 0
+
+    for variant in variants:
+        previous_id = variant.zoho_item_id
+
+        try:
+            zoho_item = await zoho_client.get_item_by_sku(variant.full_sku)
+        except Exception as exc:
+            total_skipped += 1
+            items.append(
+                ZohoRelinkBySkuItemResult(
+                    variant_id=variant.id,
+                    sku=variant.full_sku,
+                    previous_zoho_item_id=previous_id,
+                    matched_zoho_item_id=None,
+                    matched=False,
+                    updated=False,
+                    message=f"Zoho lookup failed: {str(exc)}",
+                )
+            )
+            continue
+
+        if not zoho_item:
+            total_not_found += 1
+            items.append(
+                ZohoRelinkBySkuItemResult(
+                    variant_id=variant.id,
+                    sku=variant.full_sku,
+                    previous_zoho_item_id=previous_id,
+                    matched_zoho_item_id=None,
+                    matched=False,
+                    updated=False,
+                    message="No Zoho item found for SKU",
+                )
+            )
+            continue
+
+        matched_id = str(zoho_item.get("item_id", ""))
+        if not matched_id:
+            total_skipped += 1
+            items.append(
+                ZohoRelinkBySkuItemResult(
+                    variant_id=variant.id,
+                    sku=variant.full_sku,
+                    previous_zoho_item_id=previous_id,
+                    matched_zoho_item_id=None,
+                    matched=False,
+                    updated=False,
+                    message="Zoho SKU match missing item_id in response",
+                )
+            )
+            continue
+
+        total_matched += 1
+
+        if previous_id == matched_id:
+            total_unchanged += 1
+            items.append(
+                ZohoRelinkBySkuItemResult(
+                    variant_id=variant.id,
+                    sku=variant.full_sku,
+                    previous_zoho_item_id=previous_id,
+                    matched_zoho_item_id=matched_id,
+                    matched=True,
+                    updated=False,
+                    message="Already linked to matched Zoho item",
+                )
+            )
+            continue
+
+        if previous_id and not data.overwrite_existing:
+            total_skipped += 1
+            items.append(
+                ZohoRelinkBySkuItemResult(
+                    variant_id=variant.id,
+                    sku=variant.full_sku,
+                    previous_zoho_item_id=previous_id,
+                    matched_zoho_item_id=matched_id,
+                    matched=True,
+                    updated=False,
+                    message="Skipped because overwrite_existing=false and local zoho_item_id is set",
+                )
+            )
+            continue
+
+        if not data.dry_run:
+            variant.zoho_item_id = matched_id
+            variant.zoho_sync_status = ZohoSyncStatus.SYNCED
+            variant.zoho_last_synced_at = datetime.now()
+            variant.zoho_sync_error = None
+
+        total_updated += 1
+        items.append(
+            ZohoRelinkBySkuItemResult(
+                variant_id=variant.id,
+                sku=variant.full_sku,
+                previous_zoho_item_id=previous_id,
+                matched_zoho_item_id=matched_id,
+                matched=True,
+                updated=True,
+                message="Relinked by exact SKU match" if not data.dry_run else "Dry run: relink would be applied",
+            )
+        )
+
+    if not data.dry_run:
+        await db.commit()
+
+    return ZohoRelinkBySkuResponse(
+        total_processed=len(variants),
+        total_matched=total_matched,
+        total_updated=total_updated,
+        total_unchanged=total_unchanged,
+        total_not_found=total_not_found,
+        total_skipped=total_skipped,
+        dry_run=data.dry_run,
+        items=items,
+    )
 
 
 @router.post("/sync/readiness", response_model=ZohoReadinessResponse)
