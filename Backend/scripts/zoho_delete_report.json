@@ -1,0 +1,293 @@
+{
+  "window": {
+    "start_date": "2026-03-19",
+    "end_date": "2026-03-19",
+    "dry_run": true
+  },
+  "csv_counts": {
+    "purchase_order_numbers": 7,
+    "bill_ids": 7,
+    "bill_numbers": 7,
+    "payment_vendor_ids": 7,
+    "payment_bill_payment_ids": 7,
+    "receive_ids": 2
+  },
+  "zoho_counts_before_delete": {
+    "purchase_order_ids": 7,
+    "purchase_order_numbers": 7,
+    "bill_ids": 7,
+    "bill_numbers": 7,
+    "payment_bill_payment_ids": 7,
+    "payment_vendor_ids": 7,
+    "receive_ids": 4
+  },
+  "mismatches": {
+    "purchase_orders_by_number": {
+      "csv_missing_in_zoho": [],
+      "zoho_missing_in_csv": []
+    },
+    "bills": {
+      "csv_missing_in_zoho": [],
+      "zoho_missing_in_csv": []
+    },
+    "bill_numbers": {
+      "csv_missing_in_zoho": [],
+      "zoho_missing_in_csv": []
+    },
+    "payments_by_bill_payment_id": {
+      "csv_missing_in_zoho": [],
+      "zoho_missing_in_csv": []
+    },
+    "payments_by_vendor_payment_id": {
+      "csv_missing_in_zoho": [],
+      "zoho_missing_in_csv": []
+    },
+    "receives": {
+      "csv_missing_in_zoho": [],
+      "zoho_missing_in_csv": [
+        "5623409000001833703",
+        "5623409000001833874"
+      ]
+    }
+  },
+  "delete_results": {
+    "payments": {
+      "attempted": 7,
+      "deleted_count": 7,
+      "failed_count": 0,
+      "deleted_ids": [
+        "5623409000001826361",
+        "5623409000001828534",
+        "5623409000001828651",
+        "5623409000001828764",
+        "5623409000001828891",
+        "5623409000001835004",
+        "5623409000001835117"
+      ],
+      "failed": []
+    },
+    "bills": {
+      "attempted": 7,
+      "deleted_count": 7,
+      "failed_count": 0,
+      "deleted_ids": [
+        "5623409000001826203",
+        "5623409000001828488",
+        "5623409000001828605",
+        "5623409000001828718",
+        "5623409000001828833",
+        "5623409000001828958",
+        "5623409000001835071"
+      ],
+      "failed": []
+    },
+    "receives": {
+      "attempted": 4,
+      "deleted_count": 4,
+      "failed_count": 0,
+      "deleted_ids": [
+        "5623409000001826390",
+        "5623409000001833703",
+        "5623409000001833874",
+        "5623409000001835630"
+      ],
+      "failed": []
+    }
+  },
+  "notes": {
+    "delete_scope": "payments/bills/receives attached to purchase orders whose purchase date falls within the input period",
+    "debug_mode": true,
+    "trace_api": true,
+    "diagnostics": {
+      "purchase_order_filter": {
+        "total_fetched": 2262,
+        "dated_in_range": 7,
+        "dated_outside_range": 2255,
+        "missing_or_unparsed_date": 0,
+        "min_po_date": "2015-07-20",
+        "max_po_date": "2026-03-19",
+        "sample_first_5": [
+          {
+            "purchaseorder_id": "5623409000001829843",
+            "purchaseorder_number": "61123192",
+            "status": "received",
+            "raw_date_keys": {
+              "date": "2026-03-11",
+              "purchaseorder_date": "",
+              "purchase_order_date": "",
+              "order_date": ""
+            },
+            "parsed_date": "2026-03-11"
+          },
+          {
+            "purchaseorder_id": "5623409000001831043",
+            "purchaseorder_number": "18-14370-59292",
+            "status": "received",
+            "raw_date_keys": {
+              "date": "2026-03-18",
+              "purchaseorder_date": "",
+              "purchase_order_date": "",
+              "order_date": ""
+            },
+            "parsed_date": "2026-03-18"
+          },
+          {
+            "purchaseorder_id": "5623409000001835043",
+            "purchaseorder_number": "13-14384-06740",
+            "status": "issued",
+            "raw_date_keys": {
+              "date": "2026-03-19",
+              "purchaseorder_date": "",
+              "purchase_order_date": "",
+              "order_date": ""
+            },
+            "parsed_date": "2026-03-19"
+          },
+          {
+            "purchaseorder_id": "5623409000001828930",
+            "purchaseorder_number": "12-14384-10217",
+            "status": "issued",
+            "raw_date_keys": {
+              "date": "2026-03-19",
+              "purchaseorder_date": "",
+              "purchase_order_date": "",
+              "order_date": ""
+            },
+            "parsed_date": "2026-03-19"
+          },
+          {
+            "purchaseorder_id": "5623409000001828803",
+            "purchaseorder_number": "27-14362-16764",
+            "status": "received",
+            "raw_date_keys": {
+              "date": "2026-03-19",
+              "purchaseorder_date": "",
+              "purchase_order_date": "",
+              "order_date": ""
+            },
+            "parsed_date": "2026-03-19"
+          }
+        ],
+        "sample_near_window": [
+          {
+            "purchaseorder_id": "5623409000001835043",
+            "purchaseorder_number": "13-14384-06740",
+            "status": "issued",
+            "parsed_date": "2026-03-19"
+          },
+          {
+            "purchaseorder_id": "5623409000001828930",
+            "purchaseorder_number": "12-14384-10217",
+            "status": "issued",
+            "parsed_date": "2026-03-19"
+          },
+          {
+            "purchaseorder_id": "5623409000001828803",
+            "purchaseorder_number": "27-14362-16764",
+            "status": "received",
+            "parsed_date": "2026-03-19"
+          },
+          {
+            "purchaseorder_id": "5623409000001828690",
+            "purchaseorder_number": "02-14398-36919",
+            "status": "received",
+            "parsed_date": "2026-03-19"
+          },
+          {
+            "purchaseorder_id": "5623409000001828577",
+            "purchaseorder_number": "18-14374-98642",
+            "status": "received",
+            "parsed_date": "2026-03-19"
+          },
+          {
+            "purchaseorder_id": "5623409000001828460",
+            "purchaseorder_number": "01-14400-14096",
+            "status": "issued",
+            "parsed_date": "2026-03-19"
+          },
+          {
+            "purchaseorder_id": "5623409000001826122",
+            "purchaseorder_number": "NEW LCPU MAR 19",
+            "status": "received",
+            "parsed_date": "2026-03-19"
+          },
+          {
+            "purchaseorder_id": "5623409000001831043",
+            "purchaseorder_number": "18-14370-59292",
+            "status": "received",
+            "parsed_date": "2026-03-18"
+          },
+          {
+            "purchaseorder_id": "5623409000001829728",
+            "purchaseorder_number": "06-14389-45433",
+            "status": "issued",
+            "parsed_date": "2026-03-18"
+          },
+          {
+            "purchaseorder_id": "5623409000001829458",
+            "purchaseorder_number": "04-14392-08669",
+            "status": "issued",
+            "parsed_date": "2026-03-18"
+          }
+        ]
+      },
+      "dependencies": {
+        "target_purchase_orders": 7,
+        "po_without_id": 0,
+        "po_get_failures": 0,
+        "po_embedded_receives_seen": 4,
+        "po_embedded_receives_missing_id": 0,
+        "po_dependency_samples": [
+          {
+            "purchaseorder_id": "5623409000001835043",
+            "purchaseorder_number": "13-14384-06740",
+            "bills_found": 1,
+            "receives_found": 0
+          },
+          {
+            "purchaseorder_id": "5623409000001828930",
+            "purchaseorder_number": "12-14384-10217",
+            "bills_found": 1,
+            "receives_found": 0
+          },
+          {
+            "purchaseorder_id": "5623409000001828803",
+            "purchaseorder_number": "27-14362-16764",
+            "bills_found": 1,
+            "receives_found": 1
+          },
+          {
+            "purchaseorder_id": "5623409000001828690",
+            "purchaseorder_number": "02-14398-36919",
+            "bills_found": 1,
+            "receives_found": 1
+          },
+          {
+            "purchaseorder_id": "5623409000001828577",
+            "purchaseorder_number": "18-14374-98642",
+            "bills_found": 1,
+            "receives_found": 1
+          },
+          {
+            "purchaseorder_id": "5623409000001828460",
+            "purchaseorder_number": "01-14400-14096",
+            "bills_found": 1,
+            "receives_found": 0
+          },
+          {
+            "purchaseorder_id": "5623409000001826122",
+            "purchaseorder_number": "NEW LCPU MAR 19",
+            "bills_found": 1,
+            "receives_found": 1
+          }
+        ]
+      },
+      "payments": {
+        "bills_scanned": 7,
+        "bill_fetch_failures": 0,
+        "payment_refs_found": 7,
+        "payment_refs_missing_bill_payment_id": 0
+      }
+    }
+  }
+}

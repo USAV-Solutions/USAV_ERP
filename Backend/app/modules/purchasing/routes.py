@@ -128,6 +128,15 @@ def _decode_upload_text(raw: bytes) -> str:
         return raw.decode("latin-1")
 
 
+def _normalize_web_url(value: object) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if raw.startswith("//"):
+        return f"https:{raw}"
+    return raw
+
+
 def _normalize_currency(value: object) -> str:
     currency_text = str(value or "").strip().upper()
     aliases = {
@@ -1208,6 +1217,11 @@ async def _import_aliexpress_json(
             result.source_rows_skipped += 1
             continue
 
+        existing_po = await _find_existing_po_by_external_id(db, po_number)
+        if existing_po is not None:
+            result.source_rows_skipped += 1
+            continue
+
         seller = order.get("seller") or {}
         seller_name = str((seller or {}).get("storeName") or "").strip() or "AliExpress Seller"
         vendor_id = await _resolve_vendor_id(seller_name, vendor_repo, db, vendor_cache)
@@ -1220,7 +1234,7 @@ async def _import_aliexpress_json(
             handling_amount = Decimal("0")
 
         parsed_items: list[dict] = []
-        order_detail_link = str(order.get("orderDetailLink") or "").strip() or None
+        order_detail_link = _normalize_web_url(order.get("orderDetailLink"))
         for item in items:
             if not isinstance(item, dict):
                 continue
@@ -1234,7 +1248,7 @@ async def _import_aliexpress_json(
                 continue
             external_item_name = item_title if not item_attributes else f"{item_title} ({item_attributes})"
             external_item_id = str(item.get("itemId") or item.get("productId") or item.get("skuId") or "").strip() or None
-            product_link = str(item.get("productLink") or "").strip() or order_detail_link
+            product_link = _normalize_web_url(item.get("productLink")) or order_detail_link
             parsed_items.append(
                 {
                     "external_item_id": external_item_id,
@@ -1258,7 +1272,6 @@ async def _import_aliexpress_json(
         tracking_number = str((tracking_data or {}).get("trackingNumber") or "").strip() or None
         order_date = _to_date(order.get("orderDate") or order.get("orderDateTimestampFormat"))
 
-        existing_po = await _find_existing_po_by_external_id(db, po_number)
         po_payload = {
             "po_number": po_number,
             "vendor_id": vendor_id,
@@ -1277,14 +1290,9 @@ async def _import_aliexpress_json(
             "zoho_sync_error": None,
         }
 
-        if existing_po is None:
-            local_po = await po_repo.create(po_payload)
-            await db.flush()
-            result.purchase_orders_created += 1
-        else:
-            local_po = await po_repo.update(existing_po, po_payload)
-            await db.flush()
-            result.purchase_orders_updated += 1
+        local_po = await po_repo.create(po_payload)
+        await db.flush()
+        result.purchase_orders_created += 1
 
         for item in parsed_items:
             await _upsert_purchase_item(
@@ -1300,6 +1308,205 @@ async def _import_aliexpress_json(
             )
 
     return result
+
+
+async def _import_aliexpress_csv(
+    content: str,
+    vendor_repo: VendorRepository,
+    po_repo: PurchaseOrderRepository,
+    po_item_repo: PurchaseOrderItemRepository,
+    db: AsyncSession,
+) -> PurchaseFileImportResponse:
+    reader = csv.DictReader(io.StringIO(content))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="CSV header row is missing")
+
+    required_headers = ["Order Id", "Order date", "Store Name"]
+    missing_headers = [h for h in required_headers if h not in reader.fieldnames]
+    if missing_headers:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"AliExpress CSV is missing required columns: {', '.join(missing_headers)}",
+        )
+
+    result = PurchaseFileImportResponse(source=PurchaseFileImportSource.ALIEXPRESS)
+    vendor_cache: dict[str, int] = {}
+    grouped_orders: dict[str, dict[str, object]] = {}
+
+    for row in reader:
+        result.source_rows_seen += 1
+
+        po_number = _normalize_external_po_number(row.get("Order Id"))
+        if not po_number:
+            result.source_rows_skipped += 1
+            continue
+
+        order_bucket = grouped_orders.setdefault(
+            po_number,
+            {
+                "vendor_name": str(row.get("Store Name") or "").strip() or "AliExpress Seller",
+                "order_date": _to_date(row.get("Order date")),
+                "currency": _normalize_currency(row.get("Currency") or "USD"),
+                "tracking_number": str(row.get("Tracking number") or "").strip() or None,
+                "tax_amount": Decimal("0"),
+                "shipping_amount": Decimal("0"),
+                "handling_amount": Decimal("0"),
+                "total_amount": Decimal("0"),
+                "items": [],
+                "fingerprints": set(),
+            },
+        )
+
+        summary_total = _to_decimal(row.get("Total price"), default="0")
+        if summary_total > 0:
+            order_bucket["total_amount"] = summary_total
+
+        summary_shipping = _to_decimal(row.get("Total Shipping"), default="0")
+        if summary_shipping > 0:
+            order_bucket["shipping_amount"] = summary_shipping
+
+        summary_adjustment = _to_decimal(row.get("Total price adjustments"), default="0")
+        if summary_adjustment > 0:
+            order_bucket["handling_amount"] = summary_adjustment
+
+        summary_tax = _to_decimal(row.get("Total VAT"), default="0")
+        if summary_tax <= 0:
+            summary_tax = _to_decimal(row.get("Total EU Tax"), default="0")
+        if summary_tax > 0:
+            order_bucket["tax_amount"] = summary_tax
+
+        if not order_bucket.get("tracking_number"):
+            tracking_number = str(row.get("Tracking number") or "").strip()
+            if tracking_number:
+                order_bucket["tracking_number"] = tracking_number
+
+        item_title = str(row.get("Item title") or "").strip()
+        quantity = _to_int(row.get("Item quantity"), default=0)
+        if not item_title or quantity <= 0:
+            continue
+
+        item_attributes = str(row.get("Item attributes") or "").strip()
+        if item_attributes and item_attributes.lower() != "n/a":
+            external_item_name = f"{item_title} ({item_attributes})"
+        else:
+            external_item_name = item_title
+
+        item_unit_price = _to_decimal(row.get("Item price"), default="0")
+        product_link = _normalize_web_url(row.get("Item product link")) or _normalize_web_url(row.get("Order detail url"))
+
+        external_item_id = None
+        if product_link and "/item/" in product_link:
+            try:
+                external_item_id = product_link.split("/item/", 1)[1].split(".html", 1)[0].strip() or None
+            except Exception:
+                external_item_id = None
+
+        fingerprint = (
+            str(external_item_id or ""),
+            str(external_item_name),
+            str(quantity),
+            str(item_unit_price),
+        )
+        fingerprints: set[tuple[str, str, str, str]] = order_bucket["fingerprints"]  # type: ignore[assignment]
+        if fingerprint in fingerprints:
+            continue
+        fingerprints.add(fingerprint)
+
+        items: list[dict[str, object]] = order_bucket["items"]  # type: ignore[assignment]
+        items.append(
+            {
+                "external_item_id": external_item_id,
+                "purchase_item_link": product_link,
+                "external_item_name": external_item_name,
+                "quantity": quantity,
+                "unit_price": item_unit_price,
+            }
+        )
+
+    for po_number, order_data in grouped_orders.items():
+        items: list[dict[str, object]] = order_data["items"]  # type: ignore[assignment]
+        if not items:
+            result.source_rows_skipped += 1
+            continue
+
+        existing_po = await _find_existing_po_by_external_id(db, po_number)
+        if existing_po is not None:
+            result.source_rows_skipped += 1
+            continue
+
+        vendor_name = str(order_data["vendor_name"])
+        vendor_id = await _resolve_vendor_id(vendor_name, vendor_repo, db, vendor_cache)
+
+        tax_amount = _to_decimal(order_data["tax_amount"], default="0")
+        shipping_amount = _to_decimal(order_data["shipping_amount"], default="0")
+        handling_amount = _to_decimal(order_data["handling_amount"], default="0")
+        total_amount = _to_decimal(order_data["total_amount"], default="0")
+        if total_amount <= 0:
+            total_amount = sum(
+                (_to_decimal(item.get("unit_price"), default="0") * _to_int(item.get("quantity"), default=0) for item in items),
+                Decimal("0"),
+            ) + tax_amount + shipping_amount + handling_amount
+
+        po_payload = {
+            "po_number": po_number,
+            "vendor_id": vendor_id,
+            "deliver_status": PurchaseDeliverStatus.CREATED,
+            "order_date": order_data["order_date"],
+            "expected_delivery_date": None,
+            "total_amount": total_amount,
+            "currency": str(order_data["currency"]),
+            "tracking_number": order_data["tracking_number"],
+            "tax_amount": tax_amount,
+            "shipping_amount": shipping_amount,
+            "handling_amount": handling_amount,
+            "source": "ALIEXPRESS_CSV",
+            "notes": "Imported from AliExpress orders CSV.",
+            "zoho_sync_status": ZohoSyncStatus.DIRTY,
+            "zoho_sync_error": None,
+        }
+
+        local_po = await po_repo.create(po_payload)
+        await db.flush()
+        result.purchase_orders_created += 1
+
+        for item in items:
+            item_name = str(item.get("external_item_name") or "").strip()
+            quantity = _to_int(item.get("quantity"), default=0)
+            if not item_name or quantity <= 0:
+                result.source_rows_skipped += 1
+                continue
+
+            await _upsert_purchase_item(
+                local_po_id=local_po.id,
+                item_id=str(item.get("external_item_id") or "").strip() or None,
+                purchase_item_link=str(item.get("purchase_item_link") or "").strip() or None,
+                item_name=item_name,
+                quantity=quantity,
+                unit_price=_to_decimal(item.get("unit_price"), default="0"),
+                po_item_repo=po_item_repo,
+                db=db,
+                result=result,
+            )
+
+    return result
+
+
+async def _import_aliexpress_file(
+    content: str,
+    vendor_repo: VendorRepository,
+    po_repo: PurchaseOrderRepository,
+    po_item_repo: PurchaseOrderItemRepository,
+    db: AsyncSession,
+) -> PurchaseFileImportResponse:
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError:
+        payload = None
+
+    if isinstance(payload, list):
+        return await _import_aliexpress_json(content, vendor_repo, po_repo, po_item_repo, db)
+
+    return await _import_aliexpress_csv(content, vendor_repo, po_repo, po_item_repo, db)
 
 
 async def _import_purchase_file_by_source(
@@ -1327,7 +1534,7 @@ async def _import_purchase_file_by_source(
     if source == PurchaseFileImportSource.AMAZON:
         return await _import_amazon_csv(content, vendor_repo, po_repo, po_item_repo, db)
     if source == PurchaseFileImportSource.ALIEXPRESS:
-        return await _import_aliexpress_json(content, vendor_repo, po_repo, po_item_repo, db)
+        return await _import_aliexpress_file(content, vendor_repo, po_repo, po_item_repo, db)
 
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported import source")
 

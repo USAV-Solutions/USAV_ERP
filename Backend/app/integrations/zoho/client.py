@@ -720,14 +720,27 @@ class ZohoClient:
     async def list_purchase_orders(
         self,
         *,
+        date_start: Optional[str] = None,
+        date_end: Optional[str] = None,
+        filter_by: str = "Status.All",
         page: int = 1,
         per_page: int = 200,
     ) -> List[dict]:
         """List purchase orders with pagination."""
+        params: dict[str, Any] = {
+            "page": page,
+            "per_page": per_page,
+            "filter_by": filter_by,
+        }
+        if date_start:
+            params["date_start"] = date_start
+        if date_end:
+            params["date_end"] = date_end
+
         result = await self._request(
             "GET",
             "/purchaseorders",
-            params={"page": page, "per_page": per_page},
+            params=params,
         )
         return result.get("purchaseorders", [])
 
