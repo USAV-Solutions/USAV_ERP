@@ -198,6 +198,14 @@ def _build_purchase_item_link(source: PurchaseFileImportSource, *, asin: str | N
     return None
 
 
+def _ebay_purchase_order_source(source: PurchaseFileImportSource) -> str:
+    source_map = {
+        PurchaseFileImportSource.EBAY_MEKONG: "EBAY_MEKONG_API",
+        PurchaseFileImportSource.EBAY_PURCHASING: "EBAY_PURCHASING_API",
+    }
+    return source_map.get(source, "EBAY_BUYING_API")
+
+
 def _map_zoho_po_status(status_raw: object) -> PurchaseDeliverStatus:
     status_text = str(status_raw or "").strip().lower()
     if status_text in {"billed", "partially_billed"}:
@@ -1638,7 +1646,7 @@ async def _import_ebay_purchase_api(
             "tax_amount": tax_amount,
             "shipping_amount": shipping_amount,
             "handling_amount": handling_amount,
-            "source": "EBAY_BUYING_API",
+            "source": _ebay_purchase_order_source(source),
             "notes": f"Imported via eBay GetOrders (Buyer) ({source.value}).",
             "zoho_sync_status": ZohoSyncStatus.DIRTY,
             "zoho_sync_error": None,

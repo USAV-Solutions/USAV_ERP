@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from app.integrations.zoho.sync_engine import purchase_order_to_zoho_payload
 from app.modules.purchasing.routes import (
     _extract_zoho_po_charges,
+    _import_ebay_purchase_api,
     _resolve_zoho_external_item_name,
     _upsert_purchase_item,
     import_purchasing_from_zoho,
@@ -79,7 +80,7 @@ def test_purchase_order_to_zoho_payload_maps_header_custom_and_adjustment_fields
     assert payload["reference_number"] == "TRK-123"
     assert payload["adjustment"] == 10.0
     assert payload["adjustment_description"] == "Shipping Fee + Handling Fee"
-    assert "Source: AMAZON_CSV" in payload["notes"]
+    assert "Source:" not in payload["notes"]
     assert "Tracking: TRK-123" in payload["notes"]
     assert payload["line_items"][0]["item_id"] == "it-100"
 
@@ -147,6 +148,7 @@ def test_purchase_order_to_zoho_payload_appends_missing_item_links_to_notes():
 
     assert "Item Links:" in payload["notes"]
     assert "https://example.com/items/A" in payload["notes"]
+    assert "https://example.com/items/B" in payload["notes"]
 
 
 def test_purchase_order_to_zoho_payload_does_not_duplicate_existing_item_link_in_notes():
@@ -178,6 +180,42 @@ def test_purchase_order_to_zoho_payload_does_not_duplicate_existing_item_link_in
 
     assert payload["notes"].count(existing_link) == 1
     assert "Item Links:" not in payload["notes"]
+
+
+def test_purchase_order_to_zoho_payload_does_not_drop_second_link_with_shared_prefix():
+    po = SimpleNamespace(
+        po_number="PO-791",
+        order_date=date(2026, 3, 17),
+        expected_delivery_date=None,
+        currency="USD",
+        notes="Already synced notes with first link https://example.com/items/123",
+        source="EBAY_MEKONG_API",
+        tracking_number=None,
+        tax_amount=Decimal("0"),
+        shipping_amount=Decimal("0"),
+        handling_amount=Decimal("0"),
+        vendor=SimpleNamespace(zoho_id="999001"),
+        items=[
+            SimpleNamespace(
+                external_item_name="Imported Item A",
+                purchase_item_link="https://example.com/items/123",
+                quantity=1,
+                unit_price=Decimal("12.00"),
+                variant=SimpleNamespace(zoho_item_id="it-200"),
+            ),
+            SimpleNamespace(
+                external_item_name="Imported Item B",
+                purchase_item_link="https://example.com/items/1234",
+                quantity=1,
+                unit_price=Decimal("7.00"),
+                variant=SimpleNamespace(zoho_item_id="it-201"),
+            ),
+        ],
+    )
+
+    payload = purchase_order_to_zoho_payload(po)
+
+    assert "https://example.com/items/1234" in payload["notes"]
 
 
 def test_resolve_zoho_external_item_name_prefers_existing_local_name():
@@ -298,3 +336,81 @@ async def test_import_purchasing_from_zoho_requires_date_range():
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == "order_date_from and order_date_to are required"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source", "expected_po_source"),
+    [
+        (PurchaseFileImportSource.EBAY_MEKONG, "EBAY_MEKONG_API"),
+        (PurchaseFileImportSource.EBAY_PURCHASING, "EBAY_PURCHASING_API"),
+    ],
+)
+async def test_import_ebay_purchase_api_sets_distinct_po_source(monkeypatch, source, expected_po_source):
+    class _FakeClient:
+        async def fetch_buying_orders_xml(self, since, until):
+            return [
+                {
+                    "po_number": "EB-PO-1",
+                    "vendor_name": "eBay Vendor",
+                    "order_date": date(2026, 3, 20),
+                    "currency": "USD",
+                    "tracking_number": "TRACK-1",
+                    "tax_amount": "0",
+                    "shipping_amount": "0",
+                    "handling_amount": "0",
+                    "total_amount": "10.00",
+                    "items": [
+                        {
+                            "external_item_id": "1234567890",
+                            "external_item_name": "Test Item",
+                            "quantity": 1,
+                            "unit_price": "10.00",
+                        }
+                    ],
+                }
+            ]
+
+    monkeypatch.setattr("app.modules.purchasing.routes._build_ebay_purchase_client", lambda _source: _FakeClient())
+
+    async def _fake_find_existing_po(_db, _po_number):
+        return None
+
+    monkeypatch.setattr("app.modules.purchasing.routes._find_existing_po_by_external_id", _fake_find_existing_po)
+
+    created_payloads = []
+
+    async def _fake_create(payload):
+        created_payloads.append(payload)
+        return SimpleNamespace(id=100)
+
+    po_repo = AsyncMock()
+    po_repo.create = AsyncMock(side_effect=_fake_create)
+    po_repo.update = AsyncMock()
+
+    po_item_repo = AsyncMock()
+    po_item_repo.create = AsyncMock(return_value=SimpleNamespace(id=200))
+    po_item_repo.update = AsyncMock()
+
+    vendor_repo = AsyncMock()
+    vendor_repo.get_by_name = AsyncMock(return_value=None)
+    vendor_repo.create = AsyncMock(return_value=SimpleNamespace(id=50, name="eBay Vendor"))
+
+    db = AsyncMock()
+    db.flush = AsyncMock()
+    db.execute = AsyncMock(return_value=_ScalarResult(None))
+    db.get = AsyncMock(return_value=SimpleNamespace(zoho_sync_status=None, zoho_sync_error=None))
+    db.add = MagicMock()
+
+    result = await _import_ebay_purchase_api(
+        source=source,
+        order_date_from=date(2026, 3, 1),
+        order_date_to=date(2026, 3, 31),
+        vendor_repo=vendor_repo,
+        po_repo=po_repo,
+        po_item_repo=po_item_repo,
+        db=db,
+    )
+
+    assert result.purchase_orders_created == 1
+    assert created_payloads and created_payloads[0]["source"] == expected_po_source

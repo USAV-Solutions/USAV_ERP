@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime
 from typing import Any, Optional
 
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 UNMATCHED_PLACEHOLDER_ITEM_NAME = "unmatched item"
 UNMATCHED_PLACEHOLDER_ITEM_SKU = "00000"
+_URL_PATTERN = re.compile(r"https?://[^\s)]+", re.IGNORECASE)
 
 
 # =========================================================================
@@ -144,22 +146,26 @@ def purchase_order_to_zoho_payload(
     notes_parts: list[str] = []
     if po.notes:
         notes_parts.append(str(po.notes).strip())
-    if getattr(po, "source", None):
-        notes_parts.append(f"Source: {po.source}")
     if getattr(po, "tracking_number", None):
         notes_parts.append(f"Tracking: {po.tracking_number}")
 
     existing_notes_text = "\n".join(p for p in notes_parts if p)
-    existing_notes_text_lc = existing_notes_text.lower()
+    existing_links_lc = {
+        match.group(0).rstrip(".,;:").lower()
+        for match in _URL_PATTERN.finditer(existing_notes_text)
+    }
+    links_added_lc: set[str] = set()
     item_links_to_add: list[str] = []
     for item in po.items or []:
         link = str(getattr(item, "purchase_item_link", "") or "").strip()
         if not link:
             continue
-        if link.lower() in existing_notes_text_lc:
+        normalized_link = link.rstrip(".,;:").lower()
+        if normalized_link in existing_links_lc or normalized_link in links_added_lc:
             continue
         item_name = str(getattr(item, "external_item_name", "") or "").strip() or "Item"
         item_links_to_add.append(f"- {item_name}: {link}")
+        links_added_lc.add(normalized_link)
 
     if item_links_to_add:
         notes_parts.append("Item Links:\n" + "\n".join(item_links_to_add))
