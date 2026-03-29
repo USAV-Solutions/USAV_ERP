@@ -33,7 +33,7 @@ import {
 import {
   Add,
   CloudSync,
-  DeleteOutline,
+  NoteAlt,
   FilterList,
   KeyboardArrowDown,
   KeyboardArrowUp,
@@ -107,6 +107,7 @@ interface AddPurchaseOrderItemRowProps {
 function AddPurchaseOrderItemRow({ poId, onChanged, onNotify, onDone }: AddPurchaseOrderItemRowProps) {
   const [externalItemId, setExternalItemId] = useState('')
   const [externalItemName, setExternalItemName] = useState('')
+  const [conditionNote, setConditionNote] = useState('')
   const [quantity, setQuantity] = useState('1')
   const [unitPrice, setUnitPrice] = useState('0')
   const [selectedVariant, setSelectedVariant] = useState<VariantSearchResult | null>(null)
@@ -119,6 +120,7 @@ function AddPurchaseOrderItemRow({ poId, onChanged, onNotify, onDone }: AddPurch
     mutationFn: () =>
       addPurchaseOrderItem(poId, {
         external_item_id: externalItemId.trim() || undefined,
+        condition_note: conditionNote.trim() || null,
         external_item_name: externalItemName.trim(),
         quantity: parsedQuantity,
         unit_price: parsedUnitPrice,
@@ -128,6 +130,7 @@ function AddPurchaseOrderItemRow({ poId, onChanged, onNotify, onDone }: AddPurch
     onSuccess: async () => {
       setExternalItemId('')
       setExternalItemName('')
+      setConditionNote('')
       setQuantity('1')
       setUnitPrice('0')
       setSelectedVariant(null)
@@ -209,6 +212,16 @@ function AddPurchaseOrderItemRow({ poId, onChanged, onNotify, onDone }: AddPurch
         <TableCell colSpan={7}>
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', md: 'center' }}>
             <VariantSearchAutocomplete value={selectedVariant} onChange={setSelectedVariant} />
+            <TextField
+              size="small"
+              label="Condition Note"
+              value={conditionNote}
+              onChange={(e) => setConditionNote(e.target.value)}
+              placeholder="Optional"
+              multiline
+              minRows={1}
+              sx={{ minWidth: { xs: '100%', md: 240 } }}
+            />
             <Typography variant="body2" color="text.secondary">
               Total Price (auto): {computedTotal.toFixed(2)}
             </Typography>
@@ -222,10 +235,10 @@ function AddPurchaseOrderItemRow({ poId, onChanged, onNotify, onDone }: AddPurch
 function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRowProps) {
   const [promptOpen, setPromptOpen] = useState(false)
   const [showMatch, setShowMatch] = useState(false)
-  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [selectedVariant, setSelectedVariant] = useState<VariantSearchResult | null>(null)
   const [externalItemId, setExternalItemId] = useState(item.external_item_id || '')
   const [externalItemName, setExternalItemName] = useState(item.external_item_name)
+  const [conditionNote, setConditionNote] = useState(item.condition_note || '')
   const [quantity, setQuantity] = useState(String(item.quantity))
   const [unitPrice, setUnitPrice] = useState(String(item.unit_price))
 
@@ -238,6 +251,7 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
       updatePurchaseItem(item.id, {
         external_item_id: externalItemId.trim() || null,
         external_item_name: externalItemName.trim(),
+        condition_note: conditionNote.trim() || null,
         quantity: parsedQuantity,
         unit_price: parsedUnitPrice,
         total_price: computedTotalPrice,
@@ -304,6 +318,7 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
   const openPrompt = () => {
     setExternalItemId(item.external_item_id || '')
     setExternalItemName(item.external_item_name)
+    setConditionNote(item.condition_note || '')
     setQuantity(String(item.quantity))
     setUnitPrice(String(item.unit_price))
     setSelectedVariant(null)
@@ -312,7 +327,12 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
 
   return (
     <>
-      <LongPressTableRow payload={item} onLongPress={openPrompt} rowSx={{ cursor: 'pointer' }}>
+      <LongPressTableRow
+        payload={item}
+        onLongPress={openPrompt}
+        longPressDelayMs={900}
+        rowSx={{ cursor: 'pointer' }}
+      >
         <TableCell>{item.external_item_id || '-'}</TableCell>
         <TableCell>
           <Typography variant="body2">{item.external_item_name}</Typography>
@@ -332,6 +352,22 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
               }}
             >
               {item.variant_name}
+            </Typography>
+          )}
+          {item.condition_note && (
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{
+                display: 'block',
+                mt: 0.25,
+                maxWidth: 380,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              Condition: {item.condition_note}
             </Typography>
           )}
         </TableCell>
@@ -385,14 +421,14 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
             )}
             <IconButton
               size="small"
-              color="error"
-              disabled={item.status === 'RECEIVED' || anyPending}
+              color="primary"
+              disabled={anyPending}
               onClick={(event) => {
                 event.stopPropagation()
-                setDeleteConfirmOpen(true)
+                openPrompt()
               }}
             >
-              <DeleteOutline fontSize="small" />
+              <NoteAlt fontSize="small" />
             </IconButton>
           </Stack>
         </TableCell>
@@ -440,6 +476,7 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
         <Stack spacing={2} sx={{ mt: 1 }}>
           <TextField label="Item ID" value={externalItemId} onChange={(e) => setExternalItemId(e.target.value)} fullWidth />
           <TextField label="Item Name" value={externalItemName} onChange={(e) => setExternalItemName(e.target.value)} fullWidth />
+          <TextField label="Condition Note" value={conditionNote} onChange={(e) => setConditionNote(e.target.value)} fullWidth multiline minRows={2} />
           <TextField label="Quantity" type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} fullWidth />
           <TextField label="Unit Price" type="number" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} fullWidth />
           <TextField
@@ -455,34 +492,6 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
           </Typography>
         </Stack>
       </HoldActionPromptDialog>
-
-      <Dialog open={deleteConfirmOpen} onClose={() => setDeleteConfirmOpen(false)} fullWidth maxWidth="xs">
-        <DialogTitle>Delete Purchase Item</DialogTitle>
-        <DialogContent>
-          <Typography>
-            Delete item <strong>{item.external_item_name}</strong>? This action cannot be undone.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDeleteConfirmOpen(false)} disabled={deleteMutation.isPending}>
-            Cancel
-          </Button>
-          <Button
-            color="error"
-            variant="contained"
-            disabled={deleteMutation.isPending}
-            onClick={() => {
-              deleteMutation.mutate(undefined, {
-                onSuccess: () => {
-                  setDeleteConfirmOpen(false)
-                },
-              })
-            }}
-          >
-            {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
-          </Button>
-        </DialogActions>
-      </Dialog>
     </>
   )
 }

@@ -43,6 +43,7 @@ class PurchaseOrderItemBase(BaseModel):
     variant_id: Optional[int] = None
     external_item_id: Optional[str] = Field(None, max_length=100)
     purchase_item_link: Optional[str] = Field(None, max_length=500)
+    condition_note: Optional[str] = None
     external_item_name: str = Field(..., max_length=255)
     quantity: int = Field(..., gt=0)
     unit_price: Decimal = Field(..., ge=0)
@@ -58,6 +59,7 @@ class PurchaseOrderItemUpdate(BaseModel):
     variant_id: Optional[int] = None
     external_item_id: Optional[str] = Field(None, max_length=100)
     purchase_item_link: Optional[str] = Field(None, max_length=500)
+    condition_note: Optional[str] = None
     external_item_name: Optional[str] = Field(None, max_length=255)
     quantity: Optional[int] = Field(None, gt=0)
     unit_price: Optional[Decimal] = Field(None, ge=0)

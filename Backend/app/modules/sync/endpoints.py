@@ -30,6 +30,23 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sync", tags=["Zoho Sync"])
 
 
+def _queue_purchase_orders_for_sync(
+    *,
+    purchase_orders: list[PurchaseOrder],
+    background_tasks: BackgroundTasks,
+) -> list[int]:
+    queued_ids: list[int] = []
+    for po in purchase_orders:
+        if not po.items:
+            continue
+        po.zoho_sync_status = ZohoSyncStatus.PENDING
+        po.zoho_sync_error = None
+        po._updated_by_sync = True
+        queued_ids.append(po.id)
+        background_tasks.add_task(sync_po_outbound, po.id)
+    return queued_ids
+
+
 # ------------------------------------------------------------------
 # Items (ProductVariant → Zoho Item)
 # ------------------------------------------------------------------
@@ -152,12 +169,17 @@ async def force_sync_purchase_order(
             detail=f"Purchase order {po_id} has no items to sync.",
         )
 
-    purchase_order.zoho_sync_status = ZohoSyncStatus.PENDING
-    purchase_order.zoho_sync_error = None
-    purchase_order._updated_by_sync = True
+    queued_ids = _queue_purchase_orders_for_sync(
+        purchase_orders=[purchase_order],
+        background_tasks=background_tasks,
+    )
     await db.commit()
 
-    background_tasks.add_task(sync_po_outbound, po_id)
+    if not queued_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Purchase order {po_id} has no items to sync.",
+        )
 
     logger.info("Force-sync queued | entity=purchase id=%s user=%s", po_id, _current_user.id)
     return {"status": "queued", "entity": "purchase", "id": po_id}
@@ -207,15 +229,10 @@ async def force_sync_purchase_orders_by_period(
             "ids": [],
         }
 
-    queued_ids: list[int] = []
-    for po in purchase_orders:
-        if not po.items:
-            continue
-        po.zoho_sync_status = ZohoSyncStatus.PENDING
-        po.zoho_sync_error = None
-        po._updated_by_sync = True
-        queued_ids.append(po.id)
-        background_tasks.add_task(sync_po_outbound, po.id)
+    queued_ids = _queue_purchase_orders_for_sync(
+        purchase_orders=purchase_orders,
+        background_tasks=background_tasks,
+    )
 
     await db.commit()
 

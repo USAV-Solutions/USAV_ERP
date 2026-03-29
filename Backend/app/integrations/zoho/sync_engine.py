@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from datetime import datetime
 from typing import Any, Optional
 
@@ -35,7 +34,6 @@ logger = logging.getLogger(__name__)
 
 UNMATCHED_PLACEHOLDER_ITEM_NAME = "unmatched item"
 UNMATCHED_PLACEHOLDER_ITEM_SKU = "00000"
-_URL_PATTERN = re.compile(r"https?://[^\s)]+", re.IGNORECASE)
 
 
 # =========================================================================
@@ -137,6 +135,7 @@ def purchase_order_to_zoho_payload(
     po: PurchaseOrder,
     *,
     unmatched_item_id: Optional[str] = None,
+    existing_notes: Optional[str] = None,
 ) -> dict[str, Any]:
     """Build a Zoho purchase-order payload from a local ``PurchaseOrder``."""
     vendor = getattr(po, "vendor", None)
@@ -144,31 +143,49 @@ def purchase_order_to_zoho_payload(
         raise ValueError("PurchaseOrder is missing vendor.zoho_id; sync vendor first.")
 
     notes_parts: list[str] = []
-    if po.notes:
-        notes_parts.append(str(po.notes).strip())
-    if getattr(po, "tracking_number", None):
-        notes_parts.append(f"Tracking: {po.tracking_number}")
+    if existing_notes and str(existing_notes).strip():
+        notes_parts.append(str(existing_notes).strip())
 
-    existing_notes_text = "\n".join(p for p in notes_parts if p)
-    existing_links_lc = {
-        match.group(0).rstrip(".,;:").lower()
-        for match in _URL_PATTERN.finditer(existing_notes_text)
-    }
-    links_added_lc: set[str] = set()
-    item_links_to_add: list[str] = []
+    existing_notes_text_lc = "\n".join(p for p in notes_parts if p).lower()
+
+    def _append_if_missing(line: str) -> None:
+        nonlocal existing_notes_text_lc
+        normalized = line.strip()
+        if not normalized:
+            return
+        if normalized.lower() in existing_notes_text_lc:
+            return
+        notes_parts.append(normalized)
+        existing_notes_text_lc = "\n".join(p for p in notes_parts if p).lower()
+
+    if po.notes:
+        _append_if_missing(str(po.notes).strip())
+    if getattr(po, "source", None):
+        _append_if_missing(f"Source: {po.source}")
+    if getattr(po, "tracking_number", None):
+        _append_if_missing(f"Tracking: {po.tracking_number}")
+
+    item_note_lines: list[str] = []
+    item_note_lines_added_lc: set[str] = set()
     for item in po.items or []:
         link = str(getattr(item, "purchase_item_link", "") or "").strip()
         if not link:
             continue
-        normalized_link = link.rstrip(".,;:").lower()
-        if normalized_link in existing_links_lc or normalized_link in links_added_lc:
-            continue
         item_name = str(getattr(item, "external_item_name", "") or "").strip() or "Item"
-        item_links_to_add.append(f"- {item_name}: {link}")
-        links_added_lc.add(normalized_link)
+        condition_note = str(getattr(item, "condition_note", "") or "").strip()
+        item_line = (
+            f"{item_name}: {link}, condition: {condition_note}"
+            if condition_note
+            else f"{item_name}: {link}"
+        )
+        normalized_line = item_line.lower()
+        if normalized_line in existing_notes_text_lc or normalized_line in item_note_lines_added_lc:
+            continue
+        item_note_lines.append(item_line)
+        item_note_lines_added_lc.add(normalized_line)
 
-    if item_links_to_add:
-        notes_parts.append("Item Links:\n" + "\n".join(item_links_to_add))
+    if item_note_lines:
+        notes_parts.append("\n".join(item_note_lines))
 
     payload: dict[str, Any] = {
         "purchaseorder_number": po.po_number,
@@ -248,6 +265,89 @@ async def _ensure_unmatched_placeholder_item(zoho: ZohoClient) -> Optional[str]:
     )
     item_id = str(item.get("item_id") or "").strip()
     return item_id or None
+
+
+async def _resolve_target_zoho_purchase_order(
+    zoho: ZohoClient,
+    *,
+    po: PurchaseOrder,
+) -> tuple[Optional[str], Optional[dict[str, Any]]]:
+    """
+    Resolve the Zoho purchase-order target using local zoho_id and PO number.
+
+    Resolution order:
+    1) If local zoho_id exists, fetch by zoho_id.
+       - If remote purchase number matches local po_number, use this record.
+       - If mismatch, lookup by po_number and remap local zoho_id when found.
+    2) If no/invalid zoho_id, lookup by po_number.
+    3) If not found by po_number, return None so caller creates a new PO.
+    """
+    local_po_number = str(po.po_number or "").strip()
+    resolved_id: Optional[str] = None
+    resolved_po: Optional[dict[str, Any]] = None
+
+    if po.zoho_id:
+        candidate_id = str(po.zoho_id).strip()
+        try:
+            by_id = await zoho.get_purchase_order(candidate_id)
+        except Exception as exc:
+            logger.warning(
+                "sync_po_outbound: lookup by zoho_id failed | po_id=%s zoho_id=%s error=%s",
+                po.id,
+                candidate_id,
+                exc,
+            )
+            by_id = None
+
+        if by_id:
+            remote_po_number = str(by_id.get("purchaseorder_number") or "").strip()
+            if remote_po_number == local_po_number:
+                resolved_id = candidate_id
+                resolved_po = by_id
+            else:
+                logger.warning(
+                    "sync_po_outbound: zoho_id points to different PO number | po_id=%s local_po_number=%s remote_po_number=%s zoho_id=%s",
+                    po.id,
+                    local_po_number,
+                    remote_po_number,
+                    candidate_id,
+                )
+                po.zoho_id = None
+        else:
+            po.zoho_id = None
+
+    if not resolved_id:
+        try:
+            by_number = await zoho.find_purchase_order_by_number(local_po_number)
+        except Exception as exc:
+            logger.warning(
+                "sync_po_outbound: lookup by purchase number failed | po_id=%s po_number=%s error=%s",
+                po.id,
+                local_po_number,
+                exc,
+            )
+            by_number = None
+
+        if by_number:
+            resolved_id = str(by_number.get("purchaseorder_id") or "").strip() or None
+            resolved_po = by_number
+            if resolved_id:
+                po.zoho_id = resolved_id
+
+    if resolved_id and (not resolved_po or "notes" not in resolved_po):
+        try:
+            full_po = await zoho.get_purchase_order(resolved_id)
+            if full_po:
+                resolved_po = full_po
+        except Exception as exc:
+            logger.warning(
+                "sync_po_outbound: failed to hydrate resolved purchase order | po_id=%s zoho_id=%s error=%s",
+                po.id,
+                resolved_id,
+                exc,
+            )
+
+    return resolved_id, resolved_po
 
 
 def _is_billed_po_update_error(exc: Exception) -> bool:
@@ -740,7 +840,20 @@ async def sync_po_outbound(po_id: int, allow_billed_unbill_rebill: bool = False)
                         "Unable to resolve Zoho placeholder item for unmatched purchase-order lines"
                     )
 
-            payload = purchase_order_to_zoho_payload(po, unmatched_item_id=unmatched_item_id)
+            resolved_zoho_po_id, resolved_zoho_po = await _resolve_target_zoho_purchase_order(
+                zoho,
+                po=po,
+            )
+
+            remote_notes = None
+            if resolved_zoho_po:
+                remote_notes = str(resolved_zoho_po.get("notes") or "").strip() or None
+
+            payload = purchase_order_to_zoho_payload(
+                po,
+                unmatched_item_id=unmatched_item_id,
+                existing_notes=remote_notes,
+            )
             new_hash = generate_payload_hash(payload)
 
             if new_hash == po.zoho_last_sync_hash:
@@ -751,37 +864,14 @@ async def sync_po_outbound(po_id: int, allow_billed_unbill_rebill: bool = False)
                 await db.commit()
                 return
 
-            if po.zoho_id:
+            if resolved_zoho_po_id:
                 try:
-                    existing_po = await zoho.get_purchase_order(po.zoho_id)
-                    if not existing_po:
-                        po.zoho_id = None
-                except Exception as lookup_exc:
-                    logger.warning(
-                        "sync_po_outbound: verification of existing purchase order %s failed: %s",
-                        po.zoho_id,
-                        lookup_exc,
-                    )
-
-            if not po.zoho_id:
-                try:
-                    existing_po = await zoho.find_purchase_order_by_number(po.po_number)
-                    if existing_po:
-                        po.zoho_id = str(existing_po.get("purchaseorder_id") or "").strip() or None
-                except Exception as lookup_exc:
-                    logger.warning(
-                        "sync_po_outbound: lookup existing purchase order failed: %s",
-                        lookup_exc,
-                    )
-
-            if po.zoho_id:
-                try:
-                    zoho_po = await zoho.update_purchase_order(po.zoho_id, payload)
+                    zoho_po = await zoho.update_purchase_order(resolved_zoho_po_id, payload)
                 except Exception as update_exc:
                     if allow_billed_unbill_rebill and _is_billed_po_update_error(update_exc):
                         zoho_po = await _update_billed_purchase_order_with_unbill_rebill(
                             zoho,
-                            purchase_order_id=po.zoho_id,
+                            purchase_order_id=resolved_zoho_po_id,
                             payload=payload,
                         )
                     else:

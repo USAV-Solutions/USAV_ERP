@@ -103,6 +103,12 @@ async def _load_target_variants(db: AsyncSession, data: ZohoBulkSyncRequest) -> 
         .order_by(ProductVariant.id)
         .limit(data.limit)
     )
+    if data.bundle_only:
+        stmt = stmt.where(
+            ProductVariant.identity.has(
+                ProductIdentity.type.in_([IdentityType.B, IdentityType.K])
+            )
+        )
     if not data.force_resync:
         stmt = stmt.where(
             ProductVariant.zoho_sync_status.in_([ZohoSyncStatus.PENDING, ZohoSyncStatus.DIRTY])

@@ -172,6 +172,7 @@ class PurchaseOrderItem(Base, TimestampMixin):
     )
     external_item_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     purchase_item_link: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    condition_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     external_item_name: Mapped[str] = mapped_column(String(255), nullable=False)
     quantity: Mapped[int] = mapped_column(nullable=False)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)

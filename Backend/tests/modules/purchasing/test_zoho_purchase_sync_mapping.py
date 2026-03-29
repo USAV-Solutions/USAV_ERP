@@ -80,7 +80,7 @@ def test_purchase_order_to_zoho_payload_maps_header_custom_and_adjustment_fields
     assert payload["reference_number"] == "TRK-123"
     assert payload["adjustment"] == 10.0
     assert payload["adjustment_description"] == "Shipping Fee + Handling Fee"
-    assert "Source:" not in payload["notes"]
+    assert "Source: AMAZON_CSV" in payload["notes"]
     assert "Tracking: TRK-123" in payload["notes"]
     assert payload["line_items"][0]["item_id"] == "it-100"
 
@@ -130,6 +130,7 @@ def test_purchase_order_to_zoho_payload_appends_missing_item_links_to_notes():
             SimpleNamespace(
                 external_item_name="Imported Item A",
                 purchase_item_link="https://example.com/items/A",
+                condition_note="Used",
                 quantity=1,
                 unit_price=Decimal("12.00"),
                 variant=SimpleNamespace(zoho_item_id="it-200"),
@@ -146,9 +147,7 @@ def test_purchase_order_to_zoho_payload_appends_missing_item_links_to_notes():
 
     payload = purchase_order_to_zoho_payload(po)
 
-    assert "Item Links:" in payload["notes"]
-    assert "https://example.com/items/A" in payload["notes"]
-    assert "https://example.com/items/B" in payload["notes"]
+    assert "Imported Item A: https://example.com/items/A, condition: Used" in payload["notes"]
 
 
 def test_purchase_order_to_zoho_payload_does_not_duplicate_existing_item_link_in_notes():
@@ -179,7 +178,7 @@ def test_purchase_order_to_zoho_payload_does_not_duplicate_existing_item_link_in
     payload = purchase_order_to_zoho_payload(po)
 
     assert payload["notes"].count(existing_link) == 1
-    assert "Item Links:" not in payload["notes"]
+    assert "Imported Item A:" not in payload["notes"]
 
 
 def test_purchase_order_to_zoho_payload_does_not_drop_second_link_with_shared_prefix():
@@ -216,6 +215,39 @@ def test_purchase_order_to_zoho_payload_does_not_drop_second_link_with_shared_pr
     payload = purchase_order_to_zoho_payload(po)
 
     assert "https://example.com/items/1234" in payload["notes"]
+
+
+def test_purchase_order_to_zoho_payload_preserves_existing_zoho_notes_and_appends_changed_item_line():
+    existing_notes = "Receiver note already on Zoho\nImported Item A: https://example.com/items/A, condition: New"
+    po = SimpleNamespace(
+        po_number="PO-792",
+        order_date=date(2026, 3, 17),
+        expected_delivery_date=None,
+        currency="USD",
+        notes="",
+        source=None,
+        tracking_number=None,
+        tax_amount=Decimal("0"),
+        shipping_amount=Decimal("0"),
+        handling_amount=Decimal("0"),
+        vendor=SimpleNamespace(zoho_id="999001"),
+        items=[
+            SimpleNamespace(
+                external_item_name="Imported Item A",
+                purchase_item_link="https://example.com/items/A",
+                condition_note="Used",
+                quantity=1,
+                unit_price=Decimal("12.00"),
+                variant=SimpleNamespace(zoho_item_id="it-200"),
+            )
+        ],
+    )
+
+    payload = purchase_order_to_zoho_payload(po, existing_notes=existing_notes)
+
+    assert "Receiver note already on Zoho" in payload["notes"]
+    assert "Imported Item A: https://example.com/items/A, condition: New" in payload["notes"]
+    assert "Imported Item A: https://example.com/items/A, condition: Used" in payload["notes"]
 
 
 def test_resolve_zoho_external_item_name_prefers_existing_local_name():

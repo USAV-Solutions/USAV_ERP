@@ -16,6 +16,10 @@ class ZohoBulkSyncRequest(BaseModel):
         default=True,
         description="Create/update composite items for Bundle/Kit identities.",
     )
+    bundle_only: bool = Field(
+        default=False,
+        description="When true, process only Bundle/Kit (B/K) variants.",
+    )
     force_resync: bool = Field(
         default=False,
         description="Push all active variants even if already SYNCED.",

@@ -8,6 +8,7 @@ interface LongPressTableRowProps<T> extends Omit<TableRowProps, 'children'> {
   onLongPress: (payload: T) => void
   children: ReactNode
   enableLongPress?: boolean
+  longPressDelayMs?: number
   rowSx?: SxProps<Theme>
 }
 
@@ -16,10 +17,11 @@ export default function LongPressTableRow<T>({
   onLongPress,
   children,
   enableLongPress = true,
+  longPressDelayMs,
   rowSx,
   ...props
 }: LongPressTableRowProps<T>) {
-  const handlers = useLongPress(onLongPress, payload)
+  const handlers = useLongPress(onLongPress, payload, { delayMs: longPressDelayMs })
 
   return (
     <TableRow

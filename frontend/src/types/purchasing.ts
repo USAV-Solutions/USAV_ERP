@@ -30,6 +30,7 @@ export interface PurchaseOrderItem {
   variant_name?: string | null
   external_item_id?: string | null
   purchase_item_link?: string | null
+  condition_note?: string | null
   external_item_name: string
   quantity: number
   unit_price: number
@@ -42,6 +43,7 @@ export interface PurchaseOrderItem {
 export interface PurchaseOrderItemCreate {
   variant_id?: number
   external_item_id?: string
+  condition_note?: string | null
   external_item_name: string
   quantity: number
   unit_price: number
@@ -97,6 +99,7 @@ export interface PurchaseOrderItemMatchRequest {
 export interface PurchaseOrderItemUpdate {
   variant_id?: number | null
   external_item_id?: string | null
+  condition_note?: string | null
   external_item_name?: string
   quantity?: number
   unit_price?: number

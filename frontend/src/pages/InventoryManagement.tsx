@@ -30,10 +30,12 @@ import {
   FormControl,
   InputLabel,
   Select,
+  Menu,
   MenuItem,
 } from '@mui/material'
 import {
   Add,
+  ArrowDropDown,
   ViewList,
   ViewModule,
   ExpandMore,
@@ -43,7 +45,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AxiosError } from 'axios'
 import axiosClient from '../api/axiosClient'
-import { CATALOG, IMAGES, ZOHO } from '../api/endpoints'
+import { CATALOG, ZOHO } from '../api/endpoints'
 import { Variant, ProductIdentity, ProductFamily, ProductType } from '../types/inventory'
 import { useAuth } from '../hooks/useAuth'
 import CreateProductDialog from '../components/inventory/CreateProductDialog'
@@ -87,13 +89,6 @@ interface GroupedItem {
   variants: EnhancedVariant[]
 }
 
-interface ThumbnailBackfillResponse {
-  processed: number
-  updated: number
-  failed: number
-  remaining_null_thumbnail_url: number
-}
-
 interface ZohoBulkSyncItemResult {
   variant_id: number
   success: boolean
@@ -116,24 +111,6 @@ interface ZohoRelinkBySkuResponse {
   total_not_found: number
   total_skipped: number
   dry_run: boolean
-}
-
-interface ZohoReadinessItem {
-  variant_id: number
-  sku: string
-  identity_type: string
-  ready: boolean
-  severity: 'ok' | 'warning' | 'error'
-  missing_fields: string[]
-  warnings: string[]
-}
-
-interface ZohoReadinessResponse {
-  total_checked: number
-  ready_count: number
-  blocked_count: number
-  warning_only_count: number
-  items: ZohoReadinessItem[]
 }
 
 const getTypeLabel = (type: ProductType): string => {
@@ -338,8 +315,7 @@ export default function InventoryManagement() {
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success')
   const [exportingZohoCsv, setExportingZohoCsv] = useState(false)
   const [relinkingZohoItemIds, setRelinkingZohoItemIds] = useState(false)
-  const [readinessDialogOpen, setReadinessDialogOpen] = useState(false)
-  const [readinessData, setReadinessData] = useState<ZohoReadinessResponse | null>(null)
+  const [zohoActionsAnchorEl, setZohoActionsAnchorEl] = useState<null | HTMLElement>(null)
   const [syncingVariantId, setSyncingVariantId] = useState<number | null>(null)
   const [holdPromptOpen, setHoldPromptOpen] = useState(false)
   const [selectedVariant, setSelectedVariant] = useState<EnhancedVariant | null>(null)
@@ -470,34 +446,14 @@ export default function InventoryManagement() {
     },
   })
 
-  const backfillThumbnailsMutation = useMutation({
-    mutationFn: async () => {
-      const response = await axiosClient.post(IMAGES.DEBUG_BACKFILL)
-      return response.data
-    },
-    onSuccess: async (data: ThumbnailBackfillResponse) => {
-      setSnackbarSeverity('success')
-      setSnackbarMessage(
-        `Thumbnail backfill completed: ${data.updated} updated, ${data.failed} failed, ${data.remaining_null_thumbnail_url} remaining.`
-      )
-      setSnackbarOpen(true)
-      await queryClient.invalidateQueries({ queryKey: ['variants'] })
-    },
-    onError: (error: AxiosError<{ detail?: string }>) => {
-      const detail = error.response?.data?.detail || 'Failed to run thumbnail backfill.'
-      setSnackbarSeverity('error')
-      setSnackbarMessage(detail)
-      setSnackbarOpen(true)
-    },
-  })
-
   const zohoBulkSyncMutation = useMutation({
-    mutationFn: async ({ includeImages, limit }: { includeImages: boolean; limit: number }) => {
+    mutationFn: async ({ includeImages, limit, bundleOnly = false }: { includeImages: boolean; limit: number; bundleOnly?: boolean }) => {
       const response = await axiosClient.post<ZohoBulkSyncResponse>(ZOHO.SYNC_ITEMS, {
         include_images: includeImages,
         include_composites: true,
         force_resync: true,
         limit,
+        bundle_only: bundleOnly,
       })
       return response.data
     },
@@ -567,8 +523,8 @@ export default function InventoryManagement() {
     await zohoBulkSyncMutation.mutateAsync({ includeImages: false, limit: 5000 })
   }
 
-  const handleStartZohoSyncNoImagesTest = async () => {
-    await zohoBulkSyncMutation.mutateAsync({ includeImages: false, limit: 2 })
+  const handleStartZohoBundleSync = async () => {
+    await zohoBulkSyncMutation.mutateAsync({ includeImages: true, limit: 5000, bundleOnly: true })
   }
 
   const handleSyncSingleVariant = async (variant: EnhancedVariant) => {
@@ -638,27 +594,15 @@ export default function InventoryManagement() {
     }
   }
 
-  const zohoReadinessMutation = useMutation({
-    mutationFn: async () => {
-      const response = await axiosClient.post<ZohoReadinessResponse>(ZOHO.SYNC_READINESS, {
-        include_images: true,
-        include_composites: true,
-        only_unsynced: false,
-        limit: 5000,
-      })
-      return response.data
-    },
-    onSuccess: (data: ZohoReadinessResponse) => {
-      setReadinessData(data)
-      setReadinessDialogOpen(true)
-    },
-    onError: (error: AxiosError<{ detail?: string }>) => {
-      const detail = error.response?.data?.detail || 'Zoho readiness check failed.'
-      setSnackbarSeverity('error')
-      setSnackbarMessage(detail)
-      setSnackbarOpen(true)
-    },
-  })
+  const isZohoActionsMenuOpen = Boolean(zohoActionsAnchorEl)
+
+  const handleOpenZohoActionsMenu = (event: React.MouseEvent<HTMLElement>) => {
+    setZohoActionsAnchorEl(event.currentTarget)
+  }
+
+  const handleCloseZohoActionsMenu = () => {
+    setZohoActionsAnchorEl(null)
+  }
 
   const fetchAllPages = async <T,>(
     endpoint: string,
@@ -870,75 +814,63 @@ export default function InventoryManagement() {
           <Box sx={{ display: 'flex', gap: 1 }}>
             <Button
               variant="outlined"
-              onClick={() => void handleStartZohoSync()}
-              disabled={
-                zohoReadinessMutation.isPending ||
-                zohoBulkSyncMutation.isPending ||
-                isZohoSyncRunning
-              }
+              onClick={handleOpenZohoActionsMenu}
+              endIcon={<ArrowDropDown />}
+              disabled={zohoBulkSyncMutation.isPending || isZohoSyncRunning || relinkingZohoItemIds || exportingZohoCsv}
             >
-              {zohoReadinessMutation.isPending
-                ? 'Checking Readiness...'
-                : zohoBulkSyncMutation.isPending
-                  ? 'Syncing to Zoho...'
-                  : isZohoSyncRunning
-                    ? 'Zoho Sync Running...'
-                  : 'Sync All to Zoho'}
+              {zohoBulkSyncMutation.isPending ? 'Syncing...' : 'Zoho Actions'}
             </Button>
-            <Button
-              variant="outlined"
-              onClick={() => void handleStartZohoSyncNoImages()}
-              disabled={
-                zohoReadinessMutation.isPending ||
-                zohoBulkSyncMutation.isPending ||
-                isZohoSyncRunning
-              }
+            <Menu
+              anchorEl={zohoActionsAnchorEl}
+              open={isZohoActionsMenuOpen}
+              onClose={handleCloseZohoActionsMenu}
             >
-              {zohoBulkSyncMutation.isPending ? 'Syncing to Zoho...' : 'Sync All to Zoho (No Images)'}
-            </Button>
-            <Button
-              variant="outlined"
-              onClick={() => void handleStartZohoSyncNoImagesTest()}
-              disabled={
-                zohoReadinessMutation.isPending ||
-                zohoBulkSyncMutation.isPending ||
-                isZohoSyncRunning
-              }
-            >
-              {zohoBulkSyncMutation.isPending ? 'Syncing to Zoho...' : 'Sync 2 to Zoho (No Images)'}
-            </Button>
-            <Button
-              variant="outlined"
-              onClick={() => zohoReadinessMutation.mutate()}
-              disabled={
-                zohoReadinessMutation.isPending ||
-                zohoBulkSyncMutation.isPending ||
-                isZohoSyncRunning
-              }
-            >
-              {zohoReadinessMutation.isPending ? 'Checking Readiness...' : 'Zoho Readiness Report'}
-            </Button>
-            <Button
-              variant="outlined"
-              onClick={() => backfillThumbnailsMutation.mutate()}
-              disabled={backfillThumbnailsMutation.isPending}
-            >
-              {backfillThumbnailsMutation.isPending ? 'Backfilling...' : 'Backfill Thumbnails'}
-            </Button>
-            <Button
-              variant="outlined"
-              onClick={() => void handleExportZohoImportCsv()}
-              disabled={exportingZohoCsv || relinkingZohoItemIds}
-            >
-              {exportingZohoCsv ? 'Exporting CSV...' : 'Export Zoho CSV'}
-            </Button>
-            <Button
-              variant="outlined"
-              onClick={() => void handleRelinkZohoItemIdsBySku()}
-              disabled={relinkingZohoItemIds || exportingZohoCsv || zohoBulkSyncMutation.isPending || syncingVariantId !== null}
-            >
-              {relinkingZohoItemIds ? 'Relinking Zoho IDs...' : 'Relink Zoho IDs by SKU'}
-            </Button>
+              <MenuItem
+                onClick={() => {
+                  handleCloseZohoActionsMenu()
+                  void handleExportZohoImportCsv()
+                }}
+                disabled={exportingZohoCsv || relinkingZohoItemIds || zohoBulkSyncMutation.isPending || syncingVariantId !== null}
+              >
+                {exportingZohoCsv ? 'Exporting CSV...' : 'Export Zoho CSV'}
+              </MenuItem>
+              <MenuItem
+                onClick={() => {
+                  handleCloseZohoActionsMenu()
+                  void handleStartZohoSync()
+                }}
+                disabled={zohoBulkSyncMutation.isPending || isZohoSyncRunning}
+              >
+                Sync All to Zoho
+              </MenuItem>
+              <MenuItem
+                onClick={() => {
+                  handleCloseZohoActionsMenu()
+                  void handleStartZohoSyncNoImages()
+                }}
+                disabled={zohoBulkSyncMutation.isPending || isZohoSyncRunning}
+              >
+                Sync All to Zoho (No Images)
+              </MenuItem>
+              <MenuItem
+                onClick={() => {
+                  handleCloseZohoActionsMenu()
+                  void handleRelinkZohoItemIdsBySku()
+                }}
+                disabled={relinkingZohoItemIds || exportingZohoCsv || zohoBulkSyncMutation.isPending || syncingVariantId !== null}
+              >
+                {relinkingZohoItemIds ? 'Relinking Zoho IDs...' : 'Relink Zoho IDs by SKU'}
+              </MenuItem>
+              <MenuItem
+                onClick={() => {
+                  handleCloseZohoActionsMenu()
+                  void handleStartZohoBundleSync()
+                }}
+                disabled={zohoBulkSyncMutation.isPending || isZohoSyncRunning}
+              >
+                Sync Bundle to Zoho
+              </MenuItem>
+            </Menu>
             <Button
               variant="outlined"
               startIcon={<Add />}
@@ -1395,81 +1327,6 @@ export default function InventoryManagement() {
           {snackbarMessage}
         </Alert>
       </Snackbar>
-
-      <Dialog
-        open={readinessDialogOpen}
-        onClose={() => setReadinessDialogOpen(false)}
-        fullWidth
-        maxWidth="md"
-      >
-        <DialogTitle>Zoho Sync Readiness</DialogTitle>
-        <DialogContent>
-          {zohoReadinessMutation.isPending ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-              <CircularProgress size={28} />
-            </Box>
-          ) : readinessData ? (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                <Chip label={`Checked: ${readinessData.total_checked}`} size="small" />
-                <Chip label={`Ready: ${readinessData.ready_count}`} size="small" color="success" />
-                <Chip label={`Blocked: ${readinessData.blocked_count}`} size="small" color="error" />
-                <Chip
-                  label={`Warnings: ${readinessData.warning_only_count}`}
-                  size="small"
-                  color="warning"
-                />
-              </Box>
-
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>SKU</TableCell>
-                    <TableCell>Type</TableCell>
-                    <TableCell>Status</TableCell>
-                    <TableCell>Missing Fields</TableCell>
-                    <TableCell>Warnings</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {readinessData.items.slice(0, 25).map((item: ZohoReadinessItem) => (
-                    <TableRow key={item.variant_id}>
-                      <TableCell>
-                        <Typography variant="body2" fontFamily="monospace">
-                          {item.sku}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>{item.identity_type}</TableCell>
-                      <TableCell>
-                        <Chip
-                          size="small"
-                          label={item.severity.toUpperCase()}
-                          color={item.severity === 'error' ? 'error' : item.severity === 'warning' ? 'warning' : 'success'}
-                        />
-                      </TableCell>
-                      <TableCell>{item.missing_fields.join(', ') || '-'}</TableCell>
-                      <TableCell>{item.warnings.join(', ') || '-'}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </Box>
-          ) : null}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setReadinessDialogOpen(false)}>Close</Button>
-          <Button
-            variant="contained"
-            disabled={zohoBulkSyncMutation.isPending}
-            onClick={() => {
-              setReadinessDialogOpen(false)
-              void handleStartZohoSync()
-            }}
-          >
-            {zohoBulkSyncMutation.isPending ? 'Syncing...' : 'Sync Anyway'}
-          </Button>
-        </DialogActions>
-      </Dialog>
 
       <HoldActionPromptDialog
         open={holdPromptOpen}
