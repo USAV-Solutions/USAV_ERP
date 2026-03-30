@@ -160,6 +160,9 @@ export default function OrdersManagement() {
   const [bulkTotal, setBulkTotal] = useState(0)
   const [bulkProgress, setBulkProgress] = useState({ queued: 0, success: 0, failed: 0 })
   const [bulkDone, setBulkDone] = useState(false)
+  const [bulkFromDate, setBulkFromDate] = useState('')
+  const [bulkToDate, setBulkToDate] = useState('')
+  const [bulkFailureDetails, setBulkFailureDetails] = useState<string[]>([])
 
   // ── Queries ──────────────────────────────────────────────────────
 
@@ -294,11 +297,43 @@ export default function OrdersManagement() {
     forceSyncMutation.mutate(orderId)
   }
 
+  const getErrorMessage = (error: unknown): string => {
+    if (!error || typeof error !== 'object') {
+      return 'Unknown error'
+    }
+
+    const errObj = error as {
+      message?: string
+      response?: { data?: { detail?: string } }
+    }
+
+    return errObj.response?.data?.detail || errObj.message || 'Unknown error'
+  }
+
   const handleBulkSync = async () => {
+    if (!bulkFromDate || !bulkToDate) {
+      setBulkError('Please select both From and To dates before starting sync.')
+      return
+    }
+
+    const startDate = new Date(`${bulkFromDate}T00:00:00`)
+    const endDate = new Date(`${bulkToDate}T23:59:59.999`)
+
+    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+      setBulkError('Invalid date range. Please select valid dates.')
+      return
+    }
+
+    if (startDate > endDate) {
+      setBulkError('From date must be earlier than or equal to To date.')
+      return
+    }
+
     setBulkLoading(true)
     setBulkError(null)
     setBulkDone(false)
     setBulkProgress({ queued: 0, success: 0, failed: 0 })
+    setBulkFailureDetails([])
 
     try {
       // Fetch all orders (cap at 2000 to avoid runaway)
@@ -309,7 +344,20 @@ export default function OrdersManagement() {
       // eslint-disable-next-line no-constant-condition
       while (true) {
         const batch = await listOrders({ skip, limit: pageSize })
-        const matched = batch.items.filter((o) => o.unmatched_count === 0).map((o) => o.id)
+        const matched = batch.items
+          .filter((o) => {
+            if (o.unmatched_count !== 0 || !o.ordered_at) {
+              return false
+            }
+
+            const orderedAt = new Date(o.ordered_at)
+            if (Number.isNaN(orderedAt.getTime())) {
+              return false
+            }
+
+            return orderedAt >= startDate && orderedAt <= endDate
+          })
+          .map((o) => o.id)
         eligibleIds = eligibleIds.concat(matched)
 
         if (batch.items.length < pageSize || eligibleIds.length >= 2000) {
@@ -325,30 +373,41 @@ export default function OrdersManagement() {
         return
       }
 
-      let firstError: string | null = null
+      let queued = 0
+      let success = 0
+      let failed = 0
 
       // Sequentially queue to avoid API burst
       for (const id of eligibleIds) {
         try {
           await forceSyncOrder(id)
-          setBulkProgress((p) => ({ queued: p.queued + 1, success: p.success + 1, failed: p.failed }))
-        } catch (err: any) {
-          setBulkProgress((p) => ({ queued: p.queued + 1, success: p.success, failed: p.failed + 1 }))
-          if (!firstError) {
-            firstError = err?.message || 'One or more orders failed to queue.'
-          }
+          queued += 1
+          success += 1
+          setBulkProgress({ queued, success, failed })
+        } catch (err: unknown) {
+          queued += 1
+          failed += 1
+          setBulkProgress({ queued, success, failed })
+
+          const detail = getErrorMessage(err)
+          setBulkFailureDetails((prev) => {
+            if (prev.length >= 100) {
+              return prev
+            }
+            return [...prev, `Order #${id}: ${detail}`]
+          })
         }
       }
 
-      if (firstError) {
-        setBulkError(firstError)
+      if (failed > 0) {
+        setBulkError(`${failed} order(s) failed to queue for Zoho sync.`)
       }
 
       setBulkDone(true)
       await queryClient.invalidateQueries({ queryKey: ['orders'] })
       await queryClient.invalidateQueries({ queryKey: ['syncStatus'] })
-    } catch (err: any) {
-      setBulkError(err?.message || 'Failed to load orders for bulk sync.')
+    } catch (err: unknown) {
+      setBulkError(getErrorMessage(err) || 'Failed to load orders for bulk sync.')
     } finally {
       setBulkLoading(false)
     }
@@ -363,6 +422,12 @@ export default function OrdersManagement() {
   }
 
   const bulkPercent = bulkTotal ? Math.min(Math.round((bulkProgress.queued / bulkTotal) * 100), 100) : 0
+  const invalidBulkRange = Boolean(
+    bulkFromDate
+      && bulkToDate
+      && new Date(`${bulkFromDate}T00:00:00`) > new Date(`${bulkToDate}T23:59:59.999`),
+  )
+  const canStartBulkSync = Boolean(bulkFromDate && bulkToDate && !invalidBulkRange)
   const columnCount = hasRole(['ADMIN']) ? 10 : 9
 
   const handleShippingStatusChange = (
@@ -402,6 +467,9 @@ export default function OrdersManagement() {
                 setBulkDone(false)
                 setBulkTotal(0)
                 setBulkProgress({ queued: 0, success: 0, failed: 0 })
+                setBulkFromDate('')
+                setBulkToDate('')
+                setBulkFailureDetails([])
               }}
             >
               Sync matched to Zoho
@@ -752,9 +820,34 @@ export default function OrdersManagement() {
         <DialogContent dividers>
           <Stack spacing={2}>
             <Typography variant="body2" color="text.secondary">
-              Only orders with 0 unmatched items will be queued. Fetches up to 2000 orders and queues
-              them sequentially to avoid API spikes.
+              Select a date range first. Only matched orders within that range are queued to Zoho,
+              up to 2000 orders, sequentially to avoid API spikes.
             </Typography>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+              <TextField
+                type="date"
+                label="From"
+                value={bulkFromDate}
+                onChange={(e) => setBulkFromDate(e.target.value)}
+                fullWidth
+                InputLabelProps={{ shrink: true }}
+                disabled={bulkLoading}
+              />
+              <TextField
+                type="date"
+                label="To"
+                value={bulkToDate}
+                onChange={(e) => setBulkToDate(e.target.value)}
+                fullWidth
+                InputLabelProps={{ shrink: true }}
+                disabled={bulkLoading}
+              />
+            </Stack>
+            {invalidBulkRange && (
+              <Alert severity="warning">
+                From date must be earlier than or equal to To date.
+              </Alert>
+            )}
             <Stack spacing={1}>
               <Typography variant="body2">
                 Eligible orders: {bulkTotal}
@@ -788,13 +881,25 @@ export default function OrdersManagement() {
                 {bulkError}
               </Alert>
             )}
+            {bulkFailureDetails.length > 0 && (
+              <Alert severity="error" sx={{ maxHeight: 220, overflowY: 'auto' }}>
+                <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+                  Sync errors
+                </Typography>
+                {bulkFailureDetails.map((detail) => (
+                  <Typography key={detail} variant="body2">
+                    {detail}
+                  </Typography>
+                ))}
+              </Alert>
+            )}
           </Stack>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setBulkDialogOpen(false)} disabled={bulkLoading}>
             Close
           </Button>
-          <Button onClick={handleBulkSync} variant="contained" disabled={bulkLoading}>
+          <Button onClick={handleBulkSync} variant="contained" disabled={bulkLoading || !canStartBulkSync}>
             {bulkLoading ? 'Syncing…' : 'Start sync'}
           </Button>
         </DialogActions>
