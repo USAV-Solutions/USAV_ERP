@@ -112,7 +112,6 @@ interface PurchaseOrderMetadataForm {
   deliver_status: PurchaseDeliverStatus
   order_date: string
   expected_delivery_date: string
-  total_amount: number
   tax_amount: number
   shipping_amount: number
   handling_amount: number
@@ -564,7 +563,6 @@ export default function PurchasingManagement() {
     vendor_id: 0,
     order_date: new Date().toISOString().slice(0, 10),
     tracking_number: '',
-    total_amount: 0,
     tax_amount: 0,
     shipping_amount: 0,
     handling_amount: 0,
@@ -578,7 +576,6 @@ export default function PurchasingManagement() {
     deliver_status: 'CREATED',
     order_date: new Date().toISOString().slice(0, 10),
     expected_delivery_date: '',
-    total_amount: 0,
     tax_amount: 0,
     shipping_amount: 0,
     handling_amount: 0,
@@ -649,7 +646,6 @@ export default function PurchasingManagement() {
         vendor_id: 0,
         order_date: new Date().toISOString().slice(0, 10),
         tracking_number: '',
-        total_amount: 0,
         tax_amount: 0,
         shipping_amount: 0,
         handling_amount: 0,
@@ -844,7 +840,6 @@ export default function PurchasingManagement() {
       deliver_status: po.deliver_status,
       order_date: po.order_date,
       expected_delivery_date: po.expected_delivery_date || '',
-      total_amount: Number(po.total_amount || 0),
       tax_amount: Number(po.tax_amount || 0),
       shipping_amount: Number(po.shipping_amount || 0),
       handling_amount: Number(po.handling_amount || 0),
@@ -1309,12 +1304,6 @@ export default function PurchasingManagement() {
               placeholder="Optional tracking number"
             />
             <TextField
-              label="Total Amount"
-              type="number"
-              value={poForm.total_amount}
-              onChange={(e) => setPoForm((prev) => ({ ...prev, total_amount: Number(e.target.value) }))}
-            />
-            <TextField
               label="Tax Amount"
               type="number"
               value={poForm.tax_amount ?? 0}
@@ -1462,12 +1451,6 @@ export default function PurchasingManagement() {
               onChange={(e) => setEditPoForm((prev) => ({ ...prev, source: e.target.value }))}
             />
             <TextField
-              label="Total Amount"
-              type="number"
-              value={editPoForm.total_amount}
-              onChange={(e) => setEditPoForm((prev) => ({ ...prev, total_amount: Number(e.target.value) }))}
-            />
-            <TextField
               label="Tax Amount"
               type="number"
               value={editPoForm.tax_amount}
@@ -1530,7 +1513,6 @@ export default function PurchasingManagement() {
                   deliver_status: editPoForm.deliver_status,
                   order_date: editPoForm.order_date,
                   expected_delivery_date: editPoForm.expected_delivery_date || null,
-                  total_amount: Number(editPoForm.total_amount || 0),
                   tax_amount: Number(editPoForm.tax_amount || 0),
                   shipping_amount: Number(editPoForm.shipping_amount || 0),
                   handling_amount: Number(editPoForm.handling_amount || 0),

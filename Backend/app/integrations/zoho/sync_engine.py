@@ -233,9 +233,9 @@ def purchase_order_to_zoho_payload(
 
     payload["custom_fields"] = custom_fields
 
-    # Legacy/main org still relies on adjustment for S&H rollup.
-    payload["adjustment"] = shipping_amount + handling_amount
-    payload["adjustment_description"] = "Shipping Fee + Handling Fee"
+    # Keep legacy adjustment populated, but include tax in the rollup.
+    payload["adjustment"] = tax_amount + shipping_amount + handling_amount
+    payload["adjustment_description"] = "Shipping Fee + Tax + Handling Fee"
 
     line_items: list[dict[str, Any]] = []
     for item in po.items or []:

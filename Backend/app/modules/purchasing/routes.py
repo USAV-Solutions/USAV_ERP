@@ -64,6 +64,20 @@ def _to_decimal(value: object, default: str = "0") -> Decimal:
         return Decimal(default)
 
 
+async def _recalculate_purchase_order_total(db: AsyncSession, po: PurchaseOrder) -> None:
+    line_total_stmt = select(func.coalesce(func.sum(PurchaseOrderItem.total_price), 0)).where(
+        PurchaseOrderItem.purchase_order_id == po.id
+    )
+    line_total_raw = (await db.execute(line_total_stmt)).scalar_one()
+    line_total = _to_decimal(line_total_raw, default="0")
+    tax_amount = _to_decimal(getattr(po, "tax_amount", 0), default="0")
+    shipping_amount = _to_decimal(getattr(po, "shipping_amount", 0), default="0")
+    handling_amount = _to_decimal(getattr(po, "handling_amount", 0), default="0")
+
+    po.total_amount = line_total + tax_amount + shipping_amount + handling_amount
+    db.add(po)
+
+
 def _normalize_external_po_number(value: object) -> str:
     return str(value or "").strip()
 
@@ -399,6 +413,7 @@ async def create_purchase_order(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="po_number already exists")
 
     po_payload = body.model_dump(exclude={"items"})
+    po_payload["total_amount"] = Decimal("0")
     po_payload["zoho_sync_status"] = ZohoSyncStatus.DIRTY
     po_payload["zoho_sync_error"] = None
     po = await po_repo.create(po_payload)
@@ -409,6 +424,7 @@ async def create_purchase_order(
         await po_item_repo.create(item_payload)
 
     await db.flush()
+    await _recalculate_purchase_order_total(db, po)
     fresh = await po_repo.get_with_items_and_vendor(po.id)
     await db.commit()
     if fresh is None:
@@ -465,6 +481,7 @@ async def update_purchase_order(
     payload["zoho_sync_status"] = ZohoSyncStatus.DIRTY
     payload["zoho_sync_error"] = None
     updated = await po_repo.update(po, payload)
+    await _recalculate_purchase_order_total(db, updated)
 
     await db.commit()
     fresh = await po_repo.get_with_items_and_vendor(updated.id)
@@ -496,7 +513,7 @@ async def add_purchase_order_item(
     created = await po_item_repo.create(payload)
     po.zoho_sync_status = ZohoSyncStatus.DIRTY
     po.zoho_sync_error = None
-    db.add(po)
+    await _recalculate_purchase_order_total(db, po)
     await db.commit()
     await db.refresh(created)
     return PurchaseOrderItemResponse.model_validate(created)
@@ -556,7 +573,7 @@ async def update_purchase_order_item(
     if po is not None:
         po.zoho_sync_status = ZohoSyncStatus.DIRTY
         po.zoho_sync_error = None
-        db.add(po)
+        await _recalculate_purchase_order_total(db, po)
     await db.commit()
     await db.refresh(updated)
     return PurchaseOrderItemResponse.model_validate(updated)
@@ -582,9 +599,10 @@ async def delete_purchase_order_item(
     if po is not None:
         po.zoho_sync_status = ZohoSyncStatus.DIRTY
         po.zoho_sync_error = None
-        db.add(po)
 
     await po_item_repo.delete(item_id)
+    if po is not None:
+        await _recalculate_purchase_order_total(db, po)
     await db.commit()
 
 

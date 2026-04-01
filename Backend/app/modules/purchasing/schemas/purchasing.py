@@ -84,7 +84,6 @@ class PurchaseOrderBase(BaseModel):
     deliver_status: PurchaseDeliverStatus = PurchaseDeliverStatus.CREATED
     order_date: date
     expected_delivery_date: Optional[date] = None
-    total_amount: Decimal = Field(..., ge=0)
     currency: str = Field(default="USD", min_length=3, max_length=3)
     tracking_number: Optional[str] = Field(None, max_length=100)
     tax_amount: Decimal = Field(default=Decimal("0"), ge=0)
@@ -104,7 +103,6 @@ class PurchaseOrderUpdate(BaseModel):
     deliver_status: Optional[PurchaseDeliverStatus] = None
     order_date: Optional[date] = None
     expected_delivery_date: Optional[date] = None
-    total_amount: Optional[Decimal] = Field(None, ge=0)
     currency: Optional[str] = Field(None, min_length=3, max_length=3)
     tracking_number: Optional[str] = Field(None, max_length=100)
     tax_amount: Optional[Decimal] = Field(None, ge=0)
@@ -116,6 +114,7 @@ class PurchaseOrderUpdate(BaseModel):
 
 class PurchaseOrderResponse(PurchaseOrderBase):
     id: int
+    total_amount: Decimal = Field(..., ge=0)
     zoho_id: Optional[str] = None
     zoho_sync_status: ZohoSyncStatus
     zoho_sync_error: Optional[str] = None

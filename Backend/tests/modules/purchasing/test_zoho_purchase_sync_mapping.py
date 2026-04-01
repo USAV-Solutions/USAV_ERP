@@ -78,11 +78,45 @@ def test_purchase_order_to_zoho_payload_maps_header_custom_and_adjustment_fields
     assert payload["purchaseorder_number"] == "PO-123"
     assert payload["vendor_id"] == "999001"
     assert payload["reference_number"] == "TRK-123"
-    assert payload["adjustment"] == 10.0
-    assert payload["adjustment_description"] == "Shipping Fee + Handling Fee"
+    assert payload["adjustment"] == 15.0
+    assert payload["adjustment_description"] == "Shipping Fee + Tax + Handling Fee"
     assert "Source: AMAZON_CSV" in payload["notes"]
     assert "Tracking: TRK-123" in payload["notes"]
     assert payload["line_items"][0]["item_id"] == "it-100"
+
+
+def test_purchase_order_to_zoho_payload_keeps_custom_charge_fields_and_rolls_adjustment_with_tax():
+    po = SimpleNamespace(
+        po_number="PO-124",
+        order_date=date(2026, 3, 17),
+        expected_delivery_date=None,
+        currency="USD",
+        notes=None,
+        source=None,
+        tracking_number=None,
+        tax_amount=Decimal("1.25"),
+        shipping_amount=Decimal("2.50"),
+        handling_amount=Decimal("3.75"),
+        vendor=SimpleNamespace(zoho_id="999001"),
+        items=[
+            SimpleNamespace(
+                external_item_name="External Item",
+                quantity=1,
+                unit_price=Decimal("10.00"),
+                variant=SimpleNamespace(zoho_item_id="it-100"),
+            )
+        ],
+    )
+
+    payload = purchase_order_to_zoho_payload(po)
+
+    assert payload["adjustment"] == 7.5
+    assert payload["adjustment_description"] == "Shipping Fee + Tax + Handling Fee"
+
+    custom_fields_by_api_name = {field["api_name"]: field for field in payload["custom_fields"]}
+    assert custom_fields_by_api_name["cf_tax"]["value"] == "1.25"
+    assert custom_fields_by_api_name["cf_shipping_fee"]["value"] == "2.50"
+    assert custom_fields_by_api_name["cf_handling_fee"]["value"] == "3.75"
 
 
 def test_purchase_order_to_zoho_payload_maps_unmatched_lines_to_placeholder_item():

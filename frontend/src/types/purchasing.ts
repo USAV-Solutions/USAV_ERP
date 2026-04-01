@@ -81,7 +81,6 @@ export interface PurchaseOrderCreate {
   deliver_status?: PurchaseDeliverStatus
   order_date: string
   expected_delivery_date?: string
-  total_amount: number
   currency?: string
   tracking_number?: string
   tax_amount?: number
@@ -98,7 +97,6 @@ export interface PurchaseOrderUpdate {
   deliver_status?: PurchaseDeliverStatus
   order_date?: string
   expected_delivery_date?: string | null
-  total_amount?: number
   currency?: string
   tracking_number?: string | null
   tax_amount?: number
