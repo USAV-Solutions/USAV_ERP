@@ -927,6 +927,48 @@ async def _resolve_vendor_id(
     return existing.id
 
 
+def _purchase_order_header_changed(existing_po: PurchaseOrder, incoming_payload: dict[str, object]) -> bool:
+    comparable_fields = [
+        "vendor_id",
+        "deliver_status",
+        "order_date",
+        "expected_delivery_date",
+        "currency",
+        "tracking_number",
+        "tax_amount",
+        "shipping_amount",
+        "handling_amount",
+        "source",
+        "notes",
+    ]
+
+    for field in comparable_fields:
+        current_value = getattr(existing_po, field, None)
+        incoming_value = incoming_payload.get(field)
+
+        if field in {"tax_amount", "shipping_amount", "handling_amount"}:
+            if _to_decimal(current_value, default="0") != _to_decimal(incoming_value, default="0"):
+                return True
+            continue
+
+        if field in {"tracking_number", "source", "notes"}:
+            normalized_current = str(current_value or "").strip() or None
+            normalized_incoming = str(incoming_value or "").strip() or None
+            if normalized_current != normalized_incoming:
+                return True
+            continue
+
+        if field == "currency":
+            if _normalize_currency(current_value) != _normalize_currency(incoming_value):
+                return True
+            continue
+
+        if current_value != incoming_value:
+            return True
+
+    return False
+
+
 async def _upsert_purchase_item(
     local_po_id: int,
     item_id: str | None,
@@ -938,11 +980,6 @@ async def _upsert_purchase_item(
     db: AsyncSession,
     result: PurchaseFileImportResponse,
 ):
-    local_po = await db.get(PurchaseOrder, local_po_id)
-    if local_po is not None:
-        local_po.zoho_sync_status = ZohoSyncStatus.DIRTY
-        local_po.zoho_sync_error = None
-        db.add(local_po)
 
     existing_item = None
     if item_id:
@@ -986,12 +1023,38 @@ async def _upsert_purchase_item(
         item_payload["status"] = PurchaseOrderItemStatus.UNMATCHED
         await po_item_repo.create(item_payload)
         result.purchase_order_items_created += 1
+        return True
     else:
+        existing_external_item_id = str(existing_item.external_item_id or "").strip() or None
+        existing_purchase_item_link = str(existing_item.purchase_item_link or "").strip() or None
+        existing_external_item_name = str(existing_item.external_item_name or "")[:255]
+        existing_quantity = int(existing_item.quantity or 0)
+        existing_unit_price = _to_decimal(existing_item.unit_price, default="0")
+        existing_total_price = _to_decimal(existing_item.total_price, default="0")
+
+        incoming_external_item_id = str(item_payload["external_item_id"] or "").strip() or None
+        incoming_purchase_item_link = str(item_payload["purchase_item_link"] or "").strip() or None
+        incoming_external_item_name = str(item_payload["external_item_name"] or "")[:255]
+        incoming_quantity = int(item_payload["quantity"] or 0)
+        incoming_unit_price = _to_decimal(item_payload["unit_price"], default="0")
+        incoming_total_price = _to_decimal(item_payload["total_price"], default="0")
+
+        if (
+            existing_external_item_id == incoming_external_item_id
+            and existing_purchase_item_link == incoming_purchase_item_link
+            and existing_external_item_name == incoming_external_item_name
+            and existing_quantity == incoming_quantity
+            and existing_unit_price == incoming_unit_price
+            and existing_total_price == incoming_total_price
+        ):
+            return False
+
         # Preserve prior matching state and variant linkage on re-import.
         item_payload["variant_id"] = existing_item.variant_id
         item_payload["status"] = existing_item.status
         await po_item_repo.update(existing_item, item_payload)
         result.purchase_order_items_updated += 1
+        return True
 
 
 async def _import_goodwill_csv(
@@ -1092,11 +1155,15 @@ async def _import_goodwill_csv(
             await db.flush()
             result.purchase_orders_created += 1
         else:
-            local_po = await po_repo.update(existing_po, po_payload)
-            await db.flush()
-            result.purchase_orders_updated += 1
+            header_changed = _purchase_order_header_changed(existing_po, po_payload)
+            if header_changed:
+                local_po = await po_repo.update(existing_po, po_payload)
+                await db.flush()
+                result.purchase_orders_updated += 1
+            else:
+                local_po = existing_po
 
-        await _upsert_purchase_item(
+        item_changed = await _upsert_purchase_item(
             local_po_id=local_po.id,
             item_id=item_id,
             purchase_item_link=purchase_item_link,
@@ -1107,6 +1174,11 @@ async def _import_goodwill_csv(
             db=db,
             result=result,
         )
+        if existing_po is not None and item_changed:
+            local_po.zoho_sync_status = ZohoSyncStatus.DIRTY
+            local_po.zoho_sync_error = None
+            db.add(local_po)
+            await db.flush()
 
     return result
 
@@ -1241,12 +1313,17 @@ async def _import_amazon_csv(
             await db.flush()
             result.purchase_orders_created += 1
         else:
-            local_po = await po_repo.update(existing_po, po_payload)
-            await db.flush()
-            result.purchase_orders_updated += 1
+            header_changed = _purchase_order_header_changed(existing_po, po_payload)
+            if header_changed:
+                local_po = await po_repo.update(existing_po, po_payload)
+                await db.flush()
+                result.purchase_orders_updated += 1
+            else:
+                local_po = existing_po
 
+        any_item_changed = False
         for item in order_data["items"]:
-            await _upsert_purchase_item(
+            item_changed = await _upsert_purchase_item(
                 local_po_id=local_po.id,
                 item_id=item["external_item_id"],
                 purchase_item_link=item.get("purchase_item_link"),
@@ -1257,6 +1334,13 @@ async def _import_amazon_csv(
                 db=db,
                 result=result,
             )
+            any_item_changed = any_item_changed or item_changed
+
+        if existing_po is not None and any_item_changed:
+            local_po.zoho_sync_status = ZohoSyncStatus.DIRTY
+            local_po.zoho_sync_error = None
+            db.add(local_po)
+            await db.flush()
 
     return result
 
@@ -1292,10 +1376,6 @@ async def _import_aliexpress_json(
             continue
 
         existing_po = await _find_existing_po_by_external_id(db, po_number)
-        if existing_po is not None:
-            result.source_rows_skipped += 1
-            continue
-
         seller = order.get("seller") or {}
         seller_name = str((seller or {}).get("storeName") or "").strip() or "AliExpress Seller"
         vendor_id = await _resolve_vendor_id(seller_name, vendor_repo, db, vendor_cache)
@@ -1364,12 +1444,22 @@ async def _import_aliexpress_json(
             "zoho_sync_error": None,
         }
 
-        local_po = await po_repo.create(po_payload)
-        await db.flush()
-        result.purchase_orders_created += 1
+        if existing_po is None:
+            local_po = await po_repo.create(po_payload)
+            await db.flush()
+            result.purchase_orders_created += 1
+        else:
+            header_changed = _purchase_order_header_changed(existing_po, po_payload)
+            if header_changed:
+                local_po = await po_repo.update(existing_po, po_payload)
+                await db.flush()
+                result.purchase_orders_updated += 1
+            else:
+                local_po = existing_po
 
+        any_item_changed = False
         for item in parsed_items:
-            await _upsert_purchase_item(
+            item_changed = await _upsert_purchase_item(
                 local_po_id=local_po.id,
                 item_id=item["external_item_id"],
                 purchase_item_link=item.get("purchase_item_link"),
@@ -1380,6 +1470,13 @@ async def _import_aliexpress_json(
                 db=db,
                 result=result,
             )
+            any_item_changed = any_item_changed or item_changed
+
+        if existing_po is not None and any_item_changed:
+            local_po.zoho_sync_status = ZohoSyncStatus.DIRTY
+            local_po.zoho_sync_error = None
+            db.add(local_po)
+            await db.flush()
 
     return result
 
@@ -1504,10 +1601,6 @@ async def _import_aliexpress_csv(
             continue
 
         existing_po = await _find_existing_po_by_external_id(db, po_number)
-        if existing_po is not None:
-            result.source_rows_skipped += 1
-            continue
-
         vendor_name = str(order_data["vendor_name"])
         vendor_id = await _resolve_vendor_id(vendor_name, vendor_repo, db, vendor_cache)
 
@@ -1539,10 +1632,20 @@ async def _import_aliexpress_csv(
             "zoho_sync_error": None,
         }
 
-        local_po = await po_repo.create(po_payload)
-        await db.flush()
-        result.purchase_orders_created += 1
+        if existing_po is None:
+            local_po = await po_repo.create(po_payload)
+            await db.flush()
+            result.purchase_orders_created += 1
+        else:
+            header_changed = _purchase_order_header_changed(existing_po, po_payload)
+            if header_changed:
+                local_po = await po_repo.update(existing_po, po_payload)
+                await db.flush()
+                result.purchase_orders_updated += 1
+            else:
+                local_po = existing_po
 
+        any_item_changed = False
         for item in items:
             item_name = str(item.get("external_item_name") or "").strip()
             quantity = _to_int(item.get("quantity"), default=0)
@@ -1550,7 +1653,7 @@ async def _import_aliexpress_csv(
                 result.source_rows_skipped += 1
                 continue
 
-            await _upsert_purchase_item(
+            item_changed = await _upsert_purchase_item(
                 local_po_id=local_po.id,
                 item_id=str(item.get("external_item_id") or "").strip() or None,
                 purchase_item_link=str(item.get("purchase_item_link") or "").strip() or None,
@@ -1561,6 +1664,13 @@ async def _import_aliexpress_csv(
                 db=db,
                 result=result,
             )
+            any_item_changed = any_item_changed or item_changed
+
+        if existing_po is not None and any_item_changed:
+            local_po.zoho_sync_status = ZohoSyncStatus.DIRTY
+            local_po.zoho_sync_error = None
+            db.add(local_po)
+            await db.flush()
 
     return result
 
@@ -1724,10 +1834,15 @@ async def _import_ebay_purchase_api(
             await db.flush()
             result.purchase_orders_created += 1
         else:
-            local_po = await po_repo.update(existing_po, po_payload)
-            await db.flush()
-            result.purchase_orders_updated += 1
+            header_changed = _purchase_order_header_changed(existing_po, po_payload)
+            if header_changed:
+                local_po = await po_repo.update(existing_po, po_payload)
+                await db.flush()
+                result.purchase_orders_updated += 1
+            else:
+                local_po = existing_po
 
+        any_item_changed = False
         for item in items:
             item_id = str(item.get("external_item_id") or "").strip() or None
             purchase_item_link = (
@@ -1741,7 +1856,7 @@ async def _import_ebay_purchase_api(
                 result.source_rows_skipped += 1
                 continue
 
-            await _upsert_purchase_item(
+            item_changed = await _upsert_purchase_item(
                 local_po_id=local_po.id,
                 item_id=item_id,
                 purchase_item_link=purchase_item_link,
@@ -1752,6 +1867,13 @@ async def _import_ebay_purchase_api(
                 db=db,
                 result=result,
             )
+            any_item_changed = any_item_changed or item_changed
+
+        if existing_po is not None and any_item_changed:
+            local_po.zoho_sync_status = ZohoSyncStatus.DIRTY
+            local_po.zoho_sync_error = None
+            db.add(local_po)
+            await db.flush()
 
     return result
 
