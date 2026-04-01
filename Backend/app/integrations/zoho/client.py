@@ -269,6 +269,11 @@ class ZohoClient:
         )
         items = result.get("items", [])
         return items[0] if items else None
+
+    async def get_item(self, item_id: str) -> dict:
+        """Fetch a single item by Zoho item ID."""
+        result = await self._request("GET", f"/items/{item_id}")
+        return result.get("item", {})
     
     async def sync_item(
         self,

@@ -255,6 +255,101 @@ def purchase_order_to_zoho_payload(
     return payload
 
 
+def purchase_order_metadata_to_zoho_payload(
+    po: PurchaseOrder,
+    *,
+    existing_notes: Optional[str] = None,
+) -> dict[str, Any]:
+    """Build a Zoho purchase-order payload limited to metadata fields only."""
+    payload = purchase_order_to_zoho_payload(
+        po,
+        existing_notes=existing_notes,
+    )
+    payload.pop("line_items", None)
+    return payload
+
+
+def _normalize_sku(raw: Any) -> Optional[str]:
+    text = str(raw or "").strip().upper()
+    return text or None
+
+
+def _extract_local_purchase_order_skus(po: PurchaseOrder) -> set[str]:
+    skus: set[str] = set()
+    for item in po.items or []:
+        variant = getattr(item, "variant", None)
+        if variant and getattr(variant, "full_sku", None):
+            normalized = _normalize_sku(variant.full_sku)
+            if normalized:
+                skus.add(normalized)
+            continue
+
+        placeholder_sku = _normalize_sku(UNMATCHED_PLACEHOLDER_ITEM_SKU)
+        if placeholder_sku:
+            skus.add(placeholder_sku)
+
+    return skus
+
+
+async def _extract_remote_purchase_order_skus(
+    zoho: ZohoClient,
+    remote_po: dict[str, Any],
+) -> set[str]:
+    skus: set[str] = set()
+    item_cache: dict[str, Optional[str]] = {}
+    for line in remote_po.get("line_items") or []:
+        if not isinstance(line, dict):
+            continue
+
+        direct_sku = _normalize_sku(line.get("sku") or line.get("item_sku"))
+        if direct_sku:
+            skus.add(direct_sku)
+            continue
+
+        item_id = str(line.get("item_id") or "").strip()
+        if not item_id:
+            continue
+
+        if item_id not in item_cache:
+            try:
+                item = await zoho.get_item(item_id)
+            except Exception as exc:
+                logger.warning(
+                    "sync_po_outbound: failed to resolve Zoho item sku | item_id=%s error=%s",
+                    item_id,
+                    exc,
+                )
+                item_cache[item_id] = None
+            else:
+                item_cache[item_id] = _normalize_sku(item.get("sku") if item else None)
+
+        resolved_sku = item_cache[item_id]
+        if resolved_sku:
+            skus.add(resolved_sku)
+
+    return skus
+
+
+async def _verify_purchase_order_sku_parity(
+    *,
+    po: PurchaseOrder,
+    zoho: ZohoClient,
+    remote_po: dict[str, Any],
+) -> tuple[bool, str]:
+    local_skus = _extract_local_purchase_order_skus(po)
+    remote_skus = await _extract_remote_purchase_order_skus(zoho, remote_po)
+
+    missing = sorted(local_skus - remote_skus)
+    extra = sorted(remote_skus - local_skus)
+
+    if not missing and not extra:
+        return True, "sku parity matched"
+
+    missing_preview = ", ".join(missing[:5]) if missing else "none"
+    extra_preview = ", ".join(extra[:5]) if extra else "none"
+    return False, f"missing_skus={missing_preview}; extra_skus={extra_preview}"
+
+
 async def _ensure_unmatched_placeholder_item(zoho: ZohoClient) -> Optional[str]:
     """Ensure the unmatched placeholder item exists in Zoho and return its item_id."""
     item = await zoho.ensure_item_by_sku(
@@ -854,6 +949,10 @@ async def sync_po_outbound(po_id: int, allow_billed_unbill_rebill: bool = False)
                 unmatched_item_id=unmatched_item_id,
                 existing_notes=remote_notes,
             )
+            metadata_payload = purchase_order_metadata_to_zoho_payload(
+                po,
+                existing_notes=remote_notes,
+            )
             new_hash = generate_payload_hash(payload)
 
             if new_hash == po.zoho_last_sync_hash:
@@ -865,10 +964,46 @@ async def sync_po_outbound(po_id: int, allow_billed_unbill_rebill: bool = False)
                 return
 
             if resolved_zoho_po_id:
+                metadata_updated = False
+                if metadata_payload:
+                    try:
+                        await zoho.update_purchase_order(resolved_zoho_po_id, metadata_payload)
+                        metadata_updated = True
+                    except Exception as metadata_exc:
+                        logger.warning(
+                            "sync_po_outbound: metadata update failed; continuing with full update | po_id=%s zoho_id=%s error=%s",
+                            po_id,
+                            resolved_zoho_po_id,
+                            metadata_exc,
+                        )
+
                 try:
                     zoho_po = await zoho.update_purchase_order(resolved_zoho_po_id, payload)
                 except Exception as update_exc:
-                    if allow_billed_unbill_rebill and _is_billed_po_update_error(update_exc):
+                    handled_locked_lines = False
+                    if _is_billed_po_update_error(update_exc) and metadata_updated:
+                        refreshed_zoho_po = await zoho.get_purchase_order(resolved_zoho_po_id)
+                        has_parity, parity_detail = await _verify_purchase_order_sku_parity(
+                            po=po,
+                            zoho=zoho,
+                            remote_po=refreshed_zoho_po,
+                        )
+                        if has_parity:
+                            logger.warning(
+                                "sync_po_outbound: line-item update locked; metadata synced and SKU parity matched | po_id=%s zoho_id=%s",
+                                po_id,
+                                resolved_zoho_po_id,
+                            )
+                            zoho_po = refreshed_zoho_po
+                            handled_locked_lines = True
+                        else:
+                            raise ValueError(
+                                "Metadata synced but Zoho line items differ from local SKU set: "
+                                f"{parity_detail}"
+                            )
+                    if handled_locked_lines:
+                        pass
+                    elif allow_billed_unbill_rebill and _is_billed_po_update_error(update_exc):
                         zoho_po = await _update_billed_purchase_order_with_unbill_rebill(
                             zoho,
                             purchase_order_id=resolved_zoho_po_id,

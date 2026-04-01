@@ -6,7 +6,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException
 
-from app.integrations.zoho.sync_engine import purchase_order_to_zoho_payload
+from app.integrations.zoho.sync_engine import (
+    purchase_order_metadata_to_zoho_payload,
+    purchase_order_to_zoho_payload,
+    _verify_purchase_order_sku_parity,
+)
 from app.modules.purchasing.routes import (
     _extract_zoho_po_charges,
     _import_ebay_purchase_api,
@@ -145,6 +149,99 @@ def test_purchase_order_to_zoho_payload_maps_unmatched_lines_to_placeholder_item
     payload = purchase_order_to_zoho_payload(po, unmatched_item_id="it-placeholder")
 
     assert payload["line_items"][0]["item_id"] == "it-placeholder"
+
+
+def test_purchase_order_metadata_to_zoho_payload_excludes_line_items_and_keeps_adjustments():
+    po = SimpleNamespace(
+        po_number="PO-457",
+        order_date=date(2026, 3, 17),
+        expected_delivery_date=None,
+        currency="USD",
+        notes=None,
+        source=None,
+        tracking_number=None,
+        tax_amount=Decimal("1.00"),
+        shipping_amount=Decimal("2.00"),
+        handling_amount=Decimal("3.00"),
+        vendor=SimpleNamespace(zoho_id="999001"),
+        items=[
+            SimpleNamespace(
+                external_item_name="Unknown Imported Item",
+                quantity=1,
+                unit_price=Decimal("19.99"),
+                variant=None,
+            )
+        ],
+    )
+
+    payload = purchase_order_metadata_to_zoho_payload(po)
+
+    assert "line_items" not in payload
+    assert payload["adjustment"] == 6.0
+    assert payload["adjustment_description"] == "Shipping Fee + Tax + Handling Fee"
+
+
+@pytest.mark.asyncio
+async def test_verify_purchase_order_sku_parity_matches_with_item_lookup_for_missing_line_sku():
+    po = SimpleNamespace(
+        items=[
+            SimpleNamespace(variant=SimpleNamespace(full_sku="ABC-001")),
+            SimpleNamespace(variant=None),
+        ]
+    )
+
+    class _FakeZohoClient:
+        async def get_item(self, item_id):
+            if item_id == "it-unknown":
+                return {"sku": "00000"}
+            return {}
+
+    remote_po = {
+        "line_items": [
+            {"sku": "abc-001"},
+            {"item_id": "it-unknown"},
+        ]
+    }
+
+    has_parity, detail = await _verify_purchase_order_sku_parity(
+        po=po,
+        zoho=_FakeZohoClient(),
+        remote_po=remote_po,
+    )
+
+    assert has_parity is True
+    assert detail == "sku parity matched"
+
+
+@pytest.mark.asyncio
+async def test_verify_purchase_order_sku_parity_reports_mismatch():
+    po = SimpleNamespace(
+        items=[
+            SimpleNamespace(variant=SimpleNamespace(full_sku="ABC-001")),
+            SimpleNamespace(variant=SimpleNamespace(full_sku="DEF-002")),
+        ]
+    )
+
+    class _FakeZohoClient:
+        async def get_item(self, item_id):
+            return {"sku": "ZZZ-999"}
+
+    remote_po = {
+        "line_items": [
+            {"sku": "ABC-001"},
+            {"item_id": "it-extra"},
+        ]
+    }
+
+    has_parity, detail = await _verify_purchase_order_sku_parity(
+        po=po,
+        zoho=_FakeZohoClient(),
+        remote_po=remote_po,
+    )
+
+    assert has_parity is False
+    assert "missing_skus=DEF-002" in detail
+    assert "extra_skus=ZZZ-999" in detail
 
 
 def test_purchase_order_to_zoho_payload_appends_missing_item_links_to_notes():
