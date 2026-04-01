@@ -32,6 +32,7 @@ from app.modules.purchasing.schemas import (
     PurchaseOrderItemCreate,
     PurchaseOrderItemMatchRequest,
     PurchaseOrderItemResponse,
+    PurchaseOrderUpdate,
     PurchaseOrderItemUpdate,
     PurchaseOrderReceiveRequest,
     PurchaseOrderReceiveResponse,
@@ -424,6 +425,53 @@ async def get_purchase_order(
     if po is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchase order not found")
     return PurchaseOrderResponse.model_validate(po)
+
+
+@router.patch("/purchases/{po_id}", response_model=PurchaseOrderResponse)
+async def update_purchase_order(
+    po_id: int,
+    body: PurchaseOrderUpdate,
+    po_repo: PurchaseOrderRepository = Depends(get_purchase_order_repo),
+    vendor_repo: VendorRepository = Depends(get_vendor_repo),
+    db: AsyncSession = Depends(get_db),
+):
+    po = await po_repo.get(po_id)
+    if po is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchase order not found")
+
+    payload = body.model_dump(exclude_unset=True)
+    if not payload:
+        fresh = await po_repo.get_with_items_and_vendor(po_id)
+        if fresh is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchase order not found")
+        return PurchaseOrderResponse.model_validate(fresh)
+
+    if "vendor_id" in payload:
+        vendor = await vendor_repo.get(payload["vendor_id"])
+        if vendor is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendor not found")
+
+    if "po_number" in payload:
+        normalized_number = str(payload["po_number"]).strip()
+        if not normalized_number:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="po_number cannot be blank")
+
+        existing = await po_repo.get_by_field("po_number", normalized_number)
+        if existing is not None and existing.id != po_id:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="po_number already exists")
+
+        payload["po_number"] = normalized_number
+
+    payload["zoho_sync_status"] = ZohoSyncStatus.DIRTY
+    payload["zoho_sync_error"] = None
+    updated = await po_repo.update(po, payload)
+
+    await db.commit()
+    fresh = await po_repo.get_with_items_and_vendor(updated.id)
+    if fresh is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchase order not found")
+
+    return PurchaseOrderResponse.model_validate(fresh)
 
 
 @router.post(

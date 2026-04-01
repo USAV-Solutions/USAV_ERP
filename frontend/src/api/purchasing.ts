@@ -7,6 +7,7 @@ import type {
   PurchaseOrderItemCreate,
   PurchaseOrder,
   PurchaseOrderCreate,
+  PurchaseOrderUpdate,
   PurchaseOrderItem,
   PurchaseOrderItemMatchRequest,
   PurchaseOrderItemUpdate,
@@ -18,8 +19,24 @@ import type {
 } from '../types/purchasing'
 
 export async function listVendors(): Promise<Vendor[]> {
-  const { data } = await axiosClient.get<Vendor[]>(PURCHASING.VENDORS)
-  return data
+  const pageSize = 500
+  const vendors: Vendor[] = []
+  let skip = 0
+
+  while (true) {
+    const { data } = await axiosClient.get<Vendor[]>(
+      `${PURCHASING.VENDORS}?skip=${skip}&limit=${pageSize}`,
+    )
+    vendors.push(...data)
+
+    if (data.length < pageSize) {
+      break
+    }
+
+    skip += data.length
+  }
+
+  return vendors
 }
 
 export async function createVendor(body: VendorCreate): Promise<Vendor> {
@@ -76,6 +93,11 @@ export async function getPurchaseOrder(poId: number): Promise<PurchaseOrder> {
 
 export async function createPurchaseOrder(body: PurchaseOrderCreate): Promise<PurchaseOrder> {
   const { data } = await axiosClient.post<PurchaseOrder>(PURCHASING.PURCHASES, body)
+  return data
+}
+
+export async function updatePurchaseOrder(poId: number, body: PurchaseOrderUpdate): Promise<PurchaseOrder> {
+  const { data } = await axiosClient.patch<PurchaseOrder>(PURCHASING.PURCHASE(poId), body)
   return data
 }
 

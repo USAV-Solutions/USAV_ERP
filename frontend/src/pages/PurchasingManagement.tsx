@@ -54,6 +54,7 @@ import {
   listPurchaseOrdersPaged,
   listVendors,
   matchPurchaseItem,
+  updatePurchaseOrder,
   updatePurchaseItem,
 } from '../api/purchasing'
 import { forceSyncPurchase, forceSyncPurchasesByPeriod } from '../api/sync'
@@ -62,6 +63,7 @@ import type {
   PurchaseOrderCreate,
   PurchaseDeliverStatus,
   PurchaseOrderItem,
+  PurchaseOrderUpdate,
   PurchaseFileImportSource,
   VendorCreate,
   ZohoSyncStatus,
@@ -102,6 +104,22 @@ interface AddPurchaseOrderItemRowProps {
   onChanged: () => Promise<void>
   onNotify: (msg: string, severity: 'success' | 'error') => void
   onDone: () => void
+}
+
+interface PurchaseOrderMetadataForm {
+  po_number: string
+  vendor_id: number
+  deliver_status: PurchaseDeliverStatus
+  order_date: string
+  expected_delivery_date: string
+  total_amount: number
+  tax_amount: number
+  shipping_amount: number
+  handling_amount: number
+  currency: string
+  tracking_number: string
+  source: string
+  notes: string
 }
 
 function AddPurchaseOrderItemRow({ poId, onChanged, onNotify, onDone }: AddPurchaseOrderItemRowProps) {
@@ -513,6 +531,9 @@ export default function PurchasingManagement() {
   const [filtersDialogOpen, setFiltersDialogOpen] = useState(false)
   const [selectedPoId, setSelectedPoId] = useState<number | null>(null)
   const [createPoOpen, setCreatePoOpen] = useState(false)
+  const [editPoOpen, setEditPoOpen] = useState(false)
+  const [editingPoId, setEditingPoId] = useState<number | null>(null)
+  const [editVendorSearchInput, setEditVendorSearchInput] = useState('')
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false)
   const [bulkLoading, setBulkLoading] = useState(false)
   const [bulkError, setBulkError] = useState<string | null>(null)
@@ -550,6 +571,21 @@ export default function PurchasingManagement() {
     currency: 'USD',
     notes: '',
     items: [],
+  })
+  const [editPoForm, setEditPoForm] = useState<PurchaseOrderMetadataForm>({
+    po_number: '',
+    vendor_id: 0,
+    deliver_status: 'CREATED',
+    order_date: new Date().toISOString().slice(0, 10),
+    expected_delivery_date: '',
+    total_amount: 0,
+    tax_amount: 0,
+    shipping_amount: 0,
+    handling_amount: 0,
+    currency: 'USD',
+    tracking_number: '',
+    source: 'MANUAL',
+    notes: '',
   })
 
   const { data: vendors = [] } = useQuery({ queryKey: ['vendors'], queryFn: listVendors })
@@ -627,6 +663,25 @@ export default function PurchasingManagement() {
       setSnackbar({ open: true, msg: 'Purchase order created.', severity: 'success' })
     },
     onError: () => setSnackbar({ open: true, msg: 'Failed to create purchase order.', severity: 'error' }),
+  })
+
+  const updatePoMutation = useMutation({
+    mutationFn: ({ poId, body }: { poId: number; body: PurchaseOrderUpdate }) => updatePurchaseOrder(poId, body),
+    onSuccess: async (po) => {
+      setEditPoOpen(false)
+      setEditingPoId(null)
+      setSelectedPoId(po.id)
+      setExpandedPoId(po.id)
+      await queryClient.invalidateQueries({ queryKey: ['purchases'] })
+      setSnackbar({ open: true, msg: 'Purchase order metadata updated.', severity: 'success' })
+    },
+    onError: (error: { response?: { data?: { detail?: string } }; message?: string }) => {
+      setSnackbar({
+        open: true,
+        msg: error.response?.data?.detail || error.message || 'Failed to update purchase order.',
+        severity: 'error',
+      })
+    },
   })
 
   const importZohoRangeMutation = useMutation({
@@ -775,9 +830,31 @@ export default function PurchasingManagement() {
 
   const bulkPercent = bulkTotal ? Math.min(Math.round((bulkProgress.queued / bulkTotal) * 100), 100) : 0
   const selectedVendor = vendors.find((vendor) => vendor.id === poForm.vendor_id) || null
+  const selectedEditVendor = vendors.find((vendor) => vendor.id === editPoForm.vendor_id) || null
   const vendorNameExists = vendors.some(
     (vendor) => vendor.name.trim().toLowerCase() === vendorSearchInput.trim().toLowerCase(),
   )
+
+  const openEditMetadataDialog = (po: PurchaseOrder) => {
+    setEditingPoId(po.id)
+    setEditVendorSearchInput(po.vendor?.name || '')
+    setEditPoForm({
+      po_number: po.po_number,
+      vendor_id: po.vendor_id,
+      deliver_status: po.deliver_status,
+      order_date: po.order_date,
+      expected_delivery_date: po.expected_delivery_date || '',
+      total_amount: Number(po.total_amount || 0),
+      tax_amount: Number(po.tax_amount || 0),
+      shipping_amount: Number(po.shipping_amount || 0),
+      handling_amount: Number(po.handling_amount || 0),
+      currency: po.currency || 'USD',
+      tracking_number: po.tracking_number || '',
+      source: po.source || 'MANUAL',
+      notes: po.notes || '',
+    })
+    setEditPoOpen(true)
+  }
 
   const activeFilterCount = [
     deliverStatusFilter !== 'ALL',
@@ -1046,6 +1123,19 @@ export default function PurchasingManagement() {
                                       size="small"
                                       variant="outlined"
                                       sx={{ flexShrink: 0 }}
+                                      startIcon={<NoteAlt />}
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        openEditMetadataDialog(po)
+                                      }}
+                                    >
+                                      Edit Metadata
+                                    </Button>
+
+                                    <Button
+                                      size="small"
+                                      variant="outlined"
+                                      sx={{ flexShrink: 0 }}
                                       startIcon={syncingPoId === po.id ? <CircularProgress size={14} /> : <CloudSync />}
                                       disabled={!canSyncPo(po) || syncingPoId === po.id}
                                       onClick={(e) => {
@@ -1274,6 +1364,185 @@ export default function PurchasingManagement() {
             }
           >
             Create
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={editPoOpen}
+        onClose={() => {
+          if (!updatePoMutation.isPending) {
+            setEditPoOpen(false)
+            setEditingPoId(null)
+          }
+        }}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>Edit Purchase Order Metadata</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              label="PO Number"
+              value={editPoForm.po_number}
+              onChange={(e) => setEditPoForm((prev) => ({ ...prev, po_number: e.target.value }))}
+              required
+            />
+            <Autocomplete
+              options={vendors}
+              value={selectedEditVendor}
+              inputValue={editVendorSearchInput}
+              onChange={(_event, nextVendor) => {
+                setEditPoForm((prev) => ({ ...prev, vendor_id: nextVendor?.id || 0 }))
+                setEditVendorSearchInput(nextVendor?.name || '')
+              }}
+              onInputChange={(_event, nextInput, reason) => {
+                setEditVendorSearchInput(nextInput)
+
+                // Keep existing vendor selection stable while typing/filtering.
+                if (reason !== 'input') {
+                  return
+                }
+
+                const normalizedInput = nextInput.trim().toLowerCase()
+                if (!normalizedInput) {
+                  return
+                }
+
+                const exactMatch = vendors.find(
+                  (vendor) => vendor.name.trim().toLowerCase() === normalizedInput,
+                )
+                if (exactMatch) {
+                  setEditPoForm((prev) => ({ ...prev, vendor_id: exactMatch.id }))
+                }
+              }}
+              getOptionLabel={(option) => option.name}
+              isOptionEqualToValue={(option, value) => option.id === value.id}
+              renderInput={(params) => <TextField {...params} label="Vendor" required />}
+            />
+            <FormControl size="small" fullWidth>
+              <InputLabel id="po-edit-status-label">PO Status</InputLabel>
+              <Select
+                labelId="po-edit-status-label"
+                label="PO Status"
+                value={editPoForm.deliver_status}
+                onChange={(e) =>
+                  setEditPoForm((prev) => ({ ...prev, deliver_status: e.target.value as PurchaseDeliverStatus }))
+                }
+              >
+                <MenuItem value="CREATED">CREATED</MenuItem>
+                <MenuItem value="BILLED">BILLED</MenuItem>
+                <MenuItem value="DELIVERED">DELIVERED</MenuItem>
+              </Select>
+            </FormControl>
+            <TextField
+              label="Order Date"
+              type="date"
+              value={editPoForm.order_date}
+              onChange={(e) => setEditPoForm((prev) => ({ ...prev, order_date: e.target.value }))}
+              InputLabelProps={{ shrink: true }}
+            />
+            <TextField
+              label="Expected Delivery Date"
+              type="date"
+              value={editPoForm.expected_delivery_date}
+              onChange={(e) =>
+                setEditPoForm((prev) => ({ ...prev, expected_delivery_date: e.target.value }))
+              }
+              InputLabelProps={{ shrink: true }}
+            />
+            <TextField
+              label="Tracking #"
+              value={editPoForm.tracking_number}
+              onChange={(e) => setEditPoForm((prev) => ({ ...prev, tracking_number: e.target.value }))}
+            />
+            <TextField
+              label="Source"
+              value={editPoForm.source}
+              onChange={(e) => setEditPoForm((prev) => ({ ...prev, source: e.target.value }))}
+            />
+            <TextField
+              label="Total Amount"
+              type="number"
+              value={editPoForm.total_amount}
+              onChange={(e) => setEditPoForm((prev) => ({ ...prev, total_amount: Number(e.target.value) }))}
+            />
+            <TextField
+              label="Tax Amount"
+              type="number"
+              value={editPoForm.tax_amount}
+              onChange={(e) => setEditPoForm((prev) => ({ ...prev, tax_amount: Number(e.target.value) }))}
+            />
+            <TextField
+              label="Shipping Amount"
+              type="number"
+              value={editPoForm.shipping_amount}
+              onChange={(e) => setEditPoForm((prev) => ({ ...prev, shipping_amount: Number(e.target.value) }))}
+            />
+            <TextField
+              label="Handling Amount"
+              type="number"
+              value={editPoForm.handling_amount}
+              onChange={(e) => setEditPoForm((prev) => ({ ...prev, handling_amount: Number(e.target.value) }))}
+            />
+            <TextField
+              label="Currency"
+              value={editPoForm.currency}
+              onChange={(e) => setEditPoForm((prev) => ({ ...prev, currency: e.target.value }))}
+            />
+            <TextField
+              label="Notes"
+              value={editPoForm.notes}
+              onChange={(e) => setEditPoForm((prev) => ({ ...prev, notes: e.target.value }))}
+              multiline
+              minRows={2}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setEditPoOpen(false)
+              setEditingPoId(null)
+            }}
+            disabled={updatePoMutation.isPending}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            disabled={
+              updatePoMutation.isPending ||
+              editingPoId === null ||
+              !editPoForm.po_number.trim() ||
+              !editPoForm.vendor_id ||
+              !editPoForm.order_date
+            }
+            onClick={() => {
+              if (editingPoId === null) {
+                return
+              }
+              updatePoMutation.mutate({
+                poId: editingPoId,
+                body: {
+                  po_number: editPoForm.po_number.trim(),
+                  vendor_id: editPoForm.vendor_id,
+                  deliver_status: editPoForm.deliver_status,
+                  order_date: editPoForm.order_date,
+                  expected_delivery_date: editPoForm.expected_delivery_date || null,
+                  total_amount: Number(editPoForm.total_amount || 0),
+                  tax_amount: Number(editPoForm.tax_amount || 0),
+                  shipping_amount: Number(editPoForm.shipping_amount || 0),
+                  handling_amount: Number(editPoForm.handling_amount || 0),
+                  currency: editPoForm.currency.trim().toUpperCase().slice(0, 3) || 'USD',
+                  tracking_number: editPoForm.tracking_number.trim() || null,
+                  source: editPoForm.source.trim() || 'MANUAL',
+                  notes: editPoForm.notes.trim() || null,
+                },
+              })
+            }}
+          >
+            {updatePoMutation.isPending ? 'Saving...' : 'Save Metadata'}
           </Button>
         </DialogActions>
       </Dialog>

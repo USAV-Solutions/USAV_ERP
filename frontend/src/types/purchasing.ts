@@ -92,6 +92,22 @@ export interface PurchaseOrderCreate {
   items?: PurchaseOrderItemCreate[]
 }
 
+export interface PurchaseOrderUpdate {
+  po_number?: string
+  vendor_id?: number
+  deliver_status?: PurchaseDeliverStatus
+  order_date?: string
+  expected_delivery_date?: string | null
+  total_amount?: number
+  currency?: string
+  tracking_number?: string | null
+  tax_amount?: number
+  shipping_amount?: number
+  handling_amount?: number
+  source?: string
+  notes?: string | null
+}
+
 export interface PurchaseOrderItemMatchRequest {
   variant_id: number
 }
