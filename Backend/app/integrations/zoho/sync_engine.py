@@ -247,17 +247,20 @@ def purchase_order_to_zoho_payload(
 
     line_items: list[dict[str, Any]] = []
     for item in po.items or []:
+        variant = getattr(item, "variant", None)
+        variant_sku = str(getattr(variant, "full_sku", "") or "").upper()
+        is_stationery_line = variant_sku.startswith("STAT-")
+
         li: dict[str, Any] = {
             "name": item.external_item_name,
             "quantity": item.quantity,
             "rate": float(item.unit_price),
         }
-        variant = getattr(item, "variant", None)
         if variant and variant.zoho_item_id:
             li["item_id"] = variant.zoho_item_id
         elif unmatched_item_id:
             li["item_id"] = unmatched_item_id
-        if getattr(po, "is_stationery", False):
+        if getattr(po, "is_stationery", False) and is_stationery_line:
             li["location_id"] = "5623409000001952427"
         if getattr(po, "is_stationery", False) and settings.zoho_po_stationery_purchase_account_id:
             li["account_id"] = settings.zoho_po_stationery_purchase_account_id
