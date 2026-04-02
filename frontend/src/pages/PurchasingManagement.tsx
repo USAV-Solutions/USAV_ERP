@@ -93,6 +93,29 @@ const zohoSyncColor = {
   DIRTY: 'info',
 } as const
 
+const ebayPurchaseSources: PurchaseFileImportSource[] = ['ebay_mekong', 'ebay_purchasing', 'ebay_usav', 'ebay_dragon']
+
+function getPurchaseImportSourceLabel(source: PurchaseFileImportSource): string {
+  switch (source) {
+    case 'goodwill':
+      return 'Goodwill CSV'
+    case 'amazon':
+      return 'Amazon CSV'
+    case 'aliexpress':
+      return 'AliExpress CSV/JSON'
+    case 'ebay_mekong':
+      return 'eBay Mekong API'
+    case 'ebay_purchasing':
+      return 'eBay Purchasing API'
+    case 'ebay_usav':
+      return 'eBay USAV API'
+    case 'ebay_dragon':
+      return 'eBay Dragon API'
+    default:
+      return source
+  }
+}
+
 interface PurchaseOrderItemRowProps {
   item: PurchaseOrderItem
   onChanged: () => Promise<void>
@@ -710,16 +733,7 @@ export default function PurchasingManagement() {
     onSuccess: async (res) => {
       await queryClient.invalidateQueries({ queryKey: ['vendors'] })
       await queryClient.invalidateQueries({ queryKey: ['purchases'] })
-      const sourceLabel =
-        res.source === 'goodwill'
-          ? 'Goodwill CSV'
-          : res.source === 'amazon'
-            ? 'Amazon CSV'
-            : res.source === 'aliexpress'
-              ? 'AliExpress CSV/JSON'
-              : res.source === 'ebay_mekong'
-                ? 'eBay Mekong API'
-                : 'eBay Purchasing API'
+      const sourceLabel = getPurchaseImportSourceLabel(res.source)
       setSnackbar({
         open: true,
         severity: 'success',
@@ -736,7 +750,7 @@ export default function PurchasingManagement() {
 
   const importPurchaseEbayMutation = useMutation({
     mutationFn: (params: {
-      source: 'ebay_mekong' | 'ebay_purchasing'
+      source: 'ebay_mekong' | 'ebay_purchasing' | 'ebay_usav' | 'ebay_dragon'
       orderDateFrom: string
       orderDateTo: string
     }) => importPurchasesFromEbay(params),
@@ -744,7 +758,7 @@ export default function PurchasingManagement() {
       await queryClient.invalidateQueries({ queryKey: ['vendors'] })
       await queryClient.invalidateQueries({ queryKey: ['purchases'] })
       setImportPurchaseEbayRangeOpen(false)
-      const sourceLabel = res.source === 'ebay_mekong' ? 'eBay Mekong API' : 'eBay Purchasing API'
+      const sourceLabel = getPurchaseImportSourceLabel(res.source)
       setSnackbar({
         open: true,
         severity: 'success',
@@ -763,8 +777,7 @@ export default function PurchasingManagement() {
     },
   })
 
-  const isEbayPurchaseSource =
-    purchaseImportSource === 'ebay_mekong' || purchaseImportSource === 'ebay_purchasing'
+  const isEbayPurchaseSource = ebayPurchaseSources.includes(purchaseImportSource)
 
   const handlePurchaseImportSelected = (event: ChangeEvent<HTMLInputElement>) => {
     if (isEbayPurchaseSource) {
@@ -1639,6 +1652,8 @@ export default function PurchasingManagement() {
                 <MenuItem value="ALIEXPRESS_CSV">ALIEXPRESS_CSV</MenuItem>
                 <MenuItem value="EBAY_MEKONG_API">EBAY_MEKONG_API</MenuItem>
                 <MenuItem value="EBAY_PURCHASING_API">EBAY_PURCHASING_API</MenuItem>
+                <MenuItem value="EBAY_USAV_API">EBAY_USAV_API</MenuItem>
+                <MenuItem value="EBAY_DRAGON_API">EBAY_DRAGON_API</MenuItem>
                 <MenuItem value="ZOHO_IMPORT">ZOHO_IMPORT</MenuItem>
               </Select>
             </FormControl>
@@ -1806,6 +1821,8 @@ export default function PurchasingManagement() {
                 <MenuItem value="aliexpress">AliExpress (CSV / JSON)</MenuItem>
                 <MenuItem value="ebay_mekong">eBay Mekong (API)</MenuItem>
                 <MenuItem value="ebay_purchasing">eBay Purchasing (API)</MenuItem>
+                <MenuItem value="ebay_usav">eBay USAV (API)</MenuItem>
+                <MenuItem value="ebay_dragon">eBay Dragon (API)</MenuItem>
               </Select>
             </FormControl>
             <Alert severity="info">
@@ -1869,7 +1886,7 @@ export default function PurchasingManagement() {
               fullWidth
             />
             <Alert severity="info">
-              Source: {purchaseImportSource === 'ebay_mekong' ? 'eBay Mekong' : 'eBay Purchasing'}
+              Source: {getPurchaseImportSourceLabel(purchaseImportSource).replace(' API', '')}
             </Alert>
           </Stack>
         </DialogContent>
@@ -1888,7 +1905,7 @@ export default function PurchasingManagement() {
             }
             onClick={() =>
               importPurchaseEbayMutation.mutate({
-                source: purchaseImportSource as 'ebay_mekong' | 'ebay_purchasing',
+                source: purchaseImportSource as 'ebay_mekong' | 'ebay_purchasing' | 'ebay_usav' | 'ebay_dragon',
                 orderDateFrom: importPurchaseEbayRangeFrom,
                 orderDateTo: importPurchaseEbayRangeTo,
               })

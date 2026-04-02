@@ -154,6 +154,8 @@ export type PurchaseFileImportSource =
   | 'aliexpress'
   | 'ebay_mekong'
   | 'ebay_purchasing'
+  | 'ebay_usav'
+  | 'ebay_dragon'
 
 export interface PurchaseFileImportResponse {
   source: PurchaseFileImportSource

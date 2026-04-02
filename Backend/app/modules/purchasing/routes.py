@@ -207,7 +207,12 @@ def _build_purchase_item_link(source: PurchaseFileImportSource, *, asin: str | N
         return f"https://amazon.com/dp/{normalized_asin}"
     if source == PurchaseFileImportSource.GOODWILL and normalized_item_id:
         return f"https://shopgoodwill.com/item/{normalized_item_id}"
-    if source in {PurchaseFileImportSource.EBAY_MEKONG, PurchaseFileImportSource.EBAY_PURCHASING} and normalized_item_id:
+    if source in {
+        PurchaseFileImportSource.EBAY_MEKONG,
+        PurchaseFileImportSource.EBAY_PURCHASING,
+        PurchaseFileImportSource.EBAY_USAV,
+        PurchaseFileImportSource.EBAY_DRAGON,
+    } and normalized_item_id:
         return f"https://www.ebay.com/itm/{normalized_item_id}"
 
     return None
@@ -217,6 +222,8 @@ def _ebay_purchase_order_source(source: PurchaseFileImportSource) -> str:
     source_map = {
         PurchaseFileImportSource.EBAY_MEKONG: "EBAY_MEKONG_API",
         PurchaseFileImportSource.EBAY_PURCHASING: "EBAY_PURCHASING_API",
+        PurchaseFileImportSource.EBAY_USAV: "EBAY_USAV_API",
+        PurchaseFileImportSource.EBAY_DRAGON: "EBAY_DRAGON_API",
     }
     return source_map.get(source, "EBAY_BUYING_API")
 
@@ -1707,7 +1714,12 @@ async def _import_purchase_file_by_source(
 
     content = _decode_upload_text(raw)
 
-    if source in {PurchaseFileImportSource.EBAY_MEKONG, PurchaseFileImportSource.EBAY_PURCHASING}:
+    if source in {
+        PurchaseFileImportSource.EBAY_MEKONG,
+        PurchaseFileImportSource.EBAY_PURCHASING,
+        PurchaseFileImportSource.EBAY_USAV,
+        PurchaseFileImportSource.EBAY_DRAGON,
+    }:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="eBay sources require date-range API import endpoint, not file upload",
@@ -1727,10 +1739,14 @@ def _build_ebay_purchase_client(source: PurchaseFileImportSource) -> EbayClient:
     refresh_token_map = {
         PurchaseFileImportSource.EBAY_MEKONG: settings.ebay_refresh_token_mekong,
         PurchaseFileImportSource.EBAY_PURCHASING: settings.ebay_refresh_token_purchasing,
+        PurchaseFileImportSource.EBAY_USAV: settings.ebay_refresh_token_usav,
+        PurchaseFileImportSource.EBAY_DRAGON: settings.ebay_refresh_token_dragon,
     }
     store_name_map = {
         PurchaseFileImportSource.EBAY_MEKONG: "MEKONG",
         PurchaseFileImportSource.EBAY_PURCHASING: "PURCHASING",
+        PurchaseFileImportSource.EBAY_USAV: "USAV",
+        PurchaseFileImportSource.EBAY_DRAGON: "DRAGON",
     }
 
     refresh_token = refresh_token_map.get(source)
@@ -1764,7 +1780,12 @@ async def _import_ebay_purchase_api(
     po_item_repo: PurchaseOrderItemRepository,
     db: AsyncSession,
 ) -> PurchaseFileImportResponse:
-    if source not in {PurchaseFileImportSource.EBAY_MEKONG, PurchaseFileImportSource.EBAY_PURCHASING}:
+    if source not in {
+        PurchaseFileImportSource.EBAY_MEKONG,
+        PurchaseFileImportSource.EBAY_PURCHASING,
+        PurchaseFileImportSource.EBAY_USAV,
+        PurchaseFileImportSource.EBAY_DRAGON,
+    }:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported eBay source")
 
     client = _build_ebay_purchase_client(source)
@@ -1912,7 +1933,12 @@ async def import_purchasing_from_ebay_api(
     po_item_repo: PurchaseOrderItemRepository = Depends(get_purchase_order_item_repo),
     db: AsyncSession = Depends(get_db),
 ):
-    if source not in {PurchaseFileImportSource.EBAY_MEKONG, PurchaseFileImportSource.EBAY_PURCHASING}:
+    if source not in {
+        PurchaseFileImportSource.EBAY_MEKONG,
+        PurchaseFileImportSource.EBAY_PURCHASING,
+        PurchaseFileImportSource.EBAY_USAV,
+        PurchaseFileImportSource.EBAY_DRAGON,
+    }:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported eBay import source")
 
     if order_date_from is None or order_date_to is None:

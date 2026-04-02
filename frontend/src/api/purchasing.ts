@@ -184,7 +184,7 @@ export async function importPurchasesFromFile(
 }
 
 export async function importPurchasesFromEbay(params: {
-  source: 'ebay_mekong' | 'ebay_purchasing'
+  source: 'ebay_mekong' | 'ebay_purchasing' | 'ebay_usav' | 'ebay_dragon'
   orderDateFrom: string
   orderDateTo: string
 }): Promise<PurchaseFileImportResponse> {
