@@ -274,6 +274,40 @@ class ZohoClient:
         """Fetch a single item by Zoho item ID."""
         result = await self._request("GET", f"/items/{item_id}")
         return result.get("item", {})
+
+    async def list_chart_of_accounts(self, *, page: int = 1, per_page: int = 200) -> list[dict[str, Any]]:
+        """List chart of accounts from Zoho Books."""
+        result = await self._request(
+            "GET",
+            "/chartofaccounts",
+            api="books",
+            params={"page": page, "per_page": per_page},
+        )
+        return result.get("chartofaccounts", []) or []
+
+    async def get_account_id_by_name(self, account_name: str) -> Optional[str]:
+        """Resolve a Zoho account id from account name."""
+        target = (account_name or "").strip().lower()
+        if not target:
+            return None
+
+        page = 1
+        while page <= 20:
+            accounts = await self.list_chart_of_accounts(page=page, per_page=200)
+            if not accounts:
+                break
+
+            for account in accounts:
+                name = str(account.get("account_name") or "").strip().lower()
+                if name == target:
+                    account_id = str(account.get("account_id") or "").strip()
+                    return account_id or None
+
+            if len(accounts) < 200:
+                break
+            page += 1
+
+        return None
     
     async def sync_item(
         self,

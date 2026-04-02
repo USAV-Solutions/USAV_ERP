@@ -252,6 +252,12 @@ async def create_variant(
     
     # Check for duplicate variant
     existing_variants = await variant_repo.get_by_identity(data.identity_id, include_inactive=True)
+    if identity.is_stationery and existing_variants:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Stationery identities are single-SKU only and already have a generated variant",
+        )
+
     for v in existing_variants:
         if v.color_code == data.color_code and v.condition_code == data.condition_code:
             raise HTTPException(
@@ -439,6 +445,19 @@ async def update_variant(
     
     update_data = data.model_dump(exclude_unset=True)
     if update_data:
+        identity = await identity_repo.get(variant.identity_id)
+        if identity is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Product identity {variant.identity_id} not found",
+            )
+
+        if identity.is_stationery and ("color_code" in update_data or "condition_code" in update_data):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Stationery variants cannot change color or condition",
+            )
+
         target_color = update_data.get("color_code", variant.color_code)
         target_condition = update_data.get("condition_code", variant.condition_code)
 
@@ -456,13 +475,6 @@ async def update_variant(
                             f"'{target_color}' and condition '{target_condition}' already exists for this identity"
                         ),
                     )
-
-            identity = await identity_repo.get(variant.identity_id)
-            if identity is None:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Product identity {variant.identity_id} not found",
-                )
 
             update_data["full_sku"] = repo.generate_full_sku(
                 identity.generated_upis_h,

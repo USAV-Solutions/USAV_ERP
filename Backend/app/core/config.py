@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     zoho_po_cf_tax_id: str = ""
     zoho_po_cf_shipping_fee_id: str = ""
     zoho_po_cf_handling_fee_id: str = ""
+    zoho_po_cf_is_stationery_id: str = ""
+    zoho_po_stationery_purchase_account_id: str = ""
+    zoho_po_stationery_location_id: str = ""
+    zoho_po_stationery_delivery_address: str = ""
+    zoho_item_stationery_purchase_account_id: str = ""
+    zoho_item_stationery_purchase_account_name: str = "Office Supplies"
     
     # Amazon SP-API Integration
     amazon_refresh_token: str = ""

@@ -164,6 +164,8 @@ def purchase_order_to_zoho_payload(
         _append_if_missing(f"Source: {po.source}")
     if getattr(po, "tracking_number", None):
         _append_if_missing(f"Tracking: {po.tracking_number}")
+    if getattr(po, "is_stationery", False):
+        _append_if_missing("Stationery Purchase: true")
 
     item_note_lines: list[str] = []
     item_note_lines_added_lc: set[str] = set()
@@ -233,6 +235,12 @@ def purchase_order_to_zoho_payload(
 
     payload["custom_fields"] = custom_fields
 
+    if getattr(po, "is_stationery", False):
+        if settings.zoho_po_stationery_delivery_address:
+            payload["delivery_address"] = {
+                "address": settings.zoho_po_stationery_delivery_address,
+            }
+
     # Keep legacy adjustment populated, but include tax in the rollup.
     payload["adjustment"] = tax_amount + shipping_amount + handling_amount
     payload["adjustment_description"] = "Shipping Fee + Tax + Handling Fee"
@@ -249,6 +257,10 @@ def purchase_order_to_zoho_payload(
             li["item_id"] = variant.zoho_item_id
         elif unmatched_item_id:
             li["item_id"] = unmatched_item_id
+        if getattr(po, "is_stationery", False):
+            li["location_id"] = "5623409000001952427"
+        if getattr(po, "is_stationery", False) and settings.zoho_po_stationery_purchase_account_id:
+            li["account_id"] = settings.zoho_po_stationery_purchase_account_id
         line_items.append(li)
     payload["line_items"] = line_items
 
@@ -692,6 +704,11 @@ async def sync_variant_outbound(variant_id: int) -> None:
 
         try:
             zoho = ZohoClient()
+
+            identity = getattr(variant, "identity", None)
+            if identity and identity.is_stationery:
+                payload["purchase_account_id"] = 5623409000000000400
+
             zoho_item = await zoho.sync_item(
                 sku=payload.get("sku", variant.full_sku),
                 name=payload.get("name", variant.full_sku),

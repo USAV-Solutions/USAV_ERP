@@ -90,6 +90,7 @@ class PurchaseOrderBase(BaseModel):
     shipping_amount: Decimal = Field(default=Decimal("0"), ge=0)
     handling_amount: Decimal = Field(default=Decimal("0"), ge=0)
     source: str = Field(default="MANUAL", max_length=50)
+    is_stationery: bool = False
     notes: Optional[str] = None
 
 
@@ -109,6 +110,7 @@ class PurchaseOrderUpdate(BaseModel):
     shipping_amount: Optional[Decimal] = Field(None, ge=0)
     handling_amount: Optional[Decimal] = Field(None, ge=0)
     source: Optional[str] = Field(None, max_length=50)
+    is_stationery: Optional[bool] = None
     notes: Optional[str] = None
 
 

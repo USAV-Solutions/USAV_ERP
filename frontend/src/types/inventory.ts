@@ -52,6 +52,7 @@ export interface ProductIdentity {
   id: number
   product_id: number
   type: ProductType
+  is_stationery: boolean
   lci?: number
   identity_name?: string
   dimension_length?: number
@@ -70,6 +71,7 @@ export interface IdentitySearchResult {
   id: number
   product_id: number
   type: ProductType
+  is_stationery?: boolean
   lci?: number | null
   generated_upis_h: string
   identity_name?: string | null

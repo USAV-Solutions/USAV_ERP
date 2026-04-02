@@ -65,6 +65,7 @@ export interface PurchaseOrder {
   shipping_amount?: number
   handling_amount?: number
   source?: string
+  is_stationery: boolean
   notes?: string | null
   zoho_id?: string | null
   zoho_sync_status: ZohoSyncStatus
@@ -87,6 +88,7 @@ export interface PurchaseOrderCreate {
   shipping_amount?: number
   handling_amount?: number
   source?: string
+  is_stationery?: boolean
   notes?: string
   items?: PurchaseOrderItemCreate[]
 }
@@ -103,6 +105,7 @@ export interface PurchaseOrderUpdate {
   shipping_amount?: number
   handling_amount?: number
   source?: string
+  is_stationery?: boolean
   notes?: string | null
 }
 

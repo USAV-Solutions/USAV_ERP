@@ -349,6 +349,8 @@ def _build_item_payload(variant: ProductVariant) -> dict:
         payload["length"] = float(identity.dimension_length) if identity.dimension_length is not None else None
         payload["width"] = float(identity.dimension_width) if identity.dimension_width is not None else None
         payload["height"] = float(identity.dimension_height) if identity.dimension_height is not None else None
+        if identity.is_stationery:
+            payload["purchase_account_id"] = 5623409000000000400
 
     return {key: value for key, value in payload.items() if value is not None}
 

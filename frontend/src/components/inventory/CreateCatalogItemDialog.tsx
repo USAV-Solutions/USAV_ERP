@@ -25,7 +25,7 @@ import VariantSearchAutocomplete from '../common/VariantSearchAutocomplete'
 import type { VariantSearchResult } from '../../types/orders'
 import type { Brand, IdentitySearchResult, LCIDefinition, ProductIdentity } from '../../types/inventory'
 
-type Mode = 'product' | 'part' | 'bundle'
+type Mode = 'product' | 'part' | 'bundle' | 'stationery'
 type BundleRole = 'Primary' | 'Accessory' | 'Satellite'
 
 interface BundleLine {
@@ -126,6 +126,10 @@ export default function CreateCatalogItemDialog({ open, onClose }: CreateCatalog
       return 'UPIS-H: [auto family id], Default Variant SKU: [same as UPIS-H]'
     }
 
+    if (mode === 'stationery') {
+      return 'SKU: STAT-[auto 5-digit sequence], single-SKU only'
+    }
+
     if (mode === 'bundle') {
       return 'UPIS-H: [auto family id]-B'
     }
@@ -219,6 +223,23 @@ export default function CreateCatalogItemDialog({ open, onClose }: CreateCatalog
           product_id: familyResponse.data.product_id,
           type: 'Product',
           identity_name: name.trim(),
+          is_stationery: false,
+          ...dimensionsPayload,
+        })
+        return
+      }
+
+      if (mode === 'stationery') {
+        const familyResponse = await axiosClient.post(CATALOG.FAMILIES, {
+          base_name: name.trim(),
+          brand_id: selectedBrand?.id,
+        })
+
+        await axiosClient.post(CATALOG.IDENTITIES, {
+          product_id: familyResponse.data.product_id,
+          type: 'Product',
+          identity_name: name.trim(),
+          is_stationery: true,
           ...dimensionsPayload,
         })
         return
@@ -323,16 +344,25 @@ export default function CreateCatalogItemDialog({ open, onClose }: CreateCatalog
               <MenuItem value="product">Product</MenuItem>
               <MenuItem value="part">Part</MenuItem>
               <MenuItem value="bundle">Bundle</MenuItem>
+              <MenuItem value="stationery">Stationery</MenuItem>
             </TextField>
 
             <TextField
-              label={mode === 'part' ? 'Part Name' : mode === 'bundle' ? 'Bundle Name' : 'Product Name'}
+              label={
+                mode === 'part'
+                  ? 'Part Name'
+                  : mode === 'bundle'
+                    ? 'Bundle Name'
+                    : mode === 'stationery'
+                      ? 'Stationery Name'
+                      : 'Product Name'
+              }
               value={name}
               onChange={(e) => setName(e.target.value)}
               fullWidth
             />
 
-            {mode === 'product' && (
+            {(mode === 'product' || mode === 'stationery') && (
               <>
                 <Stack direction="row" spacing={1} alignItems="center">
                   <Autocomplete

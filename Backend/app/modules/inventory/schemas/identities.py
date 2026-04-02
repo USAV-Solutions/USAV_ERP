@@ -20,6 +20,7 @@ class ProductIdentityBase(BaseModel):
     dimension_width: Optional[Decimal] = Field(None, ge=0, description="Width in inches")
     dimension_height: Optional[Decimal] = Field(None, ge=0, description="Height in inches")
     weight: Optional[Decimal] = Field(None, ge=0, description="Weight in pounds")
+    is_stationery: bool = Field(default=False, description="Whether this identity is stationery")
 
 
 class ProductIdentityCreate(ProductIdentityBase):

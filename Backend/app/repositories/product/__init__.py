@@ -5,7 +5,7 @@ Handles database operations for ProductFamily, ProductIdentity, and ProductVaria
 import hashlib
 from typing import Any, Optional, Sequence
 
-from sqlalchemy import String, cast, func, or_, select
+from sqlalchemy import Integer, String, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -233,6 +233,26 @@ class ProductVariantRepository(BaseRepository[ProductVariant]):
             parts.append(condition_code)
         
         return "-".join(parts)
+
+    async def get_next_stationery_sequence(self) -> int:
+        """Return the next sequential stationery SKU number for STAT-#####."""
+        stmt = (
+            select(
+                func.coalesce(
+                    func.max(
+                        cast(
+                            func.substring(ProductVariant.full_sku, r"^STAT-([0-9]{5})$"),
+                            Integer,
+                        )
+                    ),
+                    0,
+                )
+                + 1
+            )
+            .where(ProductVariant.full_sku.op("~")(r"^STAT-[0-9]{5}$"))
+        )
+        result = await self.session.execute(stmt)
+        return int(result.scalar_one())
     
     async def create_variant(
         self,
@@ -240,6 +260,14 @@ class ProductVariantRepository(BaseRepository[ProductVariant]):
         identity: ProductIdentity
     ) -> ProductVariant:
         """Create a new variant with auto-generated full SKU."""
+        if identity.is_stationery:
+            # Stationery items are single-SKU and intentionally do not carry color/condition suffixes.
+            next_sequence = await self.get_next_stationery_sequence()
+            data["color_code"] = None
+            data["condition_code"] = None
+            data["full_sku"] = f"STAT-{next_sequence:05d}"
+            return await self.create(data)
+
         color_code = data.get("color_code")
         condition_code = data.get("condition_code")
         

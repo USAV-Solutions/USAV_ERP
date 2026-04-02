@@ -429,6 +429,13 @@ class ProductIdentity(Base, TimestampMixin):
         nullable=True,
         comment="Identity weight in pounds.",
     )
+    is_stationery: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+        comment="Flags stationery items. Stationery identities must be Product type and single-SKU.",
+    )
     generated_upis_h: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
@@ -484,8 +491,13 @@ class ProductIdentity(Base, TimestampMixin):
             "(type = 'P' AND lci IS NOT NULL) OR (type != 'P' AND lci IS NULL)",
             name="ck_identity_lci_type_constraint",
         ),
+        CheckConstraint(
+            "(is_stationery = false) OR (type = 'Product')",
+            name="ck_identity_stationery_product_only",
+        ),
         Index("ix_identity_product_id", "product_id"),
         Index("ix_identity_hex_signature", "hex_signature"),
+        Index("ix_identity_is_stationery", "is_stationery"),
     )
     
     def __repr__(self) -> str:

@@ -121,6 +121,7 @@ class PurchaseOrder(Base, ZohoSyncMixin, TimestampMixin):
     shipping_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0, server_default="0")
     handling_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0, server_default="0")
     source: Mapped[str] = mapped_column(String(50), nullable=False, default="MANUAL", server_default="MANUAL")
+    is_stationery: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     zoho_sync_status: Mapped[ZohoSyncStatus] = mapped_column(
         Enum(ZohoSyncStatus, name="zoho_sync_status_enum", create_constraint=False),

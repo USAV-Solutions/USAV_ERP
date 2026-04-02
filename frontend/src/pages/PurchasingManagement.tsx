@@ -4,6 +4,7 @@ import {
   Autocomplete,
   Box,
   Button,
+  Checkbox,
   CircularProgress,
   Chip,
   Collapse,
@@ -17,6 +18,7 @@ import {
   Stack,
   IconButton,
   FormControl,
+  FormControlLabel,
   InputLabel,
   MenuItem,
   Select,
@@ -141,6 +143,7 @@ interface PurchaseOrderMetadataForm {
   currency: string
   tracking_number: string
   source: string
+  is_stationery: boolean
   notes: string
 }
 
@@ -590,6 +593,7 @@ export default function PurchasingManagement() {
     shipping_amount: 0,
     handling_amount: 0,
     currency: 'USD',
+    is_stationery: false,
     notes: '',
     items: [],
   })
@@ -605,6 +609,7 @@ export default function PurchasingManagement() {
     currency: 'USD',
     tracking_number: '',
     source: 'MANUAL',
+    is_stationery: false,
     notes: '',
   })
 
@@ -673,6 +678,7 @@ export default function PurchasingManagement() {
         shipping_amount: 0,
         handling_amount: 0,
         currency: 'USD',
+        is_stationery: false,
         notes: '',
         items: [],
       })
@@ -859,6 +865,7 @@ export default function PurchasingManagement() {
       currency: po.currency || 'USD',
       tracking_number: po.tracking_number || '',
       source: po.source || 'MANUAL',
+      is_stationery: po.is_stationery || false,
       notes: po.notes || '',
     })
     setEditPoOpen(true)
@@ -1080,6 +1087,15 @@ export default function PurchasingManagement() {
                                         sx={{ fontSize: '0.82rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
                                       >
                                         {po.source || '-'}
+                                      </Typography>
+                                    </Box>
+
+                                    <Box sx={{ minWidth: 100, maxWidth: 120, flexShrink: 0, overflow: 'hidden' }}>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                        Stationery
+                                      </Typography>
+                                      <Typography variant="body2" sx={{ fontSize: '0.82rem' }}>
+                                        {po.is_stationery ? 'Yes' : 'No'}
                                       </Typography>
                                     </Box>
 
@@ -1350,6 +1366,15 @@ export default function PurchasingManagement() {
               multiline
               minRows={2}
             />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={Boolean(poForm.is_stationery)}
+                  onChange={(e) => setPoForm((prev) => ({ ...prev, is_stationery: e.target.checked }))}
+                />
+              }
+              label="Is Stationery"
+            />
             <Alert severity="info">Create PO first. Line items can be loaded from integrations and matched below.</Alert>
           </Stack>
         </DialogContent>
@@ -1463,6 +1488,15 @@ export default function PurchasingManagement() {
               value={editPoForm.source}
               onChange={(e) => setEditPoForm((prev) => ({ ...prev, source: e.target.value }))}
             />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={editPoForm.is_stationery}
+                  onChange={(e) => setEditPoForm((prev) => ({ ...prev, is_stationery: e.target.checked }))}
+                />
+              }
+              label="Is Stationery"
+            />
             <TextField
               label="Tax Amount"
               type="number"
@@ -1532,6 +1566,7 @@ export default function PurchasingManagement() {
                   currency: editPoForm.currency.trim().toUpperCase().slice(0, 3) || 'USD',
                   tracking_number: editPoForm.tracking_number.trim() || null,
                   source: editPoForm.source.trim() || 'MANUAL',
+                  is_stationery: editPoForm.is_stationery,
                   notes: editPoForm.notes.trim() || null,
                 },
               })
@@ -1646,6 +1681,7 @@ export default function PurchasingManagement() {
                 }}
               >
                 <MenuItem value="ALL">All</MenuItem>
+                <MenuItem value="MANUAL">MANUAL</MenuItem>
                 <MenuItem value="GOODWILL_CSV">GOODWILL_CSV</MenuItem>
                 <MenuItem value="AMAZON_CSV">AMAZON_CSV</MenuItem>
                 <MenuItem value="ALIEXPRESS_JSON">ALIEXPRESS_JSON</MenuItem>

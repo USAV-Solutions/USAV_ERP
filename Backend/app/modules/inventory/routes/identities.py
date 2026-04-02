@@ -89,6 +89,7 @@ async def search_identities(
             ProductIdentity.id,
             ProductIdentity.product_id,
             ProductIdentity.type,
+            ProductIdentity.is_stationery,
             ProductIdentity.lci,
             ProductIdentity.generated_upis_h,
             ProductIdentity.identity_name,
@@ -120,6 +121,7 @@ async def search_identities(
             "id": row.id,
             "product_id": row.product_id,
             "type": row.type.value if hasattr(row.type, "value") else row.type,
+            "is_stationery": row.is_stationery,
             "lci": row.lci,
             "generated_upis_h": row.generated_upis_h,
             "identity_name": row.identity_name,
@@ -188,6 +190,12 @@ async def create_identity(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"LCI must be NULL for type '{data.type.value}'"
             )
+
+    if data.is_stationery and data.type != IdentityType.PRODUCT:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Stationery identities must use type 'Product'",
+        )
     
     # Check for duplicate UPIS-H
     upis_h = identity_repo.generate_upis_h(data.product_id, data.type, data.lci)
