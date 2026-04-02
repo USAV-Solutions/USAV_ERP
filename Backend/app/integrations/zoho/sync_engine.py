@@ -907,6 +907,8 @@ async def sync_po_outbound(po_id: int, allow_billed_unbill_rebill: bool = False)
     from sqlalchemy import select
     from sqlalchemy.orm import selectinload
 
+    payload: Optional[dict[str, Any]] = None
+
     async with async_session_factory() as db:
         stmt = (
             select(PurchaseOrder)
@@ -1051,6 +1053,12 @@ async def sync_po_outbound(po_id: int, allow_billed_unbill_rebill: bool = False)
                 po.zoho_id,
             )
         except Exception as exc:
+            if payload is not None and "27520" in str(exc):
+                logger.error(
+                    "sync_po_outbound: Zoho 27520 debug payload | po_id=%s payload=%s",
+                    po_id,
+                    payload,
+                )
             po.zoho_sync_error = str(exc)[:2000]
             po.zoho_sync_status = ZohoSyncStatus.ERROR
             po._updated_by_sync = True
