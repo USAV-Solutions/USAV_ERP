@@ -235,7 +235,14 @@ def purchase_order_to_zoho_payload(
 
     payload["custom_fields"] = custom_fields
 
+    stationery_location_id = "5623409000002952427" if getattr(po, "is_stationery", False) else None
+
     if getattr(po, "is_stationery", False):
+        if stationery_location_id:
+            # Zoho requires line locations to match transaction-level location
+            # (or the item's immediate warehouse). Set PO-level location when
+            # routing stationery purchases to a dedicated warehouse.
+            payload["location_id"] = stationery_location_id
         if settings.zoho_po_stationery_delivery_address:
             payload["delivery_address"] = {
                 "address": settings.zoho_po_stationery_delivery_address,
@@ -260,8 +267,8 @@ def purchase_order_to_zoho_payload(
             li["item_id"] = variant.zoho_item_id
         elif unmatched_item_id:
             li["item_id"] = unmatched_item_id
-        if getattr(po, "is_stationery", False) and is_stationery_line:
-            li["location_id"] = "5623409000001952427"
+        if getattr(po, "is_stationery", False) and is_stationery_line and stationery_location_id:
+            li["location_id"] = stationery_location_id
         if getattr(po, "is_stationery", False) and settings.zoho_po_stationery_purchase_account_id:
             li["account_id"] = settings.zoho_po_stationery_purchase_account_id
         line_items.append(li)

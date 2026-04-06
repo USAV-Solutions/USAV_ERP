@@ -7,6 +7,8 @@ import asyncio
 from datetime import datetime, date, timedelta, timezone
 from typing import Any, List, Optional
 import logging
+import socket
+from urllib.parse import urlparse
 import xml.etree.ElementTree as ET
 import httpx
 
@@ -112,9 +114,49 @@ class EbayClient(BasePlatformClient):
             ),
         }
 
+        oauth_host = urlparse(self.oauth_url).hostname or ""
+        oauth_port = 443
+
         last_err: Exception | None = None
         for attempt in range(1, _TOKEN_REFRESH_ATTEMPTS + 1):
             try:
+                resolved_ips: list[str] = []
+                if oauth_host:
+                    try:
+                        loop = asyncio.get_running_loop()
+                        addrinfo = await loop.getaddrinfo(
+                            oauth_host,
+                            oauth_port,
+                            type=socket.SOCK_STREAM,
+                        )
+                        resolved_ips = sorted(
+                            {
+                                str(info[4][0])
+                                for info in addrinfo
+                                if info and len(info) >= 5 and info[4]
+                            }
+                        )
+                    except Exception as dns_exc:
+                        logger.debug(
+                            "eBay %s token refresh DNS lookup failed on attempt %s/%s | host=%s error=%s",
+                            self.store_name,
+                            attempt,
+                            _TOKEN_REFRESH_ATTEMPTS,
+                            oauth_host,
+                            dns_exc,
+                        )
+
+                logger.debug(
+                    "eBay %s token refresh connection attempt %s/%s | url=%s host=%s resolved_ips=%s transport_retries=%s",
+                    self.store_name,
+                    attempt,
+                    _TOKEN_REFRESH_ATTEMPTS,
+                    self.oauth_url,
+                    oauth_host or "unknown",
+                    resolved_ips or ["unresolved"],
+                    _TRANSPORT_RETRIES,
+                )
+
                 transport = httpx.AsyncHTTPTransport(retries=_TRANSPORT_RETRIES)
                 async with httpx.AsyncClient(
                     transport=transport, timeout=30.0
