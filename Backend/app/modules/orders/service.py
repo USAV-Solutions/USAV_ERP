@@ -103,9 +103,9 @@ class OrderSyncService:
         response = SyncResponse(platform=platform_name)
 
         # Step 1 – acquire lock
-        logger.info(f"{platform_name}: Attempting to acquire sync lock")
+        logger.debug(f"[DEBUG.INTERNAL_API] {platform_name}: Attempting to acquire sync lock")
         locked = await self.sync_repo.acquire_sync_lock(platform_name)
-        logger.info(f"{platform_name}: Lock acquired={locked}")
+        logger.debug(f"[DEBUG.INTERNAL_API] {platform_name}: Lock acquired={locked}")
         if not locked:
             response.success = False
             error_msg = f"Platform '{platform_name}' is currently syncing or in error. Reset the state before retrying."
@@ -115,20 +115,20 @@ class OrderSyncService:
 
         try:
             # Step 2 – determine fetch window
-            logger.info(f"{platform_name}: Retrieving integration state")
+            logger.debug(f"[DEBUG.INTERNAL_API] {platform_name}: Retrieving integration state")
             state = await self.sync_repo.get_by_platform(platform_name)
             last_sync = state.last_successful_sync if state else None
-            logger.info(f"{platform_name}: Last successful sync = {last_sync}")
+            logger.debug(f"[DEBUG.INTERNAL_API] {platform_name}: Last successful sync = {last_sync}")
             if last_sync is None:
                 # Never synced – use a sensible default
                 fetch_since = datetime(2026, 1, 1, tzinfo=timezone.utc)
-                logger.info(f"{platform_name}: Never synced before, using default anchor: {fetch_since}")
+                logger.debug(f"[DEBUG.INTERNAL_API] {platform_name}: Never synced before, using default anchor: {fetch_since}")
             else:
                 fetch_since = last_sync - timedelta(minutes=SYNC_BUFFER_MINUTES)
-                logger.info(f"{platform_name}: Using last_sync minus {SYNC_BUFFER_MINUTES}min buffer: {fetch_since}")
+                logger.debug(f"[DEBUG.INTERNAL_API] {platform_name}: Using last_sync minus {SYNC_BUFFER_MINUTES}min buffer: {fetch_since}")
 
-            logger.info(
-                "%s: Calling client.fetch_orders(since=%s)",
+            logger.debug(
+                "[DEBUG.EXTERNAL_API] %s: Calling client.fetch_orders(since=%s)",
                 platform_name,
                 fetch_since.isoformat(),
             )
@@ -137,19 +137,19 @@ class OrderSyncService:
             external_orders: list[ExternalOrder] = await client.fetch_orders(
                 since=fetch_since,
             )
-            logger.info(
-                "%s: Adapter returned %d orders",
+            logger.debug(
+                "[DEBUG.EXTERNAL_API] %s: Adapter returned %d orders",
                 platform_name,
                 len(external_orders),
             )
 
             # Step 4 – ingest
             order_platform = _PLATFORM_MAP.get(platform_name)
-            logger.info(f"{platform_name}: Mapped to order platform enum: {order_platform}")
+            logger.debug(f"[DEBUG.INTERNAL_API] {platform_name}: Mapped to order platform enum: {order_platform}")
             if order_platform is None:
                 raise ValueError(f"Unknown platform mapping for '{platform_name}'")
 
-            logger.info(f"{platform_name}: Starting ingestion of {len(external_orders)} orders")
+            logger.debug(f"[DEBUG.INTERNAL_API] {platform_name}: Starting ingestion of {len(external_orders)} orders")
             for idx, ext_order in enumerate(external_orders, 1):
                 logger.debug(f"{platform_name}: Ingesting order {idx}/{len(external_orders)}: {ext_order.platform_order_id}")
                 was_new = await self._ingest_order(ext_order, order_platform, response)
@@ -158,7 +158,7 @@ class OrderSyncService:
                     logger.debug(f"{platform_name}: Order {ext_order.platform_order_id} was duplicate, skipped")
 
             # Step 5 – mark success & update anchor
-            logger.info(f"{platform_name}: Ingestion complete, releasing lock and marking success")
+            logger.debug(f"[DEBUG.INTERNAL_API] {platform_name}: Ingestion complete, releasing lock and marking success")
             await self.sync_repo.release_sync_success(platform_name)
             await self.session.commit()
             logger.info(f"{platform_name}: Sync completed successfully")
@@ -169,7 +169,7 @@ class OrderSyncService:
             logger.exception("=== Sync %s FAILED ===: %s", platform_name, error_msg)
             logger.error(f"{platform_name}: Exception details:", exc_info=True)
             # Re-acquire a fresh session state for the error update
-            logger.info(f"{platform_name}: Releasing lock and marking ERROR state")
+            logger.debug(f"[DEBUG.INTERNAL_API] {platform_name}: Releasing lock and marking ERROR state")
             await self.sync_repo.release_sync_error(platform_name, error_msg)
             await self.session.commit()
             response.success = False
@@ -195,8 +195,8 @@ class OrderSyncService:
         update the IntegrationState anchor.  Deduplication still applies:
         orders already in the database are silently skipped.
         """
-        logger.info(
-            "=== Admin range sync for %s  [%s → %s] ===",
+        logger.debug(
+            "[DEBUG.INTERNAL_API] === Admin range sync for %s  [%s → %s] ===",
             platform_name, since.isoformat(), until.isoformat(),
         )
         response = SyncResponse(platform=platform_name)
@@ -205,7 +205,7 @@ class OrderSyncService:
             external_orders: list[ExternalOrder] = await client.fetch_orders(
                 since=since, until=until,
             )
-            logger.info("%s: Adapter returned %d orders", platform_name, len(external_orders))
+            logger.debug("[DEBUG.EXTERNAL_API] %s: Adapter returned %d orders", platform_name, len(external_orders))
 
             order_platform = _PLATFORM_MAP.get(platform_name)
             if order_platform is None:
@@ -448,8 +448,8 @@ class OrderSyncService:
                 variant_id = listing.variant_id
                 item_status = OrderItemStatus.MATCHED
                 response.auto_matched += 1
-                logger.info(
-                    "Name-matched item '%s' → variant %d via listing '%s'",
+                logger.debug(
+                    "[DEBUG.INTERNAL_API] Name-matched item '%s' → variant %d via listing '%s'",
                     ext_item.title, variant_id, listing.listed_name,
                 )
 

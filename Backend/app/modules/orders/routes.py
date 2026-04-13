@@ -127,7 +127,7 @@ def _build_platform_clients() -> dict[str, BasePlatformClient]:
     else:
         logger.debug("✗ ECWID skipped (ecwid_store_id not set)")
 
-    logger.info(f"Platform clients built: {list(clients.keys())}")
+    logger.debug(f"[DEBUG.INTERNAL_API] Platform clients built: {list(clients.keys())}")
     return clients
 
 
@@ -147,29 +147,29 @@ async def sync_orders(
     Returns per-platform results including counts of new orders,
     auto-matched items, and skipped duplicates.
     """
-    logger.info(f"Sync orders endpoint called: platform={body.platform}")
+    logger.debug(f"[DEBUG.INTERNAL_API] Sync orders endpoint called: platform={body.platform}")
     clients = _build_platform_clients()
-    logger.info(f"Available clients: {list(clients.keys())}")
+    logger.debug(f"[DEBUG.INTERNAL_API] Available clients: {list(clients.keys())}")
 
     if body.platform:
         # Single platform
-        logger.info(f"Single platform sync requested: {body.platform}")
+        logger.debug(f"[DEBUG.INTERNAL_API] Single platform sync requested: {body.platform}")
         if body.platform not in clients:
             logger.error(f"Platform '{body.platform}' not in available clients {list(clients.keys())}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Platform '{body.platform}' is not configured or unknown.",
             )
-        logger.info(f"Starting sync for {body.platform}")
+        logger.debug(f"[DEBUG.INTERNAL_API] Starting sync for {body.platform}")
         result = await service.sync_platform(body.platform, clients[body.platform])
         logger.info(f"Sync result for {body.platform}: success={result.success}, new={result.new_orders}, errors={result.errors}")
         return [result]
 
     # All platforms
-    logger.info(f"Syncing all platforms: {list(clients.keys())}")
+    logger.debug(f"[DEBUG.INTERNAL_API] Syncing all platforms: {list(clients.keys())}")
     results: list[SyncResponse] = []
     for name, client in clients.items():
-        logger.info(f"Starting sync for platform: {name}")
+        logger.debug(f"[DEBUG.INTERNAL_API] Starting sync for platform: {name}")
         result = await service.sync_platform(name, client)
         logger.info(f"Sync result for {name}: success={result.success}, new={result.new_orders}, errors={result.errors}")
         results.append(result)
@@ -192,8 +192,8 @@ async def sync_orders_range(
     a sync lock or update the last-sync anchor. Duplicate orders are
     still safely skipped.
     """
-    logger.info(
-        "Admin range sync: platform=%s  since=%s  until=%s",
+    logger.debug(
+        "[DEBUG.INTERNAL_API] Admin range sync: platform=%s  since=%s  until=%s",
         body.platform, body.since.isoformat(), body.until.isoformat(),
     )
     clients = _build_platform_clients()

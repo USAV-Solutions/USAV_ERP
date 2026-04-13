@@ -111,14 +111,13 @@ def _find_variant_dir(context: VariantImageContext) -> Optional[Path]:
         return None
 
     variant_dir = IMAGES_ROOT / "sku" / context.full_sku
-    logger.info(
-        "[IMAGE_DEBUG] Resolved canonical variant path for sku=%s -> upis_h=%s path=%s",
+    logger.debug("[DEBUG.INTERNAL_API][IMAGE_DEBUG] Resolved canonical variant path for sku=%s -> upis_h=%s path=%s",
         context.full_sku,
         context.generated_upis_h,
         variant_dir,
     )
     if variant_dir.is_dir():
-        logger.info("[IMAGE_SEARCH] Found variant directory: %s", variant_dir)
+        logger.debug("[DEBUG.INTERNAL_API][IMAGE_SEARCH] Found variant directory: %s", variant_dir)
         return variant_dir
 
     logger.warning("[IMAGE_SEARCH] Variant directory not found for sku=%s at %s", context.full_sku, variant_dir)
@@ -138,8 +137,7 @@ def _iter_listing_dirs(variant_dir: Path) -> list[Path]:
         return int(match.group(1)) if match else 999999
 
     sorted_dirs = sorted(listing_dirs, key=listing_sort_key)
-    logger.info(
-        "[IMAGE_DEBUG] Listing directories under %s -> %s",
+    logger.debug("[DEBUG.INTERNAL_API][IMAGE_DEBUG] Listing directories under %s -> %s",
         variant_dir,
         [str(path) for path in sorted_dirs],
     )
@@ -151,7 +149,7 @@ def _get_best_listing(variant_dir: Path) -> Optional[tuple[str, Path]]:
     Find the listing folder with the most .jpg images for a variant directory.
     Returns (listing_name, listing_path) or None.
     """
-    logger.info(f"[IMAGE_SEARCH] Scanning listings in: {variant_dir}")
+    logger.debug(f"[DEBUG.INTERNAL_API][IMAGE_SEARCH] Scanning listings in: {variant_dir}")
     best_listing: Optional[str] = None
     best_path: Optional[Path] = None
     best_count = 0
@@ -170,17 +168,16 @@ def _get_best_listing(variant_dir: Path) -> Optional[tuple[str, Path]]:
             best_listing = entry.name
             best_path = entry
 
-    logger.info(f"[IMAGE_SEARCH] Listing image counts: {listing_counts}")
+    logger.debug(f"[DEBUG.INTERNAL_API][IMAGE_SEARCH] Listing image counts: {listing_counts}")
     
     if best_listing and best_path:
-        logger.info(f"[IMAGE_SEARCH] ✓ Best listing: {best_listing} with {best_count} images")
+        logger.debug(f"[DEBUG.INTERNAL_API][IMAGE_SEARCH] ✓ Best listing: {best_listing} with {best_count} images")
         return best_listing, best_path
 
     if not listing_dirs:
         flat_images = _sorted_images(variant_dir)
         if flat_images:
-            logger.info(
-                "[IMAGE_SEARCH] Using flattened SKU image layout in %s with %s images",
+            logger.debug("[DEBUG.INTERNAL_API][IMAGE_SEARCH] Using flattened SKU image layout in %s with %s images",
                 variant_dir,
                 len(flat_images),
             )
@@ -197,8 +194,7 @@ def _sorted_images(listing_path: Path) -> list[str]:
         if f.is_file() and f.suffix.lower() in IMAGE_EXTENSION
     ]
     sorted_files = sorted(files)
-    logger.info(
-        "[IMAGE_DEBUG] JPG files in listing %s -> %s",
+    logger.debug("[DEBUG.INTERNAL_API][IMAGE_DEBUG] JPG files in listing %s -> %s",
         listing_path,
         sorted_files,
     )
@@ -251,8 +247,7 @@ async def _recompute_thumbnail_url(
     await db.commit()
     context.thumbnail_url = thumbnail_url
 
-    logger.info(
-        "[THUMB_DEBUG] Recomputed thumbnail_url for sku=%s variant_id=%s -> %s",
+    logger.debug("[DEBUG.INTERNAL_API][THUMB_DEBUG] Recomputed thumbnail_url for sku=%s variant_id=%s -> %s",
         context.full_sku,
         context.variant_id,
         thumbnail_url,
@@ -268,41 +263,39 @@ async def _resolve_or_backfill_thumbnail_url(
     Read thumbnail_url from DB when available.
     For legacy rows without thumbnail_url, compute best image URL and persist it.
     """
-    logger.info("[THUMB_TRACE] Resolve requested for sku=%s", sku)
+    logger.debug("[DEBUG.INTERNAL_API][THUMB_TRACE] Resolve requested for sku=%s", sku)
     context = await _get_variant_context(db, sku)
     if context is None:
-        logger.warning("[THUMB_TRACE] Resolve result: SKU not found in DB for sku=%s", sku)
+        logger.debug("[DEBUG.INTERNAL_API][THUMB_TRACE] Resolve result: SKU not found in DB for sku=%s", sku)
         return None, None
 
     if context.thumbnail_url:
-        logger.warning(
-            "[THUMB_TRACE] Cache hit for sku=%s variant_id=%s thumbnail_url=%s",
+        logger.debug("[DEBUG.INTERNAL_API][THUMB_TRACE] Cache hit for sku=%s variant_id=%s thumbnail_url=%s",
             context.full_sku,
             context.variant_id,
             context.thumbnail_url,
         )
         return context, context.thumbnail_url
 
-    logger.warning(
-        "[THUMB_TRACE] Cache miss for sku=%s variant_id=%s -> computing best listing",
+    logger.debug("[DEBUG.INTERNAL_API][THUMB_TRACE] Cache miss for sku=%s variant_id=%s -> computing best listing",
         context.full_sku,
         context.variant_id,
     )
 
     variant_dir = _find_variant_dir(context)
     if not variant_dir:
-        logger.warning("[THUMB_TRACE] Resolve failed: variant_dir not found for sku=%s", context.full_sku)
+        logger.debug("[DEBUG.INTERNAL_API][THUMB_TRACE] Resolve failed: variant_dir not found for sku=%s", context.full_sku)
         return context, None
 
     listing_result = _get_best_listing(variant_dir)
     if not listing_result:
-        logger.warning("[THUMB_TRACE] Resolve failed: no listing folders for sku=%s", context.full_sku)
+        logger.debug("[DEBUG.INTERNAL_API][THUMB_TRACE] Resolve failed: no listing folders for sku=%s", context.full_sku)
         return context, None
 
     listing_name, listing_path = listing_result
     image_files = _sorted_images(listing_path)
     if not image_files:
-        logger.warning("[THUMB_TRACE] Resolve failed: no images in best listing for sku=%s", context.full_sku)
+        logger.debug("[DEBUG.INTERNAL_API][THUMB_TRACE] Resolve failed: no images in best listing for sku=%s", context.full_sku)
         return context, None
 
     thumbnail_url = _build_public_thumbnail_url(context, listing_name, image_files[0])
@@ -315,8 +308,7 @@ async def _resolve_or_backfill_thumbnail_url(
     await db.commit()
     context.thumbnail_url = thumbnail_url
 
-    logger.info(
-        "[THUMB_DEBUG] Backfilled thumbnail_url for sku=%s variant_id=%s -> %s",
+    logger.debug("[DEBUG.INTERNAL_API][THUMB_DEBUG] Backfilled thumbnail_url for sku=%s variant_id=%s -> %s",
         context.full_sku,
         context.variant_id,
         thumbnail_url,
@@ -387,7 +379,7 @@ async def get_sku_images(
     Automatically selects the listing folder with the most images.
     """
     IMAGE_DEBUG_COUNTERS["sku_images"] += 1
-    logger.info(f"[IMAGE_API] GET /{sku} - Fetching image metadata")
+    logger.debug(f"[DEBUG.INTERNAL_API][IMAGE_API] GET /{sku} - Fetching image metadata")
 
     context, resolved_thumbnail_url = await _resolve_or_backfill_thumbnail_url(db, sku)
 
@@ -399,13 +391,12 @@ async def get_sku_images(
         context.thumbnail_url = resolved_thumbnail_url
 
     response = _build_sku_images_response(context)
-    logger.info(
-        "[IMAGE_DEBUG] Response URLs for sku=%s -> thumbnail=%s images=%s",
+    logger.debug("[DEBUG.INTERNAL_API][IMAGE_DEBUG] Response URLs for sku=%s -> thumbnail=%s images=%s",
         context.full_sku,
         response.thumbnail_url,
         [img.url for img in response.images],
     )
-    logger.info(f"[IMAGE_API] GET /{sku} - Returning 200: {len(response.images)} images from {response.listing}")
+    logger.debug(f"[DEBUG.INTERNAL_API][IMAGE_API] GET /{sku} - Returning 200: {len(response.images)} images from {response.listing}")
     return response
 
 @router.get(
@@ -419,8 +410,7 @@ async def get_sku_thumbnail(
 ):
     """Serve the first sorted .jpg from the best listing as the thumbnail."""
     IMAGE_DEBUG_COUNTERS["sku_thumbnail"] += 1
-    logger.warning(
-        "[THUMB_TRACE] ROUTE_HIT method=%s path=%s sku=%s host=%s forwarded_for=%s forwarded_proto=%s user_agent=%s referer=%s",
+    logger.debug("[DEBUG.INTERNAL_API][THUMB_TRACE] ROUTE_HIT method=%s path=%s sku=%s host=%s forwarded_for=%s forwarded_proto=%s user_agent=%s referer=%s",
         request.method,
         request.url.path,
         sku,
@@ -430,8 +420,8 @@ async def get_sku_thumbnail(
         request.headers.get("user-agent"),
         request.headers.get("referer"),
     )
-    logger.info(f"[IMAGE_API] GET /{sku}/thumbnail - Fetching thumbnail")
-    logger.info("[THUMB_DEBUG] Incoming request path: %s", request.url.path)
+    logger.debug(f"[DEBUG.INTERNAL_API][IMAGE_API] GET /{sku}/thumbnail - Fetching thumbnail")
+    logger.debug("[DEBUG.INTERNAL_API][THUMB_DEBUG] Incoming request path: %s", request.url.path)
     if "/api/v1/api/v1/" in request.url.path:
         logger.warning(
             "[THUMB_DEBUG] Detected duplicated API prefix in request path: %s",
@@ -440,8 +430,7 @@ async def get_sku_thumbnail(
 
     context, thumbnail_url = await _resolve_or_backfill_thumbnail_url(db, sku)
 
-    logger.warning(
-        "[THUMB_TRACE] ROUTE_RESOLVE sku=%s context_found=%s thumbnail_url=%s",
+    logger.debug("[DEBUG.INTERNAL_API][THUMB_TRACE] ROUTE_RESOLVE sku=%s context_found=%s thumbnail_url=%s",
         sku,
         context is not None,
         thumbnail_url,
@@ -455,8 +444,7 @@ async def get_sku_thumbnail(
         logger.warning(f"[IMAGE_API] GET /{sku}/thumbnail - Returning 404: No thumbnail found")
         raise HTTPException(status_code=404, detail=f"No thumbnail found for SKU: {sku}")
 
-    logger.info(
-        "[IMAGE_API] GET /%s/thumbnail - Returning redirect to %s",
+    logger.debug("[DEBUG.INTERNAL_API][IMAGE_API] GET /%s/thumbnail - Returning redirect to %s",
         context.full_sku,
         thumbnail_url,
     )
@@ -479,8 +467,8 @@ async def get_sku_image_file(
 ):
     """Serve a specific image file from the best listing of a SKU."""
     IMAGE_DEBUG_COUNTERS["sku_file"] += 1
-    logger.info(f"[IMAGE_API] GET /{sku}/file/{filename} - Fetching image file")
-    logger.info("[IMAGE_DEBUG] Incoming request path: %s", request.url.path)
+    logger.debug(f"[DEBUG.INTERNAL_API][IMAGE_API] GET /{sku}/file/{filename} - Fetching image file")
+    logger.debug("[DEBUG.INTERNAL_API][IMAGE_DEBUG] Incoming request path: %s", request.url.path)
     if "/api/v1/api/v1/" in request.url.path:
         logger.warning(
             "[IMAGE_DEBUG] Detected duplicated API prefix in request path: %s",
@@ -506,8 +494,7 @@ async def get_sku_image_file(
 
     listing_name, listing_path = result
     file_path = listing_path / filename
-    logger.info(
-        "[IMAGE_DEBUG] Checking requested JPG path for sku=%s listing=%s filename=%s -> %s",
+    logger.debug("[DEBUG.INTERNAL_API][IMAGE_DEBUG] Checking requested JPG path for sku=%s listing=%s filename=%s -> %s",
         sku,
         listing_name,
         filename,
@@ -525,7 +512,7 @@ async def get_sku_image_file(
         )
         raise HTTPException(status_code=404, detail=f"Image not found: {filename}")
 
-    logger.info(f"[IMAGE_API] GET /{sku}/file/{filename} - Returning 200: {file_path}")
+    logger.debug(f"[DEBUG.INTERNAL_API][IMAGE_API] GET /{sku}/file/{filename} - Returning 200: {file_path}")
     return FileResponse(
         path=str(file_path),
         media_type=_guess_media_type(file_path),
@@ -547,7 +534,7 @@ async def get_batch_thumbnails(
     """
     IMAGE_DEBUG_COUNTERS["batch_thumbnails"] += 1
     sku_list = [s.strip() for s in skus.split(",") if s.strip()]
-    logger.info(f"[IMAGE_API] GET /batch/thumbnails - Fetching thumbnails for {len(sku_list)} SKUs")
+    logger.debug(f"[DEBUG.INTERNAL_API][IMAGE_API] GET /batch/thumbnails - Fetching thumbnails for {len(sku_list)} SKUs")
     result: dict[str, Optional[str]] = {}
 
     for sku in sku_list:
@@ -559,7 +546,7 @@ async def get_batch_thumbnails(
         result[context.full_sku] = thumbnail_url
 
     found_count = sum(1 for v in result.values() if v is not None)
-    logger.info(f"[IMAGE_API] GET /batch/thumbnails - Returning 200: {found_count}/{len(sku_list)} thumbnails found")
+    logger.debug(f"[DEBUG.INTERNAL_API][IMAGE_API] GET /batch/thumbnails - Returning 200: {found_count}/{len(sku_list)} thumbnails found")
     return result
 
 
@@ -616,8 +603,7 @@ async def backfill_missing_thumbnail_urls(
             failed += 1
             failed_skus.append(sku)
 
-    logger.warning(
-        "[THUMB_TRACE] BULK_BACKFILL completed processed=%s updated=%s failed=%s limit=%s",
+    logger.debug("[DEBUG.INTERNAL_API][THUMB_TRACE] BULK_BACKFILL completed processed=%s updated=%s failed=%s limit=%s",
         processed,
         updated,
         failed,
@@ -787,3 +773,4 @@ async def clear_sku_listing(
         "cleared": deleted,
         "thumbnail_url": context.thumbnail_url,
     }
+

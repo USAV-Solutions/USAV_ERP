@@ -1776,7 +1776,7 @@ def _build_ebay_purchase_client(source: PurchaseFileImportSource) -> EbayClient:
         PurchaseFileImportSource.EBAY_DRAGON: "DRAGON",
     }
 
-    logger.info("eBay purchase import client build started | source=%s", source.value)
+    logger.debug("[DEBUG.INTERNAL_API] eBay purchase import client build started | source=%s", source.value)
 
     refresh_token = refresh_token_map.get(source)
     if not refresh_token:
@@ -1806,8 +1806,8 @@ def _build_ebay_purchase_client(source: PurchaseFileImportSource) -> EbayClient:
         refresh_token=refresh_token,
         sandbox=settings.ebay_sandbox,
     )
-    logger.info(
-        "eBay purchase import client build complete | source=%s store=%s sandbox=%s trading_api=%s oauth_api=%s",
+    logger.debug(
+        "[DEBUG.INTERNAL_API] eBay purchase import client build complete | source=%s store=%s sandbox=%s trading_api=%s oauth_api=%s",
         source.value,
         client.store_name,
         client.sandbox,
@@ -1826,8 +1826,8 @@ async def _import_ebay_purchase_api(
     po_item_repo: PurchaseOrderItemRepository,
     db: AsyncSession,
 ) -> PurchaseFileImportResponse:
-    logger.info(
-        "eBay purchase import started | source=%s order_date_from=%s order_date_to=%s",
+    logger.debug(
+        "[DEBUG.INTERNAL_API] eBay purchase import started | source=%s order_date_from=%s order_date_to=%s",
         source.value,
         order_date_from.isoformat(),
         order_date_to.isoformat(),
@@ -1849,8 +1849,8 @@ async def _import_ebay_purchase_api(
     since_dt = datetime.combine(order_date_from, datetime.min.time())
     until_dt = datetime.combine(order_date_to, datetime.max.time())
 
-    logger.info(
-        "eBay purchase import connecting to APIs | source=%s trading_api=%s oauth_api=%s since=%s until=%s",
+    logger.debug(
+        "[DEBUG.EXTERNAL_API] eBay purchase import connecting to APIs | source=%s trading_api=%s oauth_api=%s since=%s until=%s",
         source.value,
         f"{client.base_url}/ws/api.dll",
         client.oauth_url,
@@ -1859,10 +1859,10 @@ async def _import_ebay_purchase_api(
     )
 
     try:
-        logger.info("eBay purchase import fetch phase started | source=%s", source.value)
+        logger.debug("[DEBUG.EXTERNAL_API] eBay purchase import fetch phase started | source=%s", source.value)
         ebay_orders = await client.fetch_buying_orders_xml(since=since_dt, until=until_dt)
-        logger.info(
-            "eBay purchase import fetch phase complete | source=%s orders_fetched=%s",
+        logger.debug(
+            "[DEBUG.EXTERNAL_API] eBay purchase import fetch phase complete | source=%s orders_fetched=%s",
             source.value,
             len(ebay_orders),
         )
@@ -2076,8 +2076,8 @@ async def import_purchasing_from_ebay_api(
     po_item_repo: PurchaseOrderItemRepository = Depends(get_purchase_order_item_repo),
     db: AsyncSession = Depends(get_db),
 ):
-    logger.info(
-        "eBay purchase import endpoint called | source=%s order_date_from=%s order_date_to=%s",
+    logger.debug(
+        "[DEBUG.INTERNAL_API] eBay purchase import endpoint called | source=%s order_date_from=%s order_date_to=%s",
         source.value,
         order_date_from.isoformat() if order_date_from else None,
         order_date_to.isoformat() if order_date_to else None,

@@ -125,11 +125,11 @@ async def _get_seatalk_app_token() -> str:
     if (_seatalk_token_cache["token"] and 
         _seatalk_token_cache["expires_at"] and 
         datetime.now().timestamp() < _seatalk_token_cache["expires_at"]):
-        logger.info("Using cached SeaTalk app access token")
+        logger.debug("[DEBUG.EXTERNAL_API] Using cached SeaTalk app access token")
         return _seatalk_token_cache["token"]
     
     # Request new token
-    logger.info("Requesting new SeaTalk app access token")
+    logger.debug("[DEBUG.EXTERNAL_API] Requesting new SeaTalk app access token")
     async with httpx.AsyncClient() as client:
         response = await client.post(
             f"{settings.seatalk_api_base_url}/auth/app_access_token",
@@ -139,7 +139,7 @@ async def _get_seatalk_app_token() -> str:
             },
         )
         
-        logger.info(f"SeaTalk app token response status: {response.status_code}")
+        logger.debug(f"[DEBUG.EXTERNAL_API] SeaTalk app token response status: {response.status_code}")
         if response.status_code != 200:
             logger.error(f"Failed to obtain SeaTalk app access token: {response.text}")
             raise HTTPException(
@@ -148,7 +148,7 @@ async def _get_seatalk_app_token() -> str:
             )
         
         data = SeaTalkAppTokenResponse(**response.json())
-        logger.info(f"SeaTalk app token response code: {data.code}")
+        logger.debug(f"[DEBUG.EXTERNAL_API] SeaTalk app token response code: {data.code}")
         
         if data.code != 0 or not data.app_access_token:
             logger.error(f"SeaTalk API error: code {data.code}")
@@ -163,7 +163,7 @@ async def _get_seatalk_app_token() -> str:
             datetime.now().timestamp() + (data.expire or 7200) - 300
         )
         
-        logger.info("SeaTalk app access token obtained and cached")
+        logger.debug("[DEBUG.EXTERNAL_API] SeaTalk app access token obtained and cached")
         return data.app_access_token
 
 
@@ -171,7 +171,7 @@ async def _get_seatalk_employee(code: str) -> SeaTalkCodeResponse:
     """
     Exchange authorization code for employee information.
     """
-    logger.info(f"Getting SeaTalk employee with code: {code[:10]}...")
+    logger.debug(f"[DEBUG.EXTERNAL_API] Getting SeaTalk employee with code: {code[:10]}...")
     app_token = await _get_seatalk_app_token()
     
     async with httpx.AsyncClient() as client:
@@ -181,7 +181,7 @@ async def _get_seatalk_employee(code: str) -> SeaTalkCodeResponse:
             headers={"Authorization": f"Bearer {app_token}"},
         )
         
-        logger.info(f"SeaTalk code2employee response status: {response.status_code}")
+        logger.debug(f"[DEBUG.EXTERNAL_API] SeaTalk code2employee response status: {response.status_code}")
         if response.status_code != 200:
             logger.error(f"Failed to verify SeaTalk authorization code: {response.text}")
             raise HTTPException(
@@ -190,7 +190,7 @@ async def _get_seatalk_employee(code: str) -> SeaTalkCodeResponse:
             )
         
         data = SeaTalkCodeResponse(**response.json())
-        logger.info(f"SeaTalk code2employee response code: {data.code}")
+        logger.debug(f"[DEBUG.EXTERNAL_API] SeaTalk code2employee response code: {data.code}")
         
         if data.code != 0 or not data.employee:
             logger.error(f"SeaTalk authentication failed: code {data.code}")
@@ -214,10 +214,10 @@ async def seatalk_oauth_callback(
     Exchanges authorization code for user identity and creates/links user account.
     Returns JWT access token for the authenticated user.
     """
-    logger.info(f"SeaTalk callback received - code: {code[:10]}..., state: {state}")
+    logger.debug(f"[DEBUG.INTERNAL_API] SeaTalk callback received - code: {code[:10]}..., state: {state}")
     
     # Step 1: Verify code and get employee data from SeaTalk
-    logger.info("Exchanging code for employee data from SeaTalk API")
+    logger.debug("[DEBUG.EXTERNAL_API] Exchanging code for employee data from SeaTalk API")
     seatalk_response = await _get_seatalk_employee(code)
     employee = seatalk_response.employee
     
@@ -234,16 +234,16 @@ async def seatalk_oauth_callback(
     user: Optional[User] = None
     
     # Step 2: Check if user exists by SeaTalk ID
-    logger.info(f"Checking if user exists with SeaTalk ID: {employee.employee_code}")
+    logger.debug(f"[DEBUG.INTERNAL_API] Checking if user exists with SeaTalk ID: {employee.employee_code}")
     user = await repo.get_by_seatalk_id(employee.employee_code)
     
     if not user and employee.email:
         # Step 3: Check if user exists by email and link SeaTalk ID
-        logger.info(f"User not found by SeaTalk ID, checking by email: {employee.email}")
+        logger.debug(f"[DEBUG.INTERNAL_API] User not found by SeaTalk ID, checking by email: {employee.email}")
         user = await repo.get_by_email(employee.email)
         if user:
             # Link SeaTalk ID to existing user
-            logger.info(f"Linking SeaTalk ID to existing user: {user.username}")
+            logger.debug(f"[DEBUG.INTERNAL_API] Linking SeaTalk ID to existing user: {user.username}")
             user.seatalk_id = employee.employee_code
             if not user.full_name and employee.name:
                 user.full_name = employee.name
@@ -482,3 +482,4 @@ async def activate_user(
     
     user = await repo.update(user, {"is_active": True})
     return UserResponse.model_validate(user)
+

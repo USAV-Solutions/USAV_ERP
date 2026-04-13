@@ -118,26 +118,25 @@ async def _load_target_variants(db: AsyncSession, data: ZohoBulkSyncRequest) -> 
 
 def _resolve_thumbnail_path(thumbnail_url: str | None) -> Path | None:
     if not thumbnail_url:
-        logger.info("Zoho image resolve thumbnail: no thumbnail_url provided")
+        logger.debug("[DEBUG.INTERNAL_API] Zoho image resolve thumbnail: no thumbnail_url provided")
         return None
     prefix = "/product-images/sku/"
     if not thumbnail_url.startswith(prefix):
-        logger.info("Zoho image resolve thumbnail: unexpected URL format | thumbnail_url=%s", thumbnail_url)
+        logger.debug("[DEBUG.INTERNAL_API] Zoho image resolve thumbnail: unexpected URL format | thumbnail_url=%s", thumbnail_url)
         return None
     relative = thumbnail_url[len(prefix):].lstrip("/")
     full_path = Path(settings.product_images_path) / "sku" / relative
     if full_path.is_file():
-        logger.info("Zoho image resolve thumbnail: found file | path=%s", full_path)
+        logger.debug("[DEBUG.INTERNAL_API] Zoho image resolve thumbnail: found file | path=%s", full_path)
         return full_path
-    logger.info("Zoho image resolve thumbnail: file missing | path=%s", full_path)
+    logger.debug("[DEBUG.INTERNAL_API] Zoho image resolve thumbnail: file missing | path=%s", full_path)
     return None
 
 
 def _resolve_best_listing_image_paths(variant: ProductVariant) -> list[Path]:
     variant_dir = Path(settings.product_images_path) / "sku" / variant.full_sku
     if not variant_dir.is_dir():
-        logger.info(
-            "Zoho image resolve best-listing: variant dir not found | variant_id=%s sku=%s path=%s",
+        logger.debug("[DEBUG.INTERNAL_API] Zoho image resolve best-listing: variant dir not found | variant_id=%s sku=%s path=%s",
             variant.id,
             variant.full_sku,
             variant_dir,
@@ -149,8 +148,7 @@ def _resolve_best_listing_image_paths(variant: ProductVariant) -> list[Path]:
         for entry in variant_dir.iterdir()
         if entry.is_dir() and entry.name.startswith("listing-")
     ]
-    logger.info(
-        "Zoho image resolve best-listing: listing dirs discovered | variant_id=%s sku=%s count=%s dirs=%s",
+    logger.debug("[DEBUG.INTERNAL_API] Zoho image resolve best-listing: listing dirs discovered | variant_id=%s sku=%s count=%s dirs=%s",
         variant.id,
         variant.full_sku,
         len(listing_dirs),
@@ -169,8 +167,7 @@ def _resolve_best_listing_image_paths(variant: ProductVariant) -> list[Path]:
             for file in listing_dir.iterdir()
             if file.is_file() and file.suffix.lower() in _IMAGE_EXTENSIONS
         )
-        logger.info(
-            "Zoho image resolve best-listing: listing image count | variant_id=%s sku=%s listing=%s image_count=%s",
+        logger.debug("[DEBUG.INTERNAL_API] Zoho image resolve best-listing: listing image count | variant_id=%s sku=%s listing=%s image_count=%s",
             variant.id,
             variant.full_sku,
             listing_dir.name,
@@ -181,8 +178,7 @@ def _resolve_best_listing_image_paths(variant: ProductVariant) -> list[Path]:
             best_listing_path = listing_dir
 
     if best_listing_path is None:
-        logger.info(
-            "Zoho image resolve best-listing: no eligible listing with images | variant_id=%s sku=%s",
+        logger.debug("[DEBUG.INTERNAL_API] Zoho image resolve best-listing: no eligible listing with images | variant_id=%s sku=%s",
             variant.id,
             variant.full_sku,
         )
@@ -194,16 +190,14 @@ def _resolve_best_listing_image_paths(variant: ProductVariant) -> list[Path]:
         if file.is_file() and file.suffix.lower() in _IMAGE_EXTENSIONS
     )
     if not images:
-        logger.info(
-            "Zoho image resolve best-listing: best listing has no supported images | variant_id=%s sku=%s listing=%s",
+        logger.debug("[DEBUG.INTERNAL_API] Zoho image resolve best-listing: best listing has no supported images | variant_id=%s sku=%s listing=%s",
             variant.id,
             variant.full_sku,
             best_listing_path.name,
         )
         return []
 
-    logger.info(
-        "Zoho image source selected from best listing | variant_id=%s sku=%s listing=%s total_images_in_listing=%s images=%s",
+    logger.debug("[DEBUG.INTERNAL_API] Zoho image source selected from best listing | variant_id=%s sku=%s listing=%s total_images_in_listing=%s images=%s",
         variant.id,
         variant.full_sku,
         best_listing_path.name,
@@ -216,8 +210,7 @@ def _resolve_best_listing_image_paths(variant: ProductVariant) -> list[Path]:
 def _resolve_flattened_image_paths(variant: ProductVariant) -> list[Path]:
     sku_dir = Path(settings.product_images_path) / "sku" / variant.full_sku
     if not sku_dir.is_dir():
-        logger.info(
-            "Zoho image resolve flattened: sku dir not found | variant_id=%s sku=%s path=%s",
+        logger.debug("[DEBUG.INTERNAL_API] Zoho image resolve flattened: sku dir not found | variant_id=%s sku=%s path=%s",
             variant.id,
             variant.full_sku,
             sku_dir,
@@ -230,15 +223,13 @@ def _resolve_flattened_image_paths(variant: ProductVariant) -> list[Path]:
         if file.is_file() and file.suffix.lower() in _IMAGE_EXTENSIONS and file.name.startswith("img-")
     )
     if not images:
-        logger.info(
-            "Zoho image resolve flattened: no supported images | variant_id=%s sku=%s",
+        logger.debug("[DEBUG.INTERNAL_API] Zoho image resolve flattened: no supported images | variant_id=%s sku=%s",
             variant.id,
             variant.full_sku,
         )
         return []
 
-    logger.info(
-        "Zoho image source selected from flattened SKU folder | variant_id=%s sku=%s count=%s images=%s",
+    logger.debug("[DEBUG.INTERNAL_API] Zoho image source selected from flattened SKU folder | variant_id=%s sku=%s count=%s images=%s",
         variant.id,
         variant.full_sku,
         len(images),
@@ -250,8 +241,7 @@ def _resolve_flattened_image_paths(variant: ProductVariant) -> list[Path]:
 def _resolve_sync_image_paths(variant: ProductVariant) -> list[Path]:
     best_listing_images = _resolve_best_listing_image_paths(variant)
     if best_listing_images:
-        logger.info(
-            "Zoho image resolve final: using best-listing images | variant_id=%s sku=%s count=%s",
+        logger.debug("[DEBUG.INTERNAL_API] Zoho image resolve final: using best-listing images | variant_id=%s sku=%s count=%s",
             variant.id,
             variant.full_sku,
             len(best_listing_images),
@@ -260,8 +250,7 @@ def _resolve_sync_image_paths(variant: ProductVariant) -> list[Path]:
 
     flattened_images = _resolve_flattened_image_paths(variant)
     if flattened_images:
-        logger.info(
-            "Zoho image resolve final: using flattened SKU images | variant_id=%s sku=%s count=%s",
+        logger.debug("[DEBUG.INTERNAL_API] Zoho image resolve final: using flattened SKU images | variant_id=%s sku=%s count=%s",
             variant.id,
             variant.full_sku,
             len(flattened_images),
@@ -270,8 +259,7 @@ def _resolve_sync_image_paths(variant: ProductVariant) -> list[Path]:
 
     thumbnail_image = _resolve_thumbnail_path(variant.thumbnail_url)
     if thumbnail_image:
-        logger.info(
-            "Zoho image source fallback to thumbnail | variant_id=%s sku=%s thumbnail_path=%s",
+        logger.debug("[DEBUG.INTERNAL_API] Zoho image source fallback to thumbnail | variant_id=%s sku=%s thumbnail_path=%s",
             variant.id,
             variant.full_sku,
             thumbnail_image,
@@ -358,8 +346,7 @@ def _build_item_payload(variant: ProductVariant) -> dict:
 def _debug_sync_context(variant: ProductVariant, payload: dict, include_images: bool) -> None:
     identity = variant.identity
     family = identity.family if identity else None
-    logger.info(
-        "Zoho single-sync payload prepared | variant_id=%s sku=%s identity_id=%s identity_type=%s include_images=%s has_thumbnail=%s payload=%s",
+    logger.debug("[DEBUG.EXTERNAL_PAYLOAD] Zoho single-sync payload prepared | variant_id=%s sku=%s identity_id=%s identity_type=%s include_images=%s has_thumbnail=%s payload=%s",
         variant.id,
         variant.full_sku,
         variant.identity_id,
@@ -369,8 +356,7 @@ def _debug_sync_context(variant: ProductVariant, payload: dict, include_images: 
         payload,
     )
     if family:
-        logger.info(
-            "Zoho single-sync family/identity context | variant_id=%s product_id=%s base_name=%s description_len=%s dimensions=(%s,%s,%s) weight=%s",
+        logger.debug("[DEBUG.INTERNAL_API] Zoho single-sync family/identity context | variant_id=%s product_id=%s base_name=%s description_len=%s dimensions=(%s,%s,%s) weight=%s",
             variant.id,
             family.product_id,
             family.base_name,
@@ -393,8 +379,7 @@ async def _sync_single_standard_variant(
     payload = _build_item_payload(variant)
     _debug_sync_context(variant=variant, payload=payload, include_images=data.include_images)
     item_name = payload.get("name", variant.full_sku)
-    logger.info(
-        "Zoho standard item sync call | variant_id=%s sku=%s name=%s rate=%s extras=%s",
+    logger.debug("[DEBUG.EXTERNAL_PAYLOAD] Zoho standard item sync call | variant_id=%s sku=%s name=%s rate=%s extras=%s",
         variant.id,
         variant.full_sku,
         item_name,
@@ -414,8 +399,8 @@ async def _sync_single_standard_variant(
     if not zoho_item_id:
         raise ValueError("Zoho response missing item_id")
 
-    logger.info(
-        "Zoho standard item sync success | variant_id=%s sku=%s zoho_item_id=%s",
+    logger.debug(
+        "[DEBUG.EXTERNAL_API] Zoho standard item sync success | variant_id=%s sku=%s zoho_item_id=%s",
         variant.id,
         variant.full_sku,
         zoho_item_id,
@@ -426,8 +411,7 @@ async def _sync_single_standard_variant(
         image_paths = _resolve_sync_image_paths(variant)
         if image_paths:
             for image_path in image_paths:
-                logger.info(
-                    "Zoho image upload attempt (standard) | variant_id=%s sku=%s zoho_item_id=%s image_path=%s",
+                logger.debug("[DEBUG.EXTERNAL_PAYLOAD] Zoho image upload attempt (standard) | variant_id=%s sku=%s zoho_item_id=%s image_path=%s",
                     variant.id,
                     variant.full_sku,
                     zoho_item_id,
@@ -435,8 +419,7 @@ async def _sync_single_standard_variant(
                 )
                 await zoho_client.upload_item_image(zoho_item_id, image_path)
             image_uploaded = True
-            logger.info(
-                "Zoho image upload success (standard) | variant_id=%s sku=%s zoho_item_id=%s uploaded_count=%s",
+            logger.debug("[DEBUG.EXTERNAL_API] Zoho image upload success (standard) | variant_id=%s sku=%s zoho_item_id=%s uploaded_count=%s",
                 variant.id,
                 variant.full_sku,
                 zoho_item_id,
@@ -457,8 +440,8 @@ async def _sync_single_standard_variant(
     if previous_zoho_item_id and previous_zoho_item_id != zoho_item_id:
         try:
             await zoho_client.mark_item_inactive(previous_zoho_item_id)
-            logger.info(
-                "Zoho standard item cleanup: previous item marked inactive | variant_id=%s old_zoho_item_id=%s new_zoho_item_id=%s",
+            logger.debug(
+                "[DEBUG.EXTERNAL_API] Zoho standard item cleanup: previous item marked inactive | variant_id=%s old_zoho_item_id=%s new_zoho_item_id=%s",
                 variant.id,
                 previous_zoho_item_id,
                 zoho_item_id,
@@ -536,8 +519,8 @@ async def _sync_single_composite_variant(
                 child_variant.zoho_item_id = child_item_id
                 child_variant.zoho_sync_status = ZohoSyncStatus.SYNCED
                 child_variant.zoho_last_synced_at = datetime.now()
-                logger.info(
-                    "Zoho composite dependency resolved via SKU lookup | child_identity_id=%s child_variant_id=%s sku=%s zoho_item_id=%s",
+                logger.debug(
+                    "[DEBUG.EXTERNAL_API] Zoho composite dependency resolved via SKU lookup | child_identity_id=%s child_variant_id=%s sku=%s zoho_item_id=%s",
                     component.child_identity_id,
                     child_variant.id,
                     child_variant.full_sku,
@@ -560,8 +543,8 @@ async def _sync_single_composite_variant(
     _debug_sync_context(variant=variant, payload=payload, include_images=data.include_images)
 
     item_name = payload.get("name", variant.full_sku)
-    logger.info(
-        "Zoho composite item sync call | variant_id=%s sku=%s name=%s rate=%s component_count=%s extras=%s",
+    logger.debug(
+        "[DEBUG.EXTERNAL_PAYLOAD] Zoho composite item sync call | variant_id=%s sku=%s name=%s rate=%s component_count=%s extras=%s",
         variant.id,
         variant.full_sku,
         item_name,
@@ -585,8 +568,8 @@ async def _sync_single_composite_variant(
     if not composite_item_id:
         raise ValueError("Zoho response missing composite item id")
 
-    logger.info(
-        "Zoho composite item sync success | variant_id=%s sku=%s zoho_item_id=%s",
+    logger.debug(
+        "[DEBUG.EXTERNAL_API] Zoho composite item sync success | variant_id=%s sku=%s zoho_item_id=%s",
         variant.id,
         variant.full_sku,
         composite_item_id,
@@ -597,8 +580,8 @@ async def _sync_single_composite_variant(
         image_paths = _resolve_sync_image_paths(variant)
         if image_paths:
             for image_path in image_paths:
-                logger.info(
-                    "Zoho image upload attempt (composite) | variant_id=%s sku=%s zoho_item_id=%s image_path=%s",
+                logger.debug(
+                    "[DEBUG.EXTERNAL_PAYLOAD] Zoho image upload attempt (composite) | variant_id=%s sku=%s zoho_item_id=%s image_path=%s",
                     variant.id,
                     variant.full_sku,
                     composite_item_id,
@@ -606,8 +589,8 @@ async def _sync_single_composite_variant(
                 )
                 await zoho_client.upload_item_image(composite_item_id, image_path)
             image_uploaded = True
-            logger.info(
-                "Zoho image upload success (composite) | variant_id=%s sku=%s zoho_item_id=%s uploaded_count=%s",
+            logger.debug(
+                "[DEBUG.EXTERNAL_API] Zoho image upload success (composite) | variant_id=%s sku=%s zoho_item_id=%s uploaded_count=%s",
                 variant.id,
                 variant.full_sku,
                 composite_item_id,
@@ -628,8 +611,8 @@ async def _sync_single_composite_variant(
     if previous_zoho_item_id and previous_zoho_item_id != composite_item_id:
         try:
             await zoho_client.mark_item_inactive(previous_zoho_item_id)
-            logger.info(
-                "Zoho composite cleanup: previous item marked inactive | variant_id=%s old_zoho_item_id=%s new_zoho_item_id=%s",
+            logger.debug(
+                "[DEBUG.EXTERNAL_API] Zoho composite cleanup: previous item marked inactive | variant_id=%s old_zoho_item_id=%s new_zoho_item_id=%s",
                 variant.id,
                 previous_zoho_item_id,
                 composite_item_id,
@@ -714,8 +697,8 @@ async def sync_single_item_to_zoho(
     identity_type = variant.identity.type if variant.identity else None
     is_composite = data.include_composites and identity_type in {IdentityType.B, IdentityType.K}
 
-    logger.info(
-        "Zoho single-sync request | variant_id=%s sku=%s include_images=%s include_composites=%s force_resync=%s detected_composite=%s",
+    logger.debug(
+        "[DEBUG.INTERNAL_API] Zoho single-sync request | variant_id=%s sku=%s include_images=%s include_composites=%s force_resync=%s detected_composite=%s",
         variant.id,
         variant.full_sku,
         data.include_images,
@@ -1315,3 +1298,4 @@ async def stop_zoho_bulk_sync(
             _CURRENT_JOB.status = "stopping"
 
         return _as_progress_response(_CURRENT_JOB)
+

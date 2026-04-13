@@ -174,8 +174,8 @@ class EbayClient(BasePlatformClient):
                         seconds=expires_in - 300
                     )
 
-                    logger.info(
-                        f"eBay {self.store_name} access token refreshed "
+                    logger.debug(
+                        f"[DEBUG.EXTERNAL_API] eBay {self.store_name} access token refreshed "
                         f"successfully (attempt {attempt})"
                     )
                     return True
@@ -287,8 +287,8 @@ class EbayClient(BasePlatformClient):
 
             order_nodes = root.findall(".//eb:OrderArray/eb:Order", _TRADING_NS)
             if not order_nodes:
-                logger.info(
-                    "eBay %s GetOrders page=%s has no Order nodes; stopping pagination",
+                logger.debug(
+                    "[DEBUG.EXTERNAL_API] eBay %s GetOrders page=%s has no Order nodes; stopping pagination",
                     self.store_name,
                     page,
                 )
@@ -309,8 +309,8 @@ class EbayClient(BasePlatformClient):
                 )
             )
             if page_signature and page_signature == last_page_signature:
-                logger.info(
-                    "eBay %s GetOrders repeated page signature at page %s; stopping pagination",
+                logger.debug(
+                    "[DEBUG.EXTERNAL_API] eBay %s GetOrders repeated page signature at page %s; stopping pagination",
                     self.store_name,
                     page,
                 )
@@ -428,9 +428,9 @@ class EbayClient(BasePlatformClient):
                     page_items_added += 1
                     total_items_added += 1
 
-            logger.info(
+            logger.debug(
                 (
-                    "eBay %s GetOrders page=%s stats: orders=%s, items_added=%s, "
+                    "[DEBUG.EXTERNAL_API] eBay %s GetOrders page=%s stats: orders=%s, items_added=%s, "
                     "skip_missing_order_id=%s, skip_missing_created_at=%s, skip_out_of_range=%s, "
                     "skip_deduped=%s, unique_orders_so_far=%s"
                 ),
@@ -446,8 +446,8 @@ class EbayClient(BasePlatformClient):
             )
 
             if page_added == 0:
-                logger.info(
-                    "eBay %s GetOrders page=%s added zero items; stopping pagination",
+                logger.debug(
+                    "[DEBUG.EXTERNAL_API] eBay %s GetOrders page=%s added zero items; stopping pagination",
                     self.store_name,
                     page,
                 )
@@ -470,9 +470,9 @@ class EbayClient(BasePlatformClient):
                     for item in order.get("items", [])
                 ) + float(order.get("shipping_amount", 0))
 
-        logger.info(
+        logger.debug(
             (
-                "eBay %s GetOrders summary: unique_orders=%s, items_added=%s, "
+                "[DEBUG.EXTERNAL_API] eBay %s GetOrders summary: unique_orders=%s, items_added=%s, "
                 "orders_seen=%s, skip_missing_order_id=%s, skip_missing_created_at=%s, "
                 "skip_out_of_range=%s, skip_deduped=%s, since=%s, until=%s"
             ),
@@ -594,8 +594,8 @@ class EbayClient(BasePlatformClient):
         start_time = datetime.combine(order_date, datetime.min.time())
         end_time = start_time + timedelta(days=1)
         
-        logger.info(
-            f"Fetching eBay {self.store_name} orders from {start_time} to {end_time}"
+        logger.debug(
+            f"[DEBUG.EXTERNAL_API] Fetching eBay {self.store_name} orders from {start_time} to {end_time}"
         )
         
         return await self.fetch_orders(since=start_time, until=end_time)
@@ -619,7 +619,7 @@ class EbayClient(BasePlatformClient):
         Returns:
             List of ExternalOrder objects
         """
-        logger.info(f"eBay {self.store_name} fetch_orders called: since={since}, until={until}, status={status}")
+        logger.debug(f"[DEBUG.EXTERNAL_API] eBay {self.store_name} fetch_orders called: since={since}, until={until}, status={status}")
         
         if not self.is_configured:
             message = f"eBay {self.store_name} credentials not configured"
@@ -672,7 +672,7 @@ class EbayClient(BasePlatformClient):
                     params["filter"] = filter_param
                 params["limit"] = 200  # eBay max is 200 per page
                 
-                logger.info(f"eBay {self.store_name}: Starting order fetch with filter={filter_param}")
+                logger.debug(f"[DEBUG.EXTERNAL_API] eBay {self.store_name}: Starting order fetch with filter={filter_param}")
                 orders = []
                 offset = 0
                 
@@ -713,7 +713,7 @@ class EbayClient(BasePlatformClient):
                         logger.debug(f"eBay {self.store_name}: Reached end of results")
                         break
                 
-                logger.info(f"eBay {self.store_name}: Successfully fetched {len(orders)} orders")
+                logger.debug(f"[DEBUG.EXTERNAL_API] eBay {self.store_name}: Successfully fetched {len(orders)} orders")
                 return orders
                 
         except httpx.HTTPStatusError as e:
@@ -733,7 +733,7 @@ class EbayClient(BasePlatformClient):
         
         Endpoint: GET /sell/fulfillment/v1/order/{orderId}
         """
-        logger.info(f"Fetching eBay {self.store_name} order: {order_id}")
+        logger.debug(f"[DEBUG.EXTERNAL_API] Fetching eBay {self.store_name} order: {order_id}")
         
         # TODO: Implement actual API call
         return None
@@ -744,7 +744,7 @@ class EbayClient(BasePlatformClient):
         
         Uses the Inventory API: PUT /sell/inventory/v1/inventory_item/{sku}
         """
-        logger.info(f"Updating eBay {self.store_name} stock for {len(updates)} items")
+        logger.debug(f"[DEBUG.EXTERNAL_API] Updating eBay {self.store_name} stock for {len(updates)} items")
         
         results = []
         for update in updates:
@@ -768,7 +768,7 @@ class EbayClient(BasePlatformClient):
         
         Endpoint: POST /sell/fulfillment/v1/order/{orderId}/shipping_fulfillment
         """
-        logger.info(f"Updating tracking for eBay order {order_id}: {carrier} {tracking_number}")
+        logger.debug(f"[DEBUG.EXTERNAL_API] Updating tracking for eBay order {order_id}: {carrier} {tracking_number}")
         
         # TODO: Implement actual API call
         return False

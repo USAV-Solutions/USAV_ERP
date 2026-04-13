@@ -161,8 +161,8 @@ class ZohoClient:
             if isinstance(data_payload, dict):
                 payload_keys = list(data_payload.keys())
 
-        logger.info(
-            "Zoho request | method=%s endpoint=%s api=%s params=%s payload_mode=%s payload_keys=%s",
+        logger.debug(
+            "[DEBUG.EXTERNAL_API] Zoho request | method=%s endpoint=%s api=%s params=%s payload_mode=%s payload_keys=%s",
             method,
             endpoint,
             api,
@@ -226,7 +226,7 @@ class ZohoClient:
     
     async def create_item(self, item_data: dict) -> dict:
         """Create an item in Zoho Inventory."""
-        logger.info("Zoho create_item payload | sku=%s payload=%s", item_data.get("sku"), item_data)
+        logger.debug("[DEBUG.EXTERNAL_PAYLOAD] Zoho create_item payload | sku=%s payload=%s", item_data.get("sku"), item_data)
         result = await self._request(
             "POST", 
             "/items", 
@@ -339,8 +339,8 @@ class ZohoClient:
                 zoho_item = await self.update_item(preferred_item_id, item_data)
                 zoho_item_id = zoho_item.get("item_id")
                 if image_path and zoho_item_id:
-                    logger.info(
-                        "Zoho sync_item image upload | sku=%s zoho_item_id=%s image_path=%s",
+                    logger.debug(
+                        "[DEBUG.EXTERNAL_PAYLOAD] Zoho sync_item image upload | sku=%s zoho_item_id=%s image_path=%s",
                         sku,
                         zoho_item_id,
                         image_path,
@@ -366,7 +366,7 @@ class ZohoClient:
             except Exception as exc:
                 # Handle duplicate item gracefully (code 1001 or "already exists")
                 if "already exists" in str(exc) or "code\":1001" in str(exc):
-                    logger.info("Zoho sync_item: item already exists, fetching by sku | sku=%s", sku)
+                    logger.debug("[DEBUG.EXTERNAL_API] Zoho sync_item: item already exists, fetching by sku | sku=%s", sku)
                     existing = await self.get_item_by_sku(sku)
                     if existing:
                         return existing
@@ -374,15 +374,15 @@ class ZohoClient:
 
         zoho_item_id = zoho_item.get("item_id")
         if image_path and zoho_item_id:
-            logger.info("Zoho sync_item image upload | sku=%s zoho_item_id=%s image_path=%s", sku, zoho_item_id, image_path)
+            logger.debug("[DEBUG.EXTERNAL_PAYLOAD] Zoho sync_item image upload | sku=%s zoho_item_id=%s image_path=%s", sku, zoho_item_id, image_path)
             await self.upload_item_image(zoho_item_id, image_path)
 
         return zoho_item
 
     async def upload_item_image(self, zoho_item_id: str, image_path: Path) -> dict:
         """Upload an image to an existing Zoho inventory item's image gallery."""
-        logger.info(
-            "Zoho client upload_item_image called | zoho_item_id=%s image_path=%s exists=%s size_bytes=%s",
+        logger.debug(
+            "[DEBUG.EXTERNAL_PAYLOAD] Zoho client upload_item_image called | zoho_item_id=%s image_path=%s exists=%s size_bytes=%s",
             zoho_item_id,
             image_path,
             image_path.exists(),
@@ -393,8 +393,8 @@ class ZohoClient:
 
         mime_type, _ = mimetypes.guess_type(str(image_path))
         content_type = mime_type or "application/octet-stream"
-        logger.info(
-            "Zoho client upload_item_image mime | zoho_item_id=%s filename=%s content_type=%s",
+        logger.debug(
+            "[DEBUG.EXTERNAL_PAYLOAD] Zoho client upload_item_image mime | zoho_item_id=%s filename=%s content_type=%s",
             zoho_item_id,
             image_path.name,
             content_type,
@@ -406,8 +406,8 @@ class ZohoClient:
                 f"/items/{zoho_item_id}/images",
                 files={"image": (image_path.name, image_file, content_type)},
             )
-        logger.info(
-            "Zoho client upload_item_image response | zoho_item_id=%s response_keys=%s",
+        logger.debug(
+            "[DEBUG.EXTERNAL_API] Zoho client upload_item_image response | zoho_item_id=%s response_keys=%s",
             zoho_item_id,
             list(result.keys()) if isinstance(result, dict) else None,
         )
@@ -415,8 +415,8 @@ class ZohoClient:
 
     async def create_composite_item(self, composite_data: dict) -> dict:
         """Create a composite item in Zoho Inventory."""
-        logger.info(
-            "Zoho create_composite_item payload | sku=%s component_count=%s payload=%s",
+        logger.debug(
+            "[DEBUG.EXTERNAL_PAYLOAD] Zoho create_composite_item payload | sku=%s component_count=%s payload=%s",
             composite_data.get("sku"),
             len(composite_data.get("component_items", [])),
             composite_data,
@@ -483,8 +483,8 @@ class ZohoClient:
         # another record; reuse it to avoid duplicate/create loops.
         existing_standard = await self.get_item_by_sku(sku)
         if existing_standard:
-            logger.info(
-                "Zoho sync_composite_item: found existing standard item, reusing by sku | sku=%s item_id=%s",
+            logger.debug(
+                "[DEBUG.EXTERNAL_API] Zoho sync_composite_item: found existing standard item, reusing by sku | sku=%s item_id=%s",
                 sku,
                 existing_standard.get("item_id"),
             )
@@ -495,8 +495,8 @@ class ZohoClient:
         except Exception as exc:
             message = str(exc)
             if "already exists" in message or "code\":1001" in message:
-                logger.info(
-                    "Zoho sync_composite_item: duplicate on create, resolving existing by sku | sku=%s",
+                logger.debug(
+                    "[DEBUG.EXTERNAL_API] Zoho sync_composite_item: duplicate on create, resolving existing by sku | sku=%s",
                     sku,
                 )
                 existing = await self.get_composite_item_by_sku(sku)
@@ -716,8 +716,8 @@ class ZohoClient:
         payload = dict(contact_data)
         if contact_type:
             payload["contact_type"] = contact_type
-        logger.info(
-            "Zoho create_contact payload | type=%s email=%s name=%s",
+        logger.debug(
+            "[DEBUG.EXTERNAL_PAYLOAD] Zoho create_contact payload | type=%s email=%s name=%s",
             payload.get("contact_type", "customer"),
             payload.get("email"),
             payload.get("contact_name"),
@@ -1082,4 +1082,5 @@ class ZohoClient:
         except Exception as e:
             logger.error(f"Zoho health check failed: {e}")
             return False
+
 

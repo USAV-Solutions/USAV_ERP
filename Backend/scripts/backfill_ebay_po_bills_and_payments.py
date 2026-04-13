@@ -240,27 +240,16 @@ async def _enrich_bill_payload_with_zoho_po_lines(
 
         purchaseorder_item_id = str(line.get("purchaseorder_item_id") or line.get("line_item_id") or "").strip()
         quantity = int(_to_decimal(line.get("quantity"), default="0"))
-        rate = _to_float_money(line.get("rate"))
-        item_id = str(line.get("item_id") or "").strip()
 
         if not purchaseorder_item_id or quantity <= 0:
             continue
 
+        # Keep PO-linked bill lines minimal so Zoho treats this as a bill against
+        # existing purchase-order lines instead of editing protected PO-derived fields.
         line_payload: dict[str, Any] = {
             "purchaseorder_item_id": purchaseorder_item_id,
             "quantity": quantity,
-            "rate": rate,
         }
-        if item_id:
-            line_payload["item_id"] = item_id
-
-        name = str(line.get("name") or "").strip()
-        if name:
-            line_payload["name"] = name
-
-        description = str(line.get("description") or "").strip()
-        if description:
-            line_payload["description"] = description
 
         linked_lines.append(line_payload)
 

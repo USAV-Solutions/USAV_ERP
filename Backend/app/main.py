@@ -31,7 +31,7 @@ from app.integrations.zoho.sync_engine import (
 
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG if settings.debug else logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
 

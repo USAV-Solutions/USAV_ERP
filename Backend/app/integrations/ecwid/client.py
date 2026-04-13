@@ -201,8 +201,8 @@ class EcwidClient(BasePlatformClient):
         start_timestamp = int(datetime.combine(date, datetime.min.time()).timestamp())
         end_timestamp = start_timestamp + 86400  # +24 hours
         
-        logger.info(
-            f"Fetching Ecwid orders from {date} "
+        logger.debug(
+            f"[DEBUG.EXTERNAL_API] Fetching Ecwid orders from {date} "
             f"(timestamp {start_timestamp} to {end_timestamp})"
         )
         
@@ -346,8 +346,8 @@ class EcwidClient(BasePlatformClient):
         # Always sync up to current time
         current_time = datetime.now(timezone.utc)
         
-        logger.info(
-            f"Fetching Ecwid orders since last sync: {last_sync_timestamp} to {current_time}"
+        logger.debug(
+            f"[DEBUG.EXTERNAL_API] Fetching Ecwid orders since last sync: {last_sync_timestamp} to {current_time}"
         )
         
     async def fetch_new_orders(
@@ -370,8 +370,8 @@ class EcwidClient(BasePlatformClient):
         """
         since = datetime.now(timezone.utc) - timedelta(hours=hours_back)
         
-        logger.info(
-            f"Fetching new Ecwid orders: fulfillment={fulfillment_status}, "
+        logger.debug(
+            f"[DEBUG.EXTERNAL_API] Fetching new Ecwid orders: fulfillment={fulfillment_status}, "
             f"payment={payment_status}, since={since}"
         )
         
@@ -400,7 +400,7 @@ class EcwidClient(BasePlatformClient):
         Returns:
             List of ExternalOrder objects
         """
-        logger.info(f"Ecwid fetch_orders called: since={since}, until={until}, status={status}, fulfillment_status={fulfillment_status}")
+        logger.debug(f"[DEBUG.EXTERNAL_API] Ecwid fetch_orders called: since={since}, until={until}, status={status}, fulfillment_status={fulfillment_status}")
         
         if not self.is_configured:
             logger.error("Ecwid client not configured")
@@ -416,8 +416,8 @@ class EcwidClient(BasePlatformClient):
         start_timestamp = int(since.timestamp())
         end_timestamp = int(until.timestamp())
         
-        logger.info(
-            f"Fetching Ecwid orders from {since.date()} to {until.date()} (timestamps: {start_timestamp} - {end_timestamp})"
+        logger.debug(
+            f"[DEBUG.EXTERNAL_API] Fetching Ecwid orders from {since.date()} to {until.date()} (timestamps: {start_timestamp} - {end_timestamp})"
         )
         
         orders = []

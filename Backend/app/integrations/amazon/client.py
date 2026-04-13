@@ -78,7 +78,7 @@ class AmazonClient(BasePlatformClient):
         #     self._access_token = data["access_token"]
         #     self._token_expires_at = datetime.now() + timedelta(seconds=data["expires_in"])
         
-        logger.info("Amazon SP-API authentication placeholder")
+        logger.debug("[DEBUG.EXTERNAL_API] Amazon SP-API authentication placeholder")
         return True
     
     async def fetch_orders(
@@ -95,7 +95,7 @@ class AmazonClient(BasePlatformClient):
         2. Handle pagination
         3. Convert to ExternalOrder format
         """
-        logger.info(f"Fetching Amazon orders since={since}, until={until}, status={status}")
+        logger.debug(f"[DEBUG.EXTERNAL_API] Fetching Amazon orders since={since}, until={until}, status={status}")
         
         # TODO: Implement actual SP-API call
         # The Orders API endpoint is: GET https://sellingpartnerapi-na.amazon.com/orders/v0/orders
@@ -109,7 +109,7 @@ class AmazonClient(BasePlatformClient):
         
         Uses GET /orders/v0/orders/{orderId}
         """
-        logger.info(f"Fetching Amazon order: {order_id}")
+        logger.debug(f"[DEBUG.EXTERNAL_API] Fetching Amazon order: {order_id}")
         
         # TODO: Implement actual SP-API call
         return None
@@ -120,7 +120,7 @@ class AmazonClient(BasePlatformClient):
         
         Uses the Feeds API to submit an inventory feed.
         """
-        logger.info(f"Updating Amazon stock for {len(updates)} items")
+        logger.debug(f"[DEBUG.EXTERNAL_API] Updating Amazon stock for {len(updates)} items")
         
         results = []
         for update in updates:
@@ -144,7 +144,7 @@ class AmazonClient(BasePlatformClient):
         
         Uses the Feeds API to submit a shipment confirmation feed.
         """
-        logger.info(f"Updating tracking for Amazon order {order_id}: {carrier} {tracking_number}")
+        logger.debug(f"[DEBUG.EXTERNAL_API] Updating tracking for Amazon order {order_id}: {carrier} {tracking_number}")
         
         # TODO: Submit shipment confirmation feed
         return False

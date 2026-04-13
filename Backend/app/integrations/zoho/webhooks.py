@@ -70,14 +70,14 @@ async def receive_zoho_webhook(
         return JSONResponse(status_code=200, content={"status": "ignored"})
 
     event_type = payload.get("event_type", "unknown")
-    logger.info(
-        "Zoho webhook received | event_type=%s keys=%s",
+    logger.debug(
+        "[DEBUG.EXTERNAL_API] Zoho webhook received | event_type=%s keys=%s",
         event_type,
         list(payload.keys()),
     )
 
     if not settings.zoho_auto_inbound_sync_enabled:
-        logger.info("Zoho webhook ignored because auto inbound sync is disabled")
+        logger.debug("[DEBUG.INTERNAL_API] Zoho webhook ignored because auto inbound sync is disabled")
         return JSONResponse(status_code=200, content={"status": "ignored", "reason": "auto_inbound_disabled"})
 
     background_tasks.add_task(_dispatch_webhook, event_type, payload)

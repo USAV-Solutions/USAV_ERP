@@ -838,8 +838,8 @@ async def sync_customer_outbound(customer_id: int) -> None:
                     customer.zoho_sync_error = None
                     customer._updated_by_sync = True
                     await db.commit()
-                    logger.info(
-                        "sync_customer_outbound: customer %s linked to existing Zoho contact %s",
+                    logger.debug(
+                        "[DEBUG.EXTERNAL_API] sync_customer_outbound: customer %s linked to existing Zoho contact %s",
                         customer_id,
                         resolved_id,
                     )
@@ -1113,7 +1113,7 @@ async def process_item_inbound(payload: dict) -> None:
 
         variant = (await db.execute(stmt)).scalar_one_or_none()
         if variant is None:
-            logger.info("process_item_inbound: no local variant for zoho_item_id=%s sku=%s", zoho_item_id, sku)
+            logger.debug("[DEBUG.INTERNAL_API] process_item_inbound: no local variant for zoho_item_id=%s sku=%s", zoho_item_id, sku)
             return
 
         if variant.zoho_last_sync_hash == new_hash:
@@ -1137,7 +1137,7 @@ async def process_item_inbound(payload: dict) -> None:
         variant._updated_by_sync = True
         await db.commit()
 
-        logger.info("process_item_inbound: variant %s updated from Zoho", variant.id)
+        logger.debug("[DEBUG.INTERNAL_API] process_item_inbound: variant %s updated from Zoho", variant.id)
 
 
 async def process_contact_inbound(payload: dict) -> None:
@@ -1171,7 +1171,7 @@ async def process_contact_inbound(payload: dict) -> None:
             customer._updated_by_sync = True
             db.add(customer)
             await db.commit()
-            logger.info("process_contact_inbound: created customer from Zoho contact %s", zoho_contact_id)
+            logger.debug("[DEBUG.INTERNAL_API] process_contact_inbound: created customer from Zoho contact %s", zoho_contact_id)
             return
 
         if customer.zoho_last_sync_hash == new_hash:
@@ -1188,7 +1188,7 @@ async def process_contact_inbound(payload: dict) -> None:
         customer._updated_by_sync = True
         await db.commit()
 
-        logger.info("process_contact_inbound: customer %s updated from Zoho", customer.id)
+        logger.debug("[DEBUG.INTERNAL_API] process_contact_inbound: customer %s updated from Zoho", customer.id)
 
 
 # =========================================================================
@@ -1317,8 +1317,8 @@ async def sync_order_outbound(order_id: int) -> None:
             return
 
         if not customer.zoho_id:
-            logger.info(
-                "sync_order_outbound: order %s waiting on customer %s zoho_id",
+            logger.debug(
+                "[DEBUG.INTERNAL_API] sync_order_outbound: order %s waiting on customer %s zoho_id",
                 order_id, customer.id,
             )
             await sync_customer_outbound(customer.id)
@@ -1339,8 +1339,8 @@ async def sync_order_outbound(order_id: int) -> None:
                 missing_variants.append(variant.id)
 
         if missing_variants:
-            logger.info(
-                "sync_order_outbound: order %s waiting on %d variants",
+            logger.debug(
+                "[DEBUG.INTERNAL_API] sync_order_outbound: order %s waiting on %d variants",
                 order_id, len(missing_variants),
             )
             for vid in missing_variants:
@@ -1504,7 +1504,7 @@ async def sync_shipping_status_to_zoho(order_id: int) -> None:
             return
 
         if not order.zoho_id:
-            logger.info("sync_shipping_status: order %s has no zoho_id — sync order first", order_id)
+            logger.debug("[DEBUG.INTERNAL_API] sync_shipping_status: order %s has no zoho_id — sync order first", order_id)
             return
 
         zoho = ZohoClient()
@@ -1531,7 +1531,7 @@ async def sync_shipping_status_to_zoho(order_id: int) -> None:
                     ]
                     if pkg_lines:
                         await zoho.create_package(order.zoho_id, pkg_lines)
-                        logger.info("sync_shipping_status: created package for order %s", order_id)
+                        logger.debug("[DEBUG.EXTERNAL_API] sync_shipping_status: created package for order %s", order_id)
                     else:
                         logger.warning(
                             "sync_shipping_status: order %s SO has no line items for packaging",
@@ -1551,7 +1551,7 @@ async def sync_shipping_status_to_zoho(order_id: int) -> None:
                             tracking_number=order.tracking_number,
                             delivery_method=order.carrier,
                         )
-                        logger.info("sync_shipping_status: created shipment for order %s", order_id)
+                        logger.debug("[DEBUG.EXTERNAL_API] sync_shipping_status: created shipment for order %s", order_id)
 
             if order.shipping_status == ShippingStatus.DELIVERED:
                 shipments = await zoho.list_shipment_orders(order.zoho_id)
@@ -1561,8 +1561,8 @@ async def sync_shipping_status_to_zoho(order_id: int) -> None:
                         shipment_id = str(shipment.get("shipment_id", ""))
                         if shipment_id:
                             await zoho.mark_shipment_delivered(shipment_id)
-                            logger.info(
-                                "sync_shipping_status: marked shipment %s delivered for order %s",
+                            logger.debug(
+                                "[DEBUG.EXTERNAL_API] sync_shipping_status: marked shipment %s delivered for order %s",
                                 shipment_id, order_id,
                             )
 
@@ -1616,7 +1616,7 @@ async def process_order_inbound(payload: dict) -> None:
         stmt = select(Order).where(Order.zoho_id == zoho_so_id)
         order = (await db.execute(stmt)).scalar_one_or_none()
         if order is None:
-            logger.info("process_order_inbound: no local order for zoho_id=%s", zoho_so_id)
+            logger.debug("[DEBUG.INTERNAL_API] process_order_inbound: no local order for zoho_id=%s", zoho_so_id)
             return
 
         if order.zoho_last_sync_hash == new_hash:
@@ -1655,7 +1655,7 @@ async def process_order_inbound(payload: dict) -> None:
         order._updated_by_sync = True
         await db.commit()
 
-        logger.info("process_order_inbound: order %s updated from Zoho", order.id)
+        logger.debug("[DEBUG.INTERNAL_API] process_order_inbound: order %s updated from Zoho", order.id)
 
 
 # =========================================================================
