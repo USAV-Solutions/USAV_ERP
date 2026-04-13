@@ -19,6 +19,7 @@ import argparse
 import asyncio
 import json
 import sys
+from types import MethodType
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
@@ -63,6 +64,69 @@ class Stats:
 
 def _debug_print_payload(title: str, payload: dict[str, Any]) -> None:
     print(f"[DEBUG] {title}: {json.dumps(payload, default=str, ensure_ascii=True)}")
+
+
+def _mask_secret(value: object) -> str:
+    text = str(value or "")
+    if not text:
+        return "<empty>"
+    if len(text) <= 10:
+        return f"{text[:2]}...({len(text)})"
+    return f"{text[:6]}...{text[-4:]}(len={len(text)})"
+
+
+def _install_zoho_debug_hooks(client: ZohoClient, *, enabled: bool) -> None:
+    if not enabled:
+        return
+
+    original_refresh = client._refresh_access_token
+    original_request = client._request
+
+    async def traced_refresh(self):
+        print(
+            "[ZOHO-DEBUG] refresh_start "
+            f"org_id={self.organization_id} "
+            f"client_id={_mask_secret(self.client_id)} "
+            f"refresh_token={_mask_secret(self.refresh_token)}"
+        )
+        await original_refresh()
+        print(
+            "[ZOHO-DEBUG] refresh_done "
+            f"access_token={_mask_secret(self._access_token)} "
+            f"expires_at={self._token_expires_at}"
+        )
+
+    async def traced_request(self, method: str, endpoint: str, api: str = "inventory", **kwargs):
+        params = dict(kwargs.get("params") or {})
+        incoming_org = params.get("organization_id")
+        payload_mode = "none"
+        payload_keys: list[str] = []
+        if "files" in kwargs:
+            payload_mode = "files"
+            files_payload = kwargs.get("files")
+            if isinstance(files_payload, dict):
+                payload_keys = list(files_payload.keys())
+        elif "json" in kwargs:
+            payload_mode = "json"
+            json_payload = kwargs.get("json")
+            if isinstance(json_payload, dict):
+                payload_keys = list(json_payload.keys())
+        elif "data" in kwargs:
+            payload_mode = "data"
+            data_payload = kwargs.get("data")
+            if isinstance(data_payload, dict):
+                payload_keys = list(data_payload.keys())
+
+        print(
+            "[ZOHO-DEBUG] request "
+            f"method={method} endpoint={endpoint} api={api} "
+            f"org_id_param={incoming_org or '<none>'} org_id_client={self.organization_id} "
+            f"token={_mask_secret(self._access_token)} payload_mode={payload_mode} payload_keys={payload_keys}"
+        )
+        return await original_request(method, endpoint, api=api, **kwargs)
+
+    client._refresh_access_token = MethodType(traced_refresh, client)
+    client._request = MethodType(traced_request, client)
 
 
 def _parse_iso(value: str) -> date:
@@ -241,23 +305,13 @@ async def _load_zoho_bills_by_number(client: ZohoClient, start_date: date, end_d
     by_number: dict[str, dict[str, Any]] = {}
 
     while True:
-        try:
-            rows = await client.list_bills(
-                date_start=start_date.isoformat(),
-                date_end=end_date.isoformat(),
-                page=page,
-                per_page=per_page,
-            )
-        except Exception as exc:
-            if not _is_zoho_unauthorized(exc):
-                raise
-            rows = await _list_bills_inventory_fallback(
-                client,
-                start_date=start_date,
-                end_date=end_date,
-                page=page,
-                per_page=per_page,
-            )
+        rows = await _list_bills_inventory_fallback(
+            client,
+            start_date=start_date,
+            end_date=end_date,
+            page=page,
+            per_page=per_page,
+        )
         if not rows:
             break
 
@@ -274,37 +328,27 @@ async def _load_zoho_bills_by_number(client: ZohoClient, start_date: date, end_d
 
 
 async def _create_bill_with_fallback(client: ZohoClient, bill_payload: dict[str, Any]) -> dict[str, Any]:
-    try:
-        return await client.create_bill(bill_payload)
-    except Exception as exc:
-        if not _is_zoho_unauthorized(exc):
-            raise
-        result = await client._request(
-            "POST",
-            "/bills",
-            api="inventory",
-            data={"JSONString": json.dumps(bill_payload)},
-        )
-        return result.get("bill", {}) or {}
+    result = await client._request(
+        "POST",
+        "/bills",
+        api="inventory",
+        data={"JSONString": json.dumps(bill_payload)},
+    )
+    return result.get("bill", {}) or {}
 
 
 async def _list_bill_payments_with_fallback(client: ZohoClient, bill_id: str) -> list[dict[str, Any]]:
-    try:
-        return await client.list_bill_payments(bill_id)
-    except Exception as exc:
-        if not _is_zoho_unauthorized(exc):
-            raise
-        result = await client._request(
-            "GET",
-            "/vendorpayments",
-            api="inventory",
-            params={
-                "bill_id": bill_id,
-                "page": 1,
-                "per_page": 200,
-            },
-        )
-        return result.get("vendorpayments", []) or result.get("vendor_payments", []) or []
+    result = await client._request(
+        "GET",
+        "/vendorpayments",
+        api="inventory",
+        params={
+            "bill_id": bill_id,
+            "page": 1,
+            "per_page": 200,
+        },
+    )
+    return result.get("vendorpayments", []) or result.get("vendor_payments", []) or []
 
 
 def _resolve_bill_amount(po: PurchaseOrder, bill: dict[str, Any]) -> float:
@@ -447,6 +491,11 @@ async def main() -> None:
         default=3,
         help="Number of payloads to print when --debug-payloads is set (default: 3)",
     )
+    parser.add_argument(
+        "--debug-zoho-auth",
+        action="store_true",
+        help="Trace Zoho token refresh and request auth context (token values are masked)",
+    )
     args = parser.parse_args()
 
     start_date = _parse_iso(args.start_date)
@@ -459,6 +508,7 @@ async def main() -> None:
     skip_zoho_prefetch = bool(args.skip_zoho_prefetch) or (not apply)
     debug_payloads = bool(args.debug_payloads)
     debug_payload_limit = max(1, int(args.debug_payload_limit or 1))
+    debug_zoho_auth = bool(args.debug_zoho_auth)
 
     print(f"Window: {start_date.isoformat()} -> {end_date.isoformat()}")
     print(f"Mode: {'APPLY' if apply else 'DRY-RUN'}")
@@ -474,6 +524,7 @@ async def main() -> None:
         return
 
     client = ZohoClient()
+    _install_zoho_debug_hooks(client, enabled=debug_zoho_auth)
     bills_by_number: dict[str, dict[str, Any]] = {}
     if not skip_zoho_prefetch:
         try:

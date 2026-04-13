@@ -99,8 +99,6 @@ class EbayClient(BasePlatformClient):
 
         credentials = f"{self.app_id}:{self.cert_id}"
         encoded_credentials = base64.b64encode(credentials.encode()).decode()
-        logger.info(f"Refreshing eBay {self.store_name} access token using refresh token")
-        logger.info(f"eBay {self.store_name} token refresh config: oauth_url={self.oauth_url}, encoded_credentials={encoded_credentials}, refresh_token={self.refresh_token}")
         headers = {
             "Content-Type": "application/x-www-form-urlencoded",
             "Authorization": f"Basic {encoded_credentials}",
