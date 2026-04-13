@@ -233,6 +233,15 @@ async def _enrich_bill_payload_with_zoho_po_lines(
     if not isinstance(po_lines, list) or not po_lines:
         raise ValueError(f"Zoho PO {purchaseorder_id} has no line_items")
 
+    default_account_id = ""
+    for line in po_lines:
+        if not isinstance(line, dict):
+            continue
+        candidate = str(line.get("account_id") or "").strip()
+        if candidate:
+            default_account_id = candidate
+            break
+
     linked_lines: list[dict[str, Any]] = []
     for line in po_lines:
         if not isinstance(line, dict):
@@ -244,12 +253,29 @@ async def _enrich_bill_payload_with_zoho_po_lines(
         if not purchaseorder_item_id or quantity <= 0:
             continue
 
-        # Keep PO-linked bill lines minimal so Zoho treats this as a bill against
-        # existing purchase-order lines instead of editing protected PO-derived fields.
+        # Keep PO linkage via purchaseorder_item_id but pass accounting fields that
+        # Zoho validates during bill creation from a purchase order.
         line_payload: dict[str, Any] = {
             "purchaseorder_item_id": purchaseorder_item_id,
             "quantity": quantity,
         }
+
+        for key in [
+            "item_id",
+            "name",
+            "description",
+            "rate",
+            "tax_id",
+            "tds_tax_id",
+            "location_id",
+            "account_id",
+        ]:
+            value = line.get(key)
+            if value is not None and str(value).strip() != "":
+                line_payload[key] = value
+
+        if not str(line_payload.get("account_id") or "").strip() and default_account_id:
+            line_payload["account_id"] = default_account_id
 
         linked_lines.append(line_payload)
 
