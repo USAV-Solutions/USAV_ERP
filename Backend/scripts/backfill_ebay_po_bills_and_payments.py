@@ -213,6 +213,65 @@ def _build_bill_payload(po: PurchaseOrder, variant_zoho_item_by_id: dict[int, st
     return payload
 
 
+async def _enrich_bill_payload_with_zoho_po_lines(
+    *,
+    client: ZohoClient,
+    po: PurchaseOrder,
+    bill_payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Populate bill line_items from Zoho PO lines when purchaseorder_id is present.
+
+    Inventory bill creation validates line_items even when purchaseorder_id is supplied.
+    Using purchaseorder_item_id anchors bill lines to the source PO.
+    """
+    purchaseorder_id = str(bill_payload.get("purchaseorder_id") or "").strip()
+    if not purchaseorder_id:
+        return bill_payload
+
+    full_po = await client.get_purchase_order(purchaseorder_id)
+    po_lines = full_po.get("line_items") or []
+    if not isinstance(po_lines, list) or not po_lines:
+        raise ValueError(f"Zoho PO {purchaseorder_id} has no line_items")
+
+    linked_lines: list[dict[str, Any]] = []
+    for line in po_lines:
+        if not isinstance(line, dict):
+            continue
+
+        purchaseorder_item_id = str(line.get("purchaseorder_item_id") or line.get("line_item_id") or "").strip()
+        quantity = int(_to_decimal(line.get("quantity"), default="0"))
+        rate = _to_float_money(line.get("rate"))
+        item_id = str(line.get("item_id") or "").strip()
+
+        if not purchaseorder_item_id or quantity <= 0:
+            continue
+
+        line_payload: dict[str, Any] = {
+            "purchaseorder_item_id": purchaseorder_item_id,
+            "quantity": quantity,
+            "rate": rate,
+        }
+        if item_id:
+            line_payload["item_id"] = item_id
+
+        name = str(line.get("name") or "").strip()
+        if name:
+            line_payload["name"] = name
+
+        description = str(line.get("description") or "").strip()
+        if description:
+            line_payload["description"] = description
+
+        linked_lines.append(line_payload)
+
+    if not linked_lines:
+        raise ValueError(f"Zoho PO {purchaseorder_id} produced no valid bill line_items")
+
+    enriched = dict(bill_payload)
+    enriched["line_items"] = linked_lines
+    return enriched
+
+
 def _build_payment_payload(po: PurchaseOrder, bill_id: str, amount: float) -> dict[str, Any]:
     if not po.vendor or not po.vendor.zoho_id:
         raise ValueError("vendor is missing zoho_id")
@@ -392,6 +451,12 @@ async def _process_po(
 
     try:
         bill_payload = _build_bill_payload(po, variant_zoho_item_by_id)
+        if po.zoho_id:
+            bill_payload = await _enrich_bill_payload_with_zoho_po_lines(
+                client=client,
+                po=po,
+                bill_payload=bill_payload,
+            )
         stats.eligible += 1
         if debug_payloads and stats.eligible <= debug_payload_limit:
             _debug_print_payload(f"PO {po_number} bill_payload", bill_payload)
