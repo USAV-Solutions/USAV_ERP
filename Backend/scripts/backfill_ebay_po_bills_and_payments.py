@@ -258,6 +258,15 @@ async def _enrich_bill_payload_with_zoho_po_lines(
 
     enriched = dict(bill_payload)
     enriched["line_items"] = linked_lines
+
+    # Keep bill in the same branch/location context as the source PO.
+    # Otherwise Zoho may default to API-user branch and reject with 27523.
+    po_branch_id = str(full_po.get("branch_id") or "").strip()
+    po_location_id = str(full_po.get("location_id") or "").strip()
+    if po_branch_id:
+        enriched["branch_id"] = po_branch_id
+    if po_location_id:
+        enriched["location_id"] = po_location_id
     return enriched
 
 
