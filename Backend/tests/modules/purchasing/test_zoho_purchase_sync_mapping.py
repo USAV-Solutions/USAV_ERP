@@ -14,6 +14,7 @@ from app.integrations.zoho.sync_engine import (
 from app.modules.purchasing.routes import (
     _extract_zoho_po_charges,
     _import_ebay_purchase_api,
+    _import_goodwill_csv,
     _resolve_zoho_external_item_name,
     _upsert_purchase_item,
     import_purchasing_from_zoho,
@@ -482,6 +483,53 @@ async def test_upsert_purchase_item_matches_by_purchase_link_when_item_id_missin
     assert payload["purchase_item_link"] == "https://example.com/item/1"
     assert result.purchase_order_items_updated == 1
     assert result.purchase_order_items_created == 0
+
+
+@pytest.mark.asyncio
+async def test_import_goodwill_csv_supports_open_orders_format_and_skips_rows_without_order_number(monkeypatch):
+    content = (
+        '"Status","Order #","Item #","Item","Seller","Qty","Price","Ended (PT)"\n'
+        '"View Order","61595664","259341242","Bose Solo 5 TV Sound System","Goodwill - West Texas","1","$29.97","03/29/2026 06:02:00 PM"\n'
+        '"Pay","","260268073","Bose Companion 5 Multimedia Speaker System","Goodwill of Central & Southern Indiana","1","$89.57","04/08/2026 07:12:00 PM"\n'
+    )
+
+    vendor_repo = AsyncMock()
+    vendor_repo.get_by_field.return_value = SimpleNamespace(id=11)
+    po_repo = AsyncMock()
+    po_repo.create.return_value = SimpleNamespace(id=101, zoho_sync_status=None, zoho_sync_error=None)
+    po_item_repo = AsyncMock()
+    db = AsyncMock()
+
+    async def _fake_find_existing_po(_db, _po_number):
+        return None
+
+    captured_item_calls = []
+
+    async def _fake_upsert_purchase_item(**kwargs):
+        captured_item_calls.append(kwargs)
+        return True
+
+    monkeypatch.setattr("app.modules.purchasing.routes._find_existing_po_by_external_id", _fake_find_existing_po)
+    monkeypatch.setattr("app.modules.purchasing.routes._upsert_purchase_item", _fake_upsert_purchase_item)
+
+    result = await _import_goodwill_csv(content, vendor_repo, po_repo, po_item_repo, db)
+
+    assert result.source_rows_seen == 2
+    assert result.source_rows_skipped == 1
+    assert result.purchase_orders_created == 1
+
+    po_repo.create.assert_awaited_once()
+    po_payload = po_repo.create.await_args.args[0]
+    assert po_payload["po_number"] == "61595664"
+    assert po_payload["tax_amount"] == Decimal("0")
+    assert po_payload["shipping_amount"] == Decimal("0")
+    assert po_payload["handling_amount"] == Decimal("0")
+
+    assert len(captured_item_calls) == 1
+    item_call = captured_item_calls[0]
+    assert item_call["item_id"] == "259341242"
+    assert item_call["quantity"] == 1
+    assert item_call["unit_price"] == Decimal("29.97")
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,7 @@
 import csv
 import io
 import json
+import logging
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated
@@ -51,6 +52,7 @@ from app.repositories.purchasing import (
 from app.repositories.product import ProductVariantRepository
 
 router = APIRouter(tags=["Purchasing"])
+logger = logging.getLogger(__name__)
 
 
 def _to_decimal(value: object, default: str = "0") -> Decimal:
@@ -103,7 +105,14 @@ def _to_date(value: object) -> date:
         try:
             return date.fromisoformat(text[:10])
         except ValueError:
-            for fmt in ("%m/%d/%Y", "%m/%d/%y", "%b %d, %Y", "%B %d, %Y"):
+            for fmt in (
+                "%m/%d/%Y",
+                "%m/%d/%y",
+                "%m/%d/%Y %I:%M:%S %p",
+                "%m/%d/%y %I:%M:%S %p",
+                "%b %d, %Y",
+                "%B %d, %Y",
+            ):
                 try:
                     return datetime.strptime(text, fmt).date()
                 except ValueError:
@@ -119,7 +128,14 @@ def _to_date_or_none(value: object) -> date | None:
         try:
             return date.fromisoformat(text[:10])
         except ValueError:
-            for fmt in ("%m/%d/%Y", "%m/%d/%y", "%b %d, %Y", "%B %d, %Y"):
+            for fmt in (
+                "%m/%d/%Y",
+                "%m/%d/%y",
+                "%m/%d/%Y %I:%M:%S %p",
+                "%m/%d/%y %I:%M:%S %p",
+                "%b %d, %Y",
+                "%B %d, %Y",
+            ):
                 try:
                     return datetime.strptime(text, fmt).date()
                 except ValueError:
@@ -1076,19 +1092,29 @@ async def _import_goodwill_csv(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="CSV header row is missing")
 
     header_aliases: dict[str, list[str]] = {
-        "order_number": ["Order #"],
-        "item_id": ["Item Id"],
+        "order_number": ["Order #", "Order#"],
+        "item_id": ["Item Id", "Item #"],
         "item_name": ["Item"],
-        "quantity": ["Quantity"],
+        "quantity": ["Quantity", "Qty"],
         # Legacy goodwill export: Price / Date / Shipping / Handling
         # Newer goodwill export: Item Price / Order Date / Shipping Price / Handling Price
         "unit_price": ["Price", "Item Price"],
-        "order_date": ["Date", "Order Date"],
+        # Open Orders export includes Ended (PT) with timestamp.
+        "order_date": ["Date", "Order Date", "Ended (PT)"],
         "tracking_number": ["Tracking #"],
         "tax": ["Tax"],
         "shipping": ["Shipping", "Shipping Price"],
         "handling": ["Handling", "Handling Price"],
     }
+
+    required_header_keys = [
+        "order_number",
+        "item_id",
+        "item_name",
+        "quantity",
+        "unit_price",
+        "order_date",
+    ]
 
     def _pick(row_data: dict[str, object], keys: list[str]) -> object:
         for key in keys:
@@ -1097,7 +1123,8 @@ async def _import_goodwill_csv(
         return None
 
     missing_headers: list[str] = []
-    for logical_name, aliases in header_aliases.items():
+    for logical_name in required_header_keys:
+        aliases = header_aliases[logical_name]
         if not any(alias in (reader.fieldnames or []) for alias in aliases):
             missing_headers.append(f"{logical_name} ({'/'.join(aliases)})")
 
@@ -1749,26 +1776,45 @@ def _build_ebay_purchase_client(source: PurchaseFileImportSource) -> EbayClient:
         PurchaseFileImportSource.EBAY_DRAGON: "DRAGON",
     }
 
+    logger.info("eBay purchase import client build started | source=%s", source.value)
+
     refresh_token = refresh_token_map.get(source)
     if not refresh_token:
+        logger.error(
+            "eBay purchase import client build failed | source=%s reason=missing_refresh_token",
+            source.value,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Missing refresh token for source '{source.value}'",
         )
 
     if not settings.ebay_app_id or not settings.ebay_cert_id:
+        logger.error(
+            "eBay purchase import client build failed | source=%s reason=missing_app_credentials",
+            source.value,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="eBay app credentials are not configured",
         )
 
-    return EbayClient(
+    client = EbayClient(
         store_name=store_name_map[source],
         app_id=settings.ebay_app_id,
         cert_id=settings.ebay_cert_id,
         refresh_token=refresh_token,
         sandbox=settings.ebay_sandbox,
     )
+    logger.info(
+        "eBay purchase import client build complete | source=%s store=%s sandbox=%s trading_api=%s oauth_api=%s",
+        source.value,
+        client.store_name,
+        client.sandbox,
+        f"{client.base_url}/ws/api.dll",
+        client.oauth_url,
+    )
+    return client
 
 
 async def _import_ebay_purchase_api(
@@ -1780,23 +1826,58 @@ async def _import_ebay_purchase_api(
     po_item_repo: PurchaseOrderItemRepository,
     db: AsyncSession,
 ) -> PurchaseFileImportResponse:
+    logger.info(
+        "eBay purchase import started | source=%s order_date_from=%s order_date_to=%s",
+        source.value,
+        order_date_from.isoformat(),
+        order_date_to.isoformat(),
+    )
+
     if source not in {
         PurchaseFileImportSource.EBAY_MEKONG,
         PurchaseFileImportSource.EBAY_PURCHASING,
         PurchaseFileImportSource.EBAY_USAV,
         PurchaseFileImportSource.EBAY_DRAGON,
     }:
+        logger.error(
+            "eBay purchase import failed validation | source=%s reason=unsupported_source",
+            source.value,
+        )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported eBay source")
 
     client = _build_ebay_purchase_client(source)
     since_dt = datetime.combine(order_date_from, datetime.min.time())
     until_dt = datetime.combine(order_date_to, datetime.max.time())
 
+    logger.info(
+        "eBay purchase import connecting to APIs | source=%s trading_api=%s oauth_api=%s since=%s until=%s",
+        source.value,
+        f"{client.base_url}/ws/api.dll",
+        client.oauth_url,
+        since_dt.isoformat(),
+        until_dt.isoformat(),
+    )
+
     try:
+        logger.info("eBay purchase import fetch phase started | source=%s", source.value)
         ebay_orders = await client.fetch_buying_orders_xml(since=since_dt, until=until_dt)
+        logger.info(
+            "eBay purchase import fetch phase complete | source=%s orders_fetched=%s",
+            source.value,
+            len(ebay_orders),
+        )
     except HTTPException:
+        logger.exception(
+            "eBay purchase import failed with HTTPException | source=%s",
+            source.value,
+        )
         raise
     except Exception as exc:
+        logger.exception(
+            "eBay purchase import fetch phase failed | source=%s error=%s",
+            source.value,
+            exc,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Failed to import from eBay source '{source.value}': {exc}",
@@ -1805,97 +1886,159 @@ async def _import_ebay_purchase_api(
     vendor_cache: dict[str, int] = {}
     result = PurchaseFileImportResponse(source=source)
 
-    for order in ebay_orders:
+    for idx, order in enumerate(ebay_orders, start=1):
         result.source_rows_seen += 1
 
         po_number = _normalize_external_po_number(order.get("po_number"))
         items = order.get("items") or []
+        logger.debug(
+            "eBay purchase import processing order | source=%s index=%s po_number=%s item_count=%s",
+            source.value,
+            idx,
+            po_number or "<missing>",
+            len(items) if isinstance(items, list) else "<invalid>",
+        )
         if not po_number or not isinstance(items, list) or not items:
             result.source_rows_skipped += 1
+            logger.warning(
+                "eBay purchase import skipped order | source=%s index=%s reason=missing_po_or_items",
+                source.value,
+                idx,
+            )
             continue
+        try:
+            vendor_name = str(order.get("vendor_name") or f"eBay {source.value}").strip() or f"eBay {source.value}"
+            vendor_id = await _resolve_vendor_id(vendor_name, vendor_repo, db, vendor_cache)
 
-        vendor_name = str(order.get("vendor_name") or f"eBay {source.value}").strip() or f"eBay {source.value}"
-        vendor_id = await _resolve_vendor_id(vendor_name, vendor_repo, db, vendor_cache)
+            order_date_value = order.get("order_date")
+            if not isinstance(order_date_value, date):
+                order_date_value = order_date_from
 
-        order_date_value = order.get("order_date")
-        if not isinstance(order_date_value, date):
-            order_date_value = order_date_from
+            total_amount = _to_decimal(order.get("total_amount"), default="0")
+            tax_amount = _to_decimal(order.get("tax_amount"), default="0")
+            shipping_amount = _to_decimal(order.get("shipping_amount"), default="0")
+            handling_amount = _to_decimal(order.get("handling_amount"), default="0")
+            if total_amount <= 0:
+                total_amount = sum(
+                    (_to_decimal(i.get("unit_price"), default="0") * _to_int(i.get("quantity"), default=0) for i in items),
+                    Decimal("0"),
+                ) + tax_amount + shipping_amount + handling_amount
 
-        total_amount = _to_decimal(order.get("total_amount"), default="0")
-        tax_amount = _to_decimal(order.get("tax_amount"), default="0")
-        shipping_amount = _to_decimal(order.get("shipping_amount"), default="0")
-        handling_amount = _to_decimal(order.get("handling_amount"), default="0")
-        if total_amount <= 0:
-            total_amount = sum(
-                (_to_decimal(i.get("unit_price"), default="0") * _to_int(i.get("quantity"), default=0) for i in items),
-                Decimal("0"),
-            ) + tax_amount + shipping_amount + handling_amount
+            po_payload = {
+                "po_number": po_number,
+                "vendor_id": vendor_id,
+                "deliver_status": PurchaseDeliverStatus.CREATED,
+                "order_date": order_date_value,
+                "expected_delivery_date": None,
+                "total_amount": total_amount,
+                "currency": _normalize_currency(order.get("currency") or "USD"),
+                "tracking_number": str(order.get("tracking_number") or "").strip() or None,
+                "tax_amount": tax_amount,
+                "shipping_amount": shipping_amount,
+                "handling_amount": handling_amount,
+                "source": _ebay_purchase_order_source(source),
+                "notes": f"Imported via eBay GetOrders (Buyer) ({source.value}).",
+                "zoho_sync_status": ZohoSyncStatus.DIRTY,
+                "zoho_sync_error": None,
+            }
 
-        po_payload = {
-            "po_number": po_number,
-            "vendor_id": vendor_id,
-            "deliver_status": PurchaseDeliverStatus.CREATED,
-            "order_date": order_date_value,
-            "expected_delivery_date": None,
-            "total_amount": total_amount,
-            "currency": _normalize_currency(order.get("currency") or "USD"),
-            "tracking_number": str(order.get("tracking_number") or "").strip() or None,
-            "tax_amount": tax_amount,
-            "shipping_amount": shipping_amount,
-            "handling_amount": handling_amount,
-            "source": _ebay_purchase_order_source(source),
-            "notes": f"Imported via eBay GetOrders (Buyer) ({source.value}).",
-            "zoho_sync_status": ZohoSyncStatus.DIRTY,
-            "zoho_sync_error": None,
-        }
-
-        existing_po = await _find_existing_po_by_external_id(db, po_number)
-        if existing_po is None:
-            local_po = await po_repo.create(po_payload)
-            await db.flush()
-            result.purchase_orders_created += 1
-        else:
-            header_changed = _purchase_order_header_changed(existing_po, po_payload)
-            if header_changed:
-                local_po = await po_repo.update(existing_po, po_payload)
+            existing_po = await _find_existing_po_by_external_id(db, po_number)
+            if existing_po is None:
+                local_po = await po_repo.create(po_payload)
                 await db.flush()
-                result.purchase_orders_updated += 1
+                result.purchase_orders_created += 1
+                logger.info(
+                    "eBay purchase import created purchase order | source=%s index=%s po_number=%s",
+                    source.value,
+                    idx,
+                    po_number,
+                )
             else:
-                local_po = existing_po
+                header_changed = _purchase_order_header_changed(existing_po, po_payload)
+                if header_changed:
+                    local_po = await po_repo.update(existing_po, po_payload)
+                    await db.flush()
+                    result.purchase_orders_updated += 1
+                    logger.info(
+                        "eBay purchase import updated purchase order | source=%s index=%s po_number=%s",
+                        source.value,
+                        idx,
+                        po_number,
+                    )
+                else:
+                    local_po = existing_po
+                    logger.debug(
+                        "eBay purchase import left purchase order unchanged | source=%s index=%s po_number=%s",
+                        source.value,
+                        idx,
+                        po_number,
+                    )
 
-        any_item_changed = False
-        for item in items:
-            item_id = str(item.get("external_item_id") or "").strip() or None
-            purchase_item_link = (
-                str(item.get("purchase_item_link") or "").strip()
-                or _build_purchase_item_link(source, item_id=item_id)
+            any_item_changed = False
+            for item in items:
+                item_id = str(item.get("external_item_id") or "").strip() or None
+                purchase_item_link = (
+                    str(item.get("purchase_item_link") or "").strip()
+                    or _build_purchase_item_link(source, item_id=item_id)
+                )
+                item_name = str(item.get("external_item_name") or "").strip()
+                quantity = _to_int(item.get("quantity"), default=0)
+                unit_price = _to_decimal(item.get("unit_price"), default="0")
+                if not item_name or quantity <= 0:
+                    result.source_rows_skipped += 1
+                    logger.warning(
+                        "eBay purchase import skipped item | source=%s index=%s po_number=%s reason=invalid_item_data external_item_id=%s",
+                        source.value,
+                        idx,
+                        po_number,
+                        item_id or "<missing>",
+                    )
+                    continue
+
+                item_changed = await _upsert_purchase_item(
+                    local_po_id=local_po.id,
+                    item_id=item_id,
+                    purchase_item_link=purchase_item_link,
+                    item_name=item_name,
+                    quantity=quantity,
+                    unit_price=unit_price,
+                    po_item_repo=po_item_repo,
+                    db=db,
+                    result=result,
+                )
+                any_item_changed = any_item_changed or item_changed
+
+            if existing_po is not None and any_item_changed:
+                local_po.zoho_sync_status = ZohoSyncStatus.DIRTY
+                local_po.zoho_sync_error = None
+                db.add(local_po)
+                await db.flush()
+
+            logger.debug(
+                "eBay purchase import order complete | source=%s index=%s po_number=%s",
+                source.value,
+                idx,
+                po_number,
             )
-            item_name = str(item.get("external_item_name") or "").strip()
-            quantity = _to_int(item.get("quantity"), default=0)
-            unit_price = _to_decimal(item.get("unit_price"), default="0")
-            if not item_name or quantity <= 0:
-                result.source_rows_skipped += 1
-                continue
-
-            item_changed = await _upsert_purchase_item(
-                local_po_id=local_po.id,
-                item_id=item_id,
-                purchase_item_link=purchase_item_link,
-                item_name=item_name,
-                quantity=quantity,
-                unit_price=unit_price,
-                po_item_repo=po_item_repo,
-                db=db,
-                result=result,
+        except Exception:
+            logger.exception(
+                "eBay purchase import order processing failed | source=%s index=%s po_number=%s",
+                source.value,
+                idx,
+                po_number,
             )
-            any_item_changed = any_item_changed or item_changed
+            raise
 
-        if existing_po is not None and any_item_changed:
-            local_po.zoho_sync_status = ZohoSyncStatus.DIRTY
-            local_po.zoho_sync_error = None
-            db.add(local_po)
-            await db.flush()
-
+    logger.info(
+        "eBay purchase import completed | source=%s source_rows_seen=%s source_rows_skipped=%s po_created=%s po_updated=%s items_created=%s items_updated=%s",
+        source.value,
+        result.source_rows_seen,
+        result.source_rows_skipped,
+        result.purchase_orders_created,
+        result.purchase_orders_updated,
+        result.purchase_order_items_created,
+        result.purchase_order_items_updated,
+    )
     return result
 
 
@@ -1933,20 +2076,41 @@ async def import_purchasing_from_ebay_api(
     po_item_repo: PurchaseOrderItemRepository = Depends(get_purchase_order_item_repo),
     db: AsyncSession = Depends(get_db),
 ):
+    logger.info(
+        "eBay purchase import endpoint called | source=%s order_date_from=%s order_date_to=%s",
+        source.value,
+        order_date_from.isoformat() if order_date_from else None,
+        order_date_to.isoformat() if order_date_to else None,
+    )
+
     if source not in {
         PurchaseFileImportSource.EBAY_MEKONG,
         PurchaseFileImportSource.EBAY_PURCHASING,
         PurchaseFileImportSource.EBAY_USAV,
         PurchaseFileImportSource.EBAY_DRAGON,
     }:
+        logger.error(
+            "eBay purchase import endpoint validation failed | source=%s reason=unsupported_source",
+            source.value,
+        )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported eBay import source")
 
     if order_date_from is None or order_date_to is None:
+        logger.error(
+            "eBay purchase import endpoint validation failed | source=%s reason=missing_date_range",
+            source.value,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="order_date_from and order_date_to are required",
         )
     if order_date_from > order_date_to:
+        logger.error(
+            "eBay purchase import endpoint validation failed | source=%s reason=invalid_date_range from=%s to=%s",
+            source.value,
+            order_date_from.isoformat(),
+            order_date_to.isoformat(),
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="order_date_from must be less than or equal to order_date_to",
@@ -1962,6 +2126,14 @@ async def import_purchasing_from_ebay_api(
         db=db,
     )
     await db.commit()
+    logger.info(
+        "eBay purchase import endpoint success | source=%s po_created=%s po_updated=%s items_created=%s items_updated=%s",
+        source.value,
+        result.purchase_orders_created,
+        result.purchase_orders_updated,
+        result.purchase_order_items_created,
+        result.purchase_order_items_updated,
+    )
     return result
 
 
