@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import noload, selectinload
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -42,7 +42,6 @@ EBAY_PO_SOURCES = {
     "EBAY_PURCHASING_API",
     "EBAY_USAV_API",
     "EBAY_DRAGON_API",
-    "EBAY_BUYING_API",
 }
 PAYMENT_TERMS_DUE_ON_RECEIPT = 0
 PAID_THROUGH_ACCOUNT_ID_GOODS_IN_TRANSIT = "5623409000001937358"
@@ -60,6 +59,10 @@ class Stats:
     created_payments: int = 0
     failed: int = 0
     failures: list[str] = field(default_factory=list)
+
+
+def _debug_print_payload(title: str, payload: dict[str, Any]) -> None:
+    print(f"[DEBUG] {title}: {json.dumps(payload, default=str, ensure_ascii=True)}")
 
 
 def _parse_iso(value: str) -> date:
@@ -176,7 +179,7 @@ async def _load_local_pos(
             select(PurchaseOrder)
             .options(
                 selectinload(PurchaseOrder.vendor),
-                selectinload(PurchaseOrder.items),
+                selectinload(PurchaseOrder.items).options(noload(PurchaseOrderItem.variant)),
             )
             .where(
                 PurchaseOrder.source.in_(sorted(EBAY_PO_SOURCES)),
@@ -327,6 +330,8 @@ async def _process_po(
     bills_by_number: dict[str, dict[str, Any]],
     variant_zoho_item_by_id: dict[int, str],
     apply: bool,
+    debug_payloads: bool,
+    debug_payload_limit: int,
     stats: Stats,
 ) -> None:
     stats.scanned += 1
@@ -340,6 +345,8 @@ async def _process_po(
     try:
         bill_payload = _build_bill_payload(po, variant_zoho_item_by_id)
         stats.eligible += 1
+        if debug_payloads and stats.eligible <= debug_payload_limit:
+            _debug_print_payload(f"PO {po_number} bill_payload", bill_payload)
     except Exception as exc:
         stats.failed += 1
         stats.failures.append(f"PO {po_number} skipped: {exc}")
@@ -360,6 +367,19 @@ async def _process_po(
         else:
             stats.would_create_bills += 1
             stats.would_create_payments += 1
+            if debug_payloads and stats.eligible <= debug_payload_limit:
+                preview_amount = _to_float_money(po.total_amount)
+                payment_preview = {
+                    "vendor_id": str(po.vendor.zoho_id),
+                    "date": po.order_date.isoformat(),
+                    "payment_mode": "Credit Card",
+                    "paid_through_account_id": PAID_THROUGH_ACCOUNT_ID_GOODS_IN_TRANSIT,
+                    "amount": preview_amount,
+                    "reference_number": po.po_number,
+                    "description": "Auto-created from eBay purchase-order backfill",
+                    "bills": [{"bill_id": "<to-be-created>", "amount_applied": preview_amount}],
+                }
+                _debug_print_payload(f"PO {po_number} payment_payload_preview", payment_preview)
             return
 
     bill_id = str((bill or {}).get("bill_id") or "").strip()
@@ -411,6 +431,22 @@ async def main() -> None:
     parser.add_argument("--end-date", default=today.isoformat(), help="YYYY-MM-DD (default: today)")
     parser.add_argument("--limit", type=int, default=0, help="Optional cap on number of POs to process")
     parser.add_argument("--apply", action="store_true", help="Execute creates (default is dry-run)")
+    parser.add_argument(
+        "--skip-zoho-prefetch",
+        action="store_true",
+        help="Skip Zoho bill prefetch/idempotency lookup (default true for dry-run, false for apply)",
+    )
+    parser.add_argument(
+        "--debug-payloads",
+        action="store_true",
+        help="Print the first N generated Zoho payloads for debugging",
+    )
+    parser.add_argument(
+        "--debug-payload-limit",
+        type=int,
+        default=3,
+        help="Number of payloads to print when --debug-payloads is set (default: 3)",
+    )
     args = parser.parse_args()
 
     start_date = _parse_iso(args.start_date)
@@ -420,9 +456,13 @@ async def main() -> None:
 
     limit = args.limit if args.limit and args.limit > 0 else None
     apply = bool(args.apply)
+    skip_zoho_prefetch = bool(args.skip_zoho_prefetch) or (not apply)
+    debug_payloads = bool(args.debug_payloads)
+    debug_payload_limit = max(1, int(args.debug_payload_limit or 1))
 
     print(f"Window: {start_date.isoformat()} -> {end_date.isoformat()}")
     print(f"Mode: {'APPLY' if apply else 'DRY-RUN'}")
+    print(f"Zoho prefetch: {'SKIPPED' if skip_zoho_prefetch else 'ENABLED'}")
     if limit:
         print(f"Limit: {limit}")
 
@@ -435,13 +475,16 @@ async def main() -> None:
 
     client = ZohoClient()
     bills_by_number: dict[str, dict[str, Any]] = {}
-    try:
-        bills_by_number = await _load_zoho_bills_by_number(client, start_date, end_date)
-    except Exception as exc:
-        if apply:
-            raise
-        stats_warning = f"Bill prefetch unavailable in dry-run (continuing without existing-bill checks): {exc}"
-        print(stats_warning)
+    if not skip_zoho_prefetch:
+        try:
+            bills_by_number = await _load_zoho_bills_by_number(client, start_date, end_date)
+        except Exception as exc:
+            if apply:
+                raise
+            stats_warning = f"Bill prefetch unavailable in dry-run (continuing without existing-bill checks): {exc}"
+            print(stats_warning)
+    else:
+        print("Skipping Zoho bill prefetch; run with --apply (or remove --skip-zoho-prefetch) for idempotency lookup.")
     print(f"Existing Zoho bills in window: {len(bills_by_number)}")
 
     stats = Stats()
@@ -452,6 +495,8 @@ async def main() -> None:
             bills_by_number=bills_by_number,
             variant_zoho_item_by_id=variant_zoho_item_by_id,
             apply=apply,
+            debug_payloads=debug_payloads,
+            debug_payload_limit=debug_payload_limit,
             stats=stats,
         )
 
