@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sys
 from dataclasses import dataclass, field
 from datetime import date
@@ -33,6 +34,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.core.database import async_session_factory
 from app.integrations.zoho.client import ZohoClient
+from app.models.entities import ProductVariant
 from app.models.purchasing import PurchaseOrder, PurchaseOrderItem
 
 EBAY_PO_SOURCES = {
@@ -81,7 +83,12 @@ def _to_float_money(value: object) -> float:
     return float(_to_decimal(value, default="0"))
 
 
-def _build_bill_payload(po: PurchaseOrder) -> dict[str, Any]:
+def _is_zoho_unauthorized(exc: Exception) -> bool:
+    text = str(exc)
+    return '"code":57' in text or "not authorized" in text.lower()
+
+
+def _build_bill_payload(po: PurchaseOrder, variant_zoho_item_by_id: dict[int, str]) -> dict[str, Any]:
     if not po.vendor or not po.vendor.zoho_id:
         raise ValueError("vendor is missing zoho_id")
 
@@ -97,8 +104,8 @@ def _build_bill_payload(po: PurchaseOrder) -> dict[str, Any]:
             "rate": _to_float_money(item.unit_price),
         }
 
-        variant = getattr(item, "variant", None)
-        zoho_item_id = str(getattr(variant, "zoho_item_id", "") or "").strip()
+        variant_id = getattr(item, "variant_id", None)
+        zoho_item_id = str(variant_zoho_item_by_id.get(int(variant_id or 0), "") or "").strip()
         if zoho_item_id:
             line["item_id"] = zoho_item_id
         else:
@@ -159,13 +166,17 @@ def _build_payment_payload(po: PurchaseOrder, bill_id: str, amount: float) -> di
     }
 
 
-async def _load_local_pos(start_date: date, end_date: date, limit: int | None) -> list[PurchaseOrder]:
+async def _load_local_pos(
+    start_date: date,
+    end_date: date,
+    limit: int | None,
+) -> tuple[list[PurchaseOrder], dict[int, str]]:
     async with async_session_factory() as session:
         stmt = (
             select(PurchaseOrder)
             .options(
                 selectinload(PurchaseOrder.vendor),
-                selectinload(PurchaseOrder.items).selectinload(PurchaseOrderItem.variant),
+                selectinload(PurchaseOrder.items),
             )
             .where(
                 PurchaseOrder.source.in_(sorted(EBAY_PO_SOURCES)),
@@ -177,7 +188,48 @@ async def _load_local_pos(start_date: date, end_date: date, limit: int | None) -
         if limit and limit > 0:
             stmt = stmt.limit(limit)
 
-        return (await session.execute(stmt)).scalars().all()
+        pos = (await session.execute(stmt)).scalars().all()
+
+        variant_ids: set[int] = set()
+        for po in pos:
+            for item in po.items or []:
+                if item.variant_id:
+                    variant_ids.add(int(item.variant_id))
+
+        variant_zoho_item_by_id: dict[int, str] = {}
+        if variant_ids:
+            rows = await session.execute(
+                select(ProductVariant.id, ProductVariant.zoho_item_id).where(ProductVariant.id.in_(sorted(variant_ids)))
+            )
+            for variant_id, zoho_item_id in rows.all():
+                normalized = str(zoho_item_id or "").strip()
+                if normalized:
+                    variant_zoho_item_by_id[int(variant_id)] = normalized
+
+        return pos, variant_zoho_item_by_id
+
+
+async def _list_bills_inventory_fallback(
+    client: ZohoClient,
+    *,
+    start_date: date,
+    end_date: date,
+    page: int,
+    per_page: int,
+) -> list[dict[str, Any]]:
+    result = await client._request(
+        "GET",
+        "/bills",
+        api="inventory",
+        params={
+            "date_start": start_date.isoformat(),
+            "date_end": end_date.isoformat(),
+            "page": page,
+            "per_page": per_page,
+            "filter_by": "Status.All",
+        },
+    )
+    return result.get("bills", []) or []
 
 
 async def _load_zoho_bills_by_number(client: ZohoClient, start_date: date, end_date: date) -> dict[str, dict[str, Any]]:
@@ -186,12 +238,23 @@ async def _load_zoho_bills_by_number(client: ZohoClient, start_date: date, end_d
     by_number: dict[str, dict[str, Any]] = {}
 
     while True:
-        rows = await client.list_bills(
-            date_start=start_date.isoformat(),
-            date_end=end_date.isoformat(),
-            page=page,
-            per_page=per_page,
-        )
+        try:
+            rows = await client.list_bills(
+                date_start=start_date.isoformat(),
+                date_end=end_date.isoformat(),
+                page=page,
+                per_page=per_page,
+            )
+        except Exception as exc:
+            if not _is_zoho_unauthorized(exc):
+                raise
+            rows = await _list_bills_inventory_fallback(
+                client,
+                start_date=start_date,
+                end_date=end_date,
+                page=page,
+                per_page=per_page,
+            )
         if not rows:
             break
 
@@ -205,6 +268,40 @@ async def _load_zoho_bills_by_number(client: ZohoClient, start_date: date, end_d
         page += 1
 
     return by_number
+
+
+async def _create_bill_with_fallback(client: ZohoClient, bill_payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return await client.create_bill(bill_payload)
+    except Exception as exc:
+        if not _is_zoho_unauthorized(exc):
+            raise
+        result = await client._request(
+            "POST",
+            "/bills",
+            api="inventory",
+            data={"JSONString": json.dumps(bill_payload)},
+        )
+        return result.get("bill", {}) or {}
+
+
+async def _list_bill_payments_with_fallback(client: ZohoClient, bill_id: str) -> list[dict[str, Any]]:
+    try:
+        return await client.list_bill_payments(bill_id)
+    except Exception as exc:
+        if not _is_zoho_unauthorized(exc):
+            raise
+        result = await client._request(
+            "GET",
+            "/vendorpayments",
+            api="inventory",
+            params={
+                "bill_id": bill_id,
+                "page": 1,
+                "per_page": 200,
+            },
+        )
+        return result.get("vendorpayments", []) or result.get("vendor_payments", []) or []
 
 
 def _resolve_bill_amount(po: PurchaseOrder, bill: dict[str, Any]) -> float:
@@ -228,6 +325,7 @@ async def _process_po(
     po: PurchaseOrder,
     client: ZohoClient,
     bills_by_number: dict[str, dict[str, Any]],
+    variant_zoho_item_by_id: dict[int, str],
     apply: bool,
     stats: Stats,
 ) -> None:
@@ -240,7 +338,7 @@ async def _process_po(
         return
 
     try:
-        bill_payload = _build_bill_payload(po)
+        bill_payload = _build_bill_payload(po, variant_zoho_item_by_id)
         stats.eligible += 1
     except Exception as exc:
         stats.failed += 1
@@ -253,7 +351,7 @@ async def _process_po(
     else:
         if apply:
             try:
-                bill = await client.create_bill(bill_payload)
+                bill = await _create_bill_with_fallback(client, bill_payload)
                 stats.created_bills += 1
             except Exception as exc:
                 stats.failed += 1
@@ -271,7 +369,7 @@ async def _process_po(
         return
 
     try:
-        existing_payments = await client.list_bill_payments(bill_id)
+        existing_payments = await _list_bill_payments_with_fallback(client, bill_id)
     except Exception as exc:
         stats.failed += 1
         stats.failures.append(f"PO {po_number} payment check failed for bill {bill_id}: {exc}")
@@ -328,7 +426,7 @@ async def main() -> None:
     if limit:
         print(f"Limit: {limit}")
 
-    local_pos = await _load_local_pos(start_date, end_date, limit)
+    local_pos, variant_zoho_item_by_id = await _load_local_pos(start_date, end_date, limit)
     print(f"Local eBay purchase orders found: {len(local_pos)}")
 
     if not local_pos:
@@ -336,7 +434,14 @@ async def main() -> None:
         return
 
     client = ZohoClient()
-    bills_by_number = await _load_zoho_bills_by_number(client, start_date, end_date)
+    bills_by_number: dict[str, dict[str, Any]] = {}
+    try:
+        bills_by_number = await _load_zoho_bills_by_number(client, start_date, end_date)
+    except Exception as exc:
+        if apply:
+            raise
+        stats_warning = f"Bill prefetch unavailable in dry-run (continuing without existing-bill checks): {exc}"
+        print(stats_warning)
     print(f"Existing Zoho bills in window: {len(bills_by_number)}")
 
     stats = Stats()
@@ -345,6 +450,7 @@ async def main() -> None:
             po=po,
             client=client,
             bills_by_number=bills_by_number,
+            variant_zoho_item_by_id=variant_zoho_item_by_id,
             apply=apply,
             stats=stats,
         )
