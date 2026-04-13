@@ -160,28 +160,30 @@ def _build_bill_payload(po: PurchaseOrder, variant_zoho_item_by_id: dict[int, st
         raise ValueError("vendor is missing zoho_id")
 
     line_items: list[dict[str, Any]] = []
-    for item in po.items or []:
-        qty = int(item.quantity or 0)
-        if qty <= 0:
-            continue
+    if not po.zoho_id:
+        # Standalone fallback when local PO is not linked to Zoho PO.
+        for item in po.items or []:
+            qty = int(item.quantity or 0)
+            if qty <= 0:
+                continue
 
-        line: dict[str, Any] = {
-            "name": str(item.external_item_name or "Imported Item")[:255],
-            "quantity": qty,
-            "rate": _to_float_money(item.unit_price),
-        }
+            line: dict[str, Any] = {
+                "name": str(item.external_item_name or "Imported Item")[:255],
+                "quantity": qty,
+                "rate": _to_float_money(item.unit_price),
+            }
 
-        variant_id = getattr(item, "variant_id", None)
-        zoho_item_id = str(variant_zoho_item_by_id.get(int(variant_id or 0), "") or "").strip()
-        if zoho_item_id:
-            line["item_id"] = zoho_item_id
-        else:
-            line["description"] = "Auto-backfill line without mapped Zoho item ID"
+            variant_id = getattr(item, "variant_id", None)
+            zoho_item_id = str(variant_zoho_item_by_id.get(int(variant_id or 0), "") or "").strip()
+            if zoho_item_id:
+                line["item_id"] = zoho_item_id
+            else:
+                line["description"] = "Auto-backfill line without mapped Zoho item ID"
 
-        line_items.append(line)
+            line_items.append(line)
 
-    if not line_items:
-        raise ValueError("no billable line items")
+        if not line_items:
+            raise ValueError("no billable line items")
 
     bill_date = po.order_date.isoformat()
     payload: dict[str, Any] = {
@@ -192,11 +194,13 @@ def _build_bill_payload(po: PurchaseOrder, variant_zoho_item_by_id: dict[int, st
         "due_date": bill_date,
         "payment_terms": PAYMENT_TERMS_DUE_ON_RECEIPT,
         "currency_code": str(po.currency or "USD"),
-        "line_items": line_items,
     }
 
     if po.zoho_id:
+        # Prefer PO-linked bill creation path so the bill is attached to this PO in Zoho.
         payload["purchaseorder_id"] = str(po.zoho_id)
+    else:
+        payload["line_items"] = line_items
 
     charge_total = _to_decimal(po.tax_amount, "0") + _to_decimal(po.shipping_amount, "0") + _to_decimal(po.handling_amount, "0")
     if charge_total != Decimal("0"):
