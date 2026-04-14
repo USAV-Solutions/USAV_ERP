@@ -50,6 +50,7 @@ class OrderPlatform(str, enum.Enum):
     EBAY_USAV = "EBAY_USAV"
     EBAY_DRAGON = "EBAY_DRAGON"
     ECWID = "ECWID"
+    WALMART = "WALMART"
     ZOHO = "ZOHO"
     MANUAL = "MANUAL"
 
@@ -172,6 +173,13 @@ class Order(Base, ZohoSyncMixin, TimestampMixin):
         Enum(OrderPlatform, name="order_platform_enum", create_constraint=False),
         nullable=False,
         comment="Source platform (AMAZON, EBAY, etc.).",
+    )
+    source: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="MANUAL",
+        server_default="MANUAL",
+        comment="Order ingestion source (ECWID_API, WALMART_API, CSV_GENERIC, etc.).",
     )
     external_order_id: Mapped[str] = mapped_column(
         String(100),
@@ -303,6 +311,7 @@ class Order(Base, ZohoSyncMixin, TimestampMixin):
         Index("ix_order_status", "status"),
         Index("ix_order_ordered_at", "ordered_at"),
         Index("ix_order_external_id", "external_order_id"),
+        Index("ix_order_source", "source"),
         Index("ix_order_customer_id", "customer_id"),
         Index("ix_order_zoho_id", "zoho_id"),
         Index("ix_orders_zoho_sync_status", "zoho_sync_status"),

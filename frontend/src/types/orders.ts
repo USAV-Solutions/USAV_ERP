@@ -13,8 +13,18 @@ export type OrderPlatform =
   | 'EBAY_USAV'
   | 'EBAY_DRAGON'
   | 'ECWID'
+  | 'WALMART'
   | 'ZOHO'
   | 'MANUAL'
+
+export type SalesImportApiSource =
+  | 'ECWID'
+  | 'EBAY_MEKONG'
+  | 'EBAY_USAV'
+  | 'EBAY_DRAGON'
+  | 'WALMART'
+
+export type SalesImportFileSource = 'CSV_GENERIC'
 
 export type OrderStatus =
   | 'PENDING'
@@ -96,6 +106,7 @@ export interface OrderItemConfirmRequest {
 export interface OrderBrief {
   id: number
   platform: OrderPlatform
+  source: string
   external_order_id: string
   external_order_number: string | null
   status: OrderStatus
@@ -113,6 +124,7 @@ export interface OrderBrief {
 export interface OrderDetail {
   id: number
   platform: OrderPlatform
+  source: string
   external_order_id: string
   external_order_number: string | null
   status: OrderStatus
@@ -191,6 +203,24 @@ export interface SyncRangeRequest {
 
 export interface SyncResponse {
   platform: string
+  new_orders: number
+  new_items: number
+  auto_matched: number
+  skipped_duplicates: number
+  errors: string[]
+  success: boolean
+}
+
+export interface SalesImportApiRequest {
+  source: SalesImportApiSource
+  since: string
+  until: string
+}
+
+export interface SalesImportFileResponse {
+  source: SalesImportFileSource
+  source_rows_seen: number
+  source_rows_skipped: number
   new_orders: number
   new_items: number
   auto_matched: number

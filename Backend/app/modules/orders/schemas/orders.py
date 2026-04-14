@@ -96,6 +96,7 @@ class OrderBrief(BaseModel):
     """Compact order representation for the dashboard list."""
     id: int
     platform: OrderPlatform
+    source: str
     external_order_id: str
     external_order_number: Optional[str] = None
     status: OrderStatus
@@ -117,6 +118,7 @@ class OrderDetail(BaseModel):
     """Full order view including all line items."""
     id: int
     platform: OrderPlatform
+    source: str
     external_order_id: str
     external_order_number: Optional[str] = None
     status: OrderStatus

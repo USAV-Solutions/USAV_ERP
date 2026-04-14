@@ -122,12 +122,22 @@ def _make_service(
     listing_repo=None,
 ) -> OrderSyncService:
     """Create an OrderSyncService with mocked dependencies."""
+    lr = listing_repo or AsyncMock()
+    if not hasattr(lr, "get_active_by_external_ref"):
+        lr.get_active_by_external_ref = AsyncMock(return_value=None)  # type: ignore[attr-defined]
+    if not hasattr(lr, "search_active_by_listed_name"):
+        lr.search_active_by_listed_name = AsyncMock(return_value=None)  # type: ignore[attr-defined]
+    if not hasattr(lr, "get_by_variant_platform"):
+        lr.get_by_variant_platform = AsyncMock(return_value=None)  # type: ignore[attr-defined]
+    if not hasattr(lr, "get_by_external_ref"):
+        lr.get_by_external_ref = AsyncMock(return_value=None)  # type: ignore[attr-defined]
+
     return OrderSyncService(
         session=session or _make_session(),
         sync_repo=sync_repo or AsyncMock(),
         order_repo=order_repo or AsyncMock(),
         order_item_repo=order_item_repo or AsyncMock(),
-        listing_repo=listing_repo or AsyncMock(),
+        listing_repo=lr,
     )
 
 
@@ -304,6 +314,40 @@ class TestSyncPlatform:
         assert result.success is True
         assert result.new_orders == 3
         assert result.new_items == 3  # each has 1 item
+
+    @pytest.mark.asyncio
+    async def test_sync_platform_sets_order_source(self):
+        """Sync should stamp source on created orders for traceability."""
+        sync_repo = AsyncMock()
+        sync_repo.acquire_sync_lock.return_value = True
+        state = MagicMock()
+        state.last_successful_sync = datetime(2026, 1, 10, tzinfo=timezone.utc)
+        sync_repo.get_by_platform.return_value = state
+
+        order_repo = AsyncMock()
+        order_repo.get_by_external_id.return_value = None
+        order_repo.create.return_value = _make_order()
+
+        listing_repo = AsyncMock()
+        listing_repo.get_by_external_ref.return_value = None
+
+        svc = _make_service(
+            sync_repo=sync_repo,
+            order_repo=order_repo,
+            order_item_repo=AsyncMock(),
+            listing_repo=listing_repo,
+        )
+        svc._get_or_create_customer = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+        client = AsyncMock(spec=BasePlatformClient)
+        client.fetch_orders.return_value = [_make_external_order()]
+
+        result = await svc.sync_platform("ECWID", client, source="ECWID_API")
+
+        assert result.success is True
+        assert order_repo.create.await_count == 1
+        create_payload = order_repo.create.await_args.args[0]
+        assert create_payload["source"] == "ECWID_API"
 
 
 # ==========================================================================

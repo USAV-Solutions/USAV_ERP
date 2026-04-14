@@ -63,6 +63,7 @@ const PLATFORMS: { value: Platform; label: string }[] = [
   { value: 'EBAY_USAV', label: 'eBay USAV' },
   { value: 'EBAY_DRAGON', label: 'eBay Dragon' },
   { value: 'ECWID', label: 'ECWID' },
+  { value: 'WALMART', label: 'Walmart' },
 ]
 
 interface EnhancedListing extends PlatformListing {

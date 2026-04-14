@@ -1,6 +1,7 @@
 """
 Pydantic schemas for integration-state / sync endpoints.
 """
+from enum import Enum
 from datetime import datetime
 from typing import Optional
 
@@ -72,3 +73,33 @@ class SyncStatusResponse(BaseModel):
     total_orders: int = 0
     total_unmatched_items: int = 0
     total_matched_items: int = 0
+
+
+class SalesImportApiSource(str, Enum):
+    ECWID = "ECWID"
+    EBAY_MEKONG = "EBAY_MEKONG"
+    EBAY_USAV = "EBAY_USAV"
+    EBAY_DRAGON = "EBAY_DRAGON"
+    WALMART = "WALMART"
+
+
+class SalesImportFileSource(str, Enum):
+    CSV_GENERIC = "CSV_GENERIC"
+
+
+class SalesImportApiRequest(BaseModel):
+    source: SalesImportApiSource
+    since: datetime = Field(..., description="Start of import window (UTC).")
+    until: datetime = Field(..., description="End of import window (UTC).")
+
+
+class SalesImportFileResponse(BaseModel):
+    source: SalesImportFileSource
+    source_rows_seen: int = 0
+    source_rows_skipped: int = 0
+    new_orders: int = 0
+    new_items: int = 0
+    auto_matched: int = 0
+    skipped_duplicates: int = 0
+    success: bool = True
+    errors: list[str] = Field(default_factory=list)

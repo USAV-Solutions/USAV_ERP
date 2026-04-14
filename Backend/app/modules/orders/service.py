@@ -43,6 +43,8 @@ _PLATFORM_MAP: dict[str, OrderPlatform] = {
     "EBAY_USAV": OrderPlatform.EBAY_USAV,
     "EBAY_DRAGON": OrderPlatform.EBAY_DRAGON,
     "ECWID": OrderPlatform.ECWID,
+    "WALMART": OrderPlatform.WALMART,
+    "MANUAL": OrderPlatform.MANUAL,
 }
 
 # Mapping from OrderPlatform → entities.Platform (for PLATFORM_LISTING lookups)
@@ -52,6 +54,7 @@ _ORDER_TO_ENTITY_PLATFORM: dict[OrderPlatform, Platform] = {
     OrderPlatform.EBAY_USAV: Platform.EBAY_USAV,
     OrderPlatform.EBAY_DRAGON: Platform.EBAY_DRAGON,
     OrderPlatform.ECWID: Platform.ECWID,
+    OrderPlatform.WALMART: Platform.WALMART,
 }
 
 SYNC_BUFFER_MINUTES = 10
@@ -87,6 +90,8 @@ class OrderSyncService:
         self,
         platform_name: str,
         client: BasePlatformClient,
+        *,
+        source: Optional[str] = None,
     ) -> SyncResponse:
         """
         Execute the "Safe Sync" workflow for a single platform.
@@ -152,7 +157,12 @@ class OrderSyncService:
             logger.debug(f"[DEBUG.INTERNAL_API] {platform_name}: Starting ingestion of {len(external_orders)} orders")
             for idx, ext_order in enumerate(external_orders, 1):
                 logger.debug(f"{platform_name}: Ingesting order {idx}/{len(external_orders)}: {ext_order.platform_order_id}")
-                was_new = await self._ingest_order(ext_order, order_platform, response)
+                was_new = await self._ingest_order(
+                    ext_order,
+                    order_platform,
+                    response,
+                    source=source or self._platform_source(platform_name),
+                )
                 if not was_new:
                     response.skipped_duplicates += 1
                     logger.debug(f"{platform_name}: Order {ext_order.platform_order_id} was duplicate, skipped")
@@ -187,6 +197,8 @@ class OrderSyncService:
         client: BasePlatformClient,
         since: datetime,
         until: datetime,
+        *,
+        source: Optional[str] = None,
     ) -> SyncResponse:
         """
         Fetch orders within an explicit date range.
@@ -212,7 +224,12 @@ class OrderSyncService:
                 raise ValueError(f"Unknown platform mapping for '{platform_name}'")
 
             for ext_order in external_orders:
-                was_new = await self._ingest_order(ext_order, order_platform, response)
+                was_new = await self._ingest_order(
+                    ext_order,
+                    order_platform,
+                    response,
+                    source=source or self._platform_source(platform_name),
+                )
                 if not was_new:
                     response.skipped_duplicates += 1
 
@@ -310,6 +327,8 @@ class OrderSyncService:
         ext: ExternalOrder,
         platform: OrderPlatform,
         response: SyncResponse,
+        *,
+        source: str,
     ) -> bool:
         """
         Insert a single external order + items.
@@ -329,6 +348,7 @@ class OrderSyncService:
         # Build the Order header
         order_data = {
             "platform": platform,
+            "source": source,
             "external_order_id": ext.platform_order_id,
             "external_order_number": ext.platform_order_number,
             "status": OrderStatus.PENDING,
@@ -364,6 +384,10 @@ class OrderSyncService:
             await self._ingest_item(ext_item, order, platform, response)
 
         return True
+
+    @staticmethod
+    def _platform_source(platform_name: str) -> str:
+        return f"{platform_name.upper()}_API"
 
     async def _get_or_create_customer(self, ext: ExternalOrder) -> Optional[int]:
         """Find or create a Customer from external order details."""

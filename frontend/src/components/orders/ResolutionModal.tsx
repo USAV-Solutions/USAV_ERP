@@ -52,6 +52,7 @@ const PLATFORM_LABELS: Record<string, string> = {
   EBAY_USAV: 'eBay USAV',
   EBAY_DRAGON: 'eBay Dragon',
   ECWID: 'Ecwid',
+  WALMART: 'Walmart',
   ZOHO: 'Zoho',
   MANUAL: 'Manual',
 }

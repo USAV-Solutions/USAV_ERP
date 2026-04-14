@@ -40,6 +40,7 @@ const PLATFORM_OPTIONS = [
   { value: 'EBAY_USAV', label: 'eBay USAV' },
   { value: 'EBAY_DRAGON', label: 'eBay Dragon' },
   { value: 'AMAZON', label: 'Amazon' },
+  { value: 'WALMART', label: 'Walmart' },
 ] as const
 
 export default function OrderSyncButton() {

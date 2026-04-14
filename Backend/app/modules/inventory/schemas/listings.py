@@ -11,7 +11,7 @@ from app.models import Platform, PlatformSyncStatus
 
 class PlatformListingBase(BaseModel):
     """Base platform listing schema."""
-    platform: Platform = Field(..., description="Platform: AMAZON, EBAY_MEKONG, EBAY_USAV, EBAY_DRAGON, ECWID")
+    platform: Platform = Field(..., description="Platform: AMAZON, EBAY_MEKONG, EBAY_USAV, EBAY_DRAGON, ECWID, WALMART")
     external_ref_id: Optional[str] = Field(None, max_length=100, description="ID on remote platform")
     listed_name: Optional[str] = Field(None, max_length=500, description="Product name on this platform")
     listed_description: Optional[str] = Field(None, description="Product description on this platform")

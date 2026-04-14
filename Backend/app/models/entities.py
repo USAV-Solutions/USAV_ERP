@@ -100,6 +100,7 @@ class Platform(str, enum.Enum):
     EBAY_USAV = "EBAY_USAV"
     EBAY_DRAGON = "EBAY_DRAGON"
     ECWID = "ECWID"
+    WALMART = "WALMART"
 
 
 # ============================================================================

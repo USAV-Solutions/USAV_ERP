@@ -18,18 +18,22 @@ SKU Resolution
     POST /orders/items/{item_id}/confirm – Confirm an auto-match.
     POST /orders/items/{item_id}/reject  – Reject a bad match → UNMATCHED.
 """
+import csv
+import io
 import logging
+from datetime import datetime, timezone
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.integrations.amazon.client import AmazonClient
-from app.integrations.base import BasePlatformClient
+from app.integrations.base import BasePlatformClient, ExternalOrder, ExternalOrderItem
 from app.integrations.ebay.client import EbayClient
 from app.integrations.ecwid.client import EcwidClient
+from app.integrations.walmart.client import WalmartClient
 from app.modules.orders.dependencies import (
     get_order_item_repo,
     get_order_repo,
@@ -50,6 +54,10 @@ from app.modules.orders.schemas.orders import (
 )
 from app.modules.orders.schemas.sync import (
     IntegrationStateResponse,
+    SalesImportApiRequest,
+    SalesImportApiSource,
+    SalesImportFileResponse,
+    SalesImportFileSource,
     SyncRangeRequest,
     SyncRequest,
     SyncResponse,
@@ -58,11 +66,28 @@ from app.modules.orders.schemas.sync import (
 from app.modules.orders.service import OrderSyncService
 from app.repositories.orders.order_repository import OrderItemRepository, OrderRepository
 from app.repositories.orders.sync_repository import SyncRepository
-from app.api.deps import AdminUser
+from app.api.deps import AdminOrSalesUser, AdminUser
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/orders", tags=["Orders"])
+
+_IMPORT_SOURCE_TO_PLATFORM: dict[SalesImportApiSource, str] = {
+    SalesImportApiSource.ECWID: "ECWID",
+    SalesImportApiSource.EBAY_MEKONG: "EBAY_MEKONG",
+    SalesImportApiSource.EBAY_USAV: "EBAY_USAV",
+    SalesImportApiSource.EBAY_DRAGON: "EBAY_DRAGON",
+    SalesImportApiSource.WALMART: "WALMART",
+}
+
+_PLATFORM_TO_SOURCE: dict[str, str] = {
+    "AMAZON": "AMAZON_API",
+    "EBAY_MEKONG": "EBAY_MEKONG_API",
+    "EBAY_USAV": "EBAY_USAV_API",
+    "EBAY_DRAGON": "EBAY_DRAGON_API",
+    "ECWID": "ECWID_API",
+    "WALMART": "WALMART_API",
+}
 
 
 # ============================================================================
@@ -127,8 +152,124 @@ def _build_platform_clients() -> dict[str, BasePlatformClient]:
     else:
         logger.debug("✗ ECWID skipped (ecwid_store_id not set)")
 
+    # Walmart
+    if settings.walmart_client_id and settings.walmart_client_secret:
+        clients["WALMART"] = WalmartClient(
+            client_id=settings.walmart_client_id,
+            client_secret=settings.walmart_client_secret,
+            api_base_url=settings.walmart_api_base_url,
+        )
+        logger.debug("WALMART client built")
+    else:
+        logger.debug("WALMART skipped (walmart credentials not set)")
+
     logger.debug(f"[DEBUG.INTERNAL_API] Platform clients built: {list(clients.keys())}")
     return clients
+
+
+class _StaticImportClient(BasePlatformClient):
+    def __init__(self, platform_name: str, orders: list):
+        self._platform_name = platform_name
+        self._orders = orders
+
+    @property
+    def platform_name(self) -> str:
+        return self._platform_name
+
+    async def authenticate(self) -> bool:
+        return True
+
+    async def fetch_orders(self, since=None, until=None, status=None):
+        _ = (since, until, status)
+        return self._orders
+
+    async def get_order(self, order_id: str):
+        _ = order_id
+        return None
+
+    async def update_stock(self, updates):
+        _ = updates
+        return []
+
+    async def update_tracking(self, order_id: str, tracking_number: str, carrier: str) -> bool:
+        _ = (order_id, tracking_number, carrier)
+        return False
+
+
+def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
+    reader = csv.DictReader(io.StringIO(file_text))
+    grouped: dict[str, dict] = {}
+    seen = 0
+    skipped = 0
+
+    for row in reader:
+        seen += 1
+        ext_order_id = (row.get("external_order_id") or row.get("order_id") or "").strip()
+        item_name = (row.get("item_name") or row.get("title") or "").strip()
+        if not ext_order_id or not item_name:
+            skipped += 1
+            continue
+
+        external_item_id = (row.get("external_item_id") or "").strip() or None
+        external_sku = (row.get("external_sku") or row.get("sku") or "").strip() or None
+        quantity_text = (row.get("quantity") or "1").strip()
+        unit_price_text = (row.get("unit_price") or "0").strip()
+        total_price_text = (row.get("total_price") or "").strip()
+
+        try:
+            quantity = int(quantity_text)
+            unit_price = float(unit_price_text)
+            total_price = float(total_price_text) if total_price_text else unit_price * quantity
+        except ValueError:
+            skipped += 1
+            continue
+
+        ordered_at = None
+        ordered_at_raw = (row.get("ordered_at") or "").strip()
+        if ordered_at_raw:
+            try:
+                ordered_at = datetime.fromisoformat(ordered_at_raw.replace("Z", "+00:00"))
+            except ValueError:
+                ordered_at = None
+
+        order_entry = grouped.setdefault(
+            ext_order_id,
+            {
+                "platform_order_id": ext_order_id,
+                "platform_order_number": (row.get("external_order_number") or row.get("order_number") or "").strip() or None,
+                "customer_name": (row.get("customer_name") or "").strip() or None,
+                "customer_email": (row.get("customer_email") or "").strip() or None,
+                "ship_address_line1": (row.get("shipping_address_line1") or "").strip() or None,
+                "ship_address_line2": (row.get("shipping_address_line2") or "").strip() or None,
+                "ship_city": (row.get("shipping_city") or "").strip() or None,
+                "ship_state": (row.get("shipping_state") or "").strip() or None,
+                "ship_postal_code": (row.get("shipping_postal_code") or "").strip() or None,
+                "ship_country": (row.get("shipping_country") or "").strip() or "US",
+                "subtotal": float((row.get("subtotal_amount") or row.get("subtotal") or "0").strip() or "0"),
+                "tax": float((row.get("tax_amount") or row.get("tax") or "0").strip() or "0"),
+                "shipping": float((row.get("shipping_amount") or row.get("shipping") or "0").strip() or "0"),
+                "total": float((row.get("total_amount") or row.get("total") or "0").strip() or "0"),
+                "currency": (row.get("currency") or "USD").strip() or "USD",
+                "ordered_at": ordered_at,
+                "items": [],
+                "raw_data": {"import_source": "CSV_GENERIC"},
+            },
+        )
+
+        order_entry["items"].append(
+            {
+                "platform_item_id": external_item_id,
+                "platform_sku": external_sku,
+                "asin": (row.get("external_asin") or "").strip() or None,
+                "title": item_name,
+                "quantity": quantity,
+                "unit_price": unit_price,
+                "total_price": total_price,
+                "raw_data": row,
+            }
+        )
+
+    return list(grouped.values()), seen, skipped
 
 
 # ============================================================================
@@ -161,7 +302,11 @@ async def sync_orders(
                 detail=f"Platform '{body.platform}' is not configured or unknown.",
             )
         logger.debug(f"[DEBUG.INTERNAL_API] Starting sync for {body.platform}")
-        result = await service.sync_platform(body.platform, clients[body.platform])
+        result = await service.sync_platform(
+            body.platform,
+            clients[body.platform],
+            source=_PLATFORM_TO_SOURCE.get(body.platform, f"{body.platform}_API"),
+        )
         logger.info(f"Sync result for {body.platform}: success={result.success}, new={result.new_orders}, errors={result.errors}")
         return [result]
 
@@ -170,7 +315,11 @@ async def sync_orders(
     results: list[SyncResponse] = []
     for name, client in clients.items():
         logger.debug(f"[DEBUG.INTERNAL_API] Starting sync for platform: {name}")
-        result = await service.sync_platform(name, client)
+        result = await service.sync_platform(
+            name,
+            client,
+            source=_PLATFORM_TO_SOURCE.get(name, f"{name}_API"),
+        )
         logger.info(f"Sync result for {name}: success={result.success}, new={result.new_orders}, errors={result.errors}")
         results.append(result)
 
@@ -205,14 +354,22 @@ async def sync_orders_range(
                 detail=f"Platform '{body.platform}' is not configured or unknown.",
             )
         result = await service.sync_platform_range(
-            body.platform, clients[body.platform], body.since, body.until,
+            body.platform,
+            clients[body.platform],
+            body.since,
+            body.until,
+            source=_PLATFORM_TO_SOURCE.get(body.platform, f"{body.platform}_API"),
         )
         return [result]
 
     results: list[SyncResponse] = []
     for name, client in clients.items():
         result = await service.sync_platform_range(
-            name, client, body.since, body.until,
+            name,
+            client,
+            body.since,
+            body.until,
+            source=_PLATFORM_TO_SOURCE.get(name, f"{name}_API"),
         )
         results.append(result)
 
@@ -259,6 +416,118 @@ async def reset_sync_state(
     return IntegrationStateResponse.model_validate(updated)
 
 
+@router.post("/import/api", response_model=SyncResponse)
+async def import_orders_from_api(
+    body: SalesImportApiRequest,
+    _staff: AdminOrSalesUser,
+    service: OrderSyncService = Depends(get_order_sync_service),
+):
+    clients = _build_platform_clients()
+    platform_name = _IMPORT_SOURCE_TO_PLATFORM[body.source]
+    if platform_name not in clients:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Platform '{platform_name}' is not configured or unknown.",
+        )
+
+    return await service.sync_platform_range(
+        platform_name,
+        clients[platform_name],
+        body.since,
+        body.until,
+        source=_PLATFORM_TO_SOURCE.get(platform_name, f"{platform_name}_API"),
+    )
+
+
+@router.post("/import/file", response_model=SalesImportFileResponse)
+async def import_orders_from_file(
+    _staff: AdminOrSalesUser,
+    source: Annotated[SalesImportFileSource, Query()],
+    file: UploadFile = File(...),
+    service: OrderSyncService = Depends(get_order_sync_service),
+):
+    if source != SalesImportFileSource.CSV_GENERIC:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported import source",
+        )
+
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only CSV file uploads are supported.",
+        )
+
+    content = await file.read()
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="CSV must be UTF-8 encoded.",
+        ) from exc
+
+    rows, rows_seen, rows_skipped = _parse_order_csv(text)
+    external_orders: list[ExternalOrder] = []
+    for row in rows:
+        items = [
+            ExternalOrderItem(
+                platform_item_id=item["platform_item_id"],
+                platform_sku=item["platform_sku"],
+                asin=item["asin"],
+                title=item["title"],
+                quantity=item["quantity"],
+                unit_price=item["unit_price"],
+                total_price=item["total_price"],
+                raw_data=item["raw_data"],
+            )
+            for item in row["items"]
+        ]
+        external_orders.append(
+            ExternalOrder(
+                platform_order_id=row["platform_order_id"],
+                platform_order_number=row["platform_order_number"],
+                customer_name=row["customer_name"],
+                customer_email=row["customer_email"],
+                ship_address_line1=row["ship_address_line1"],
+                ship_address_line2=row["ship_address_line2"],
+                ship_city=row["ship_city"],
+                ship_state=row["ship_state"],
+                ship_postal_code=row["ship_postal_code"],
+                ship_country=row["ship_country"],
+                subtotal=row["subtotal"],
+                tax=row["tax"],
+                shipping=row["shipping"],
+                total=row["total"],
+                currency=row["currency"],
+                ordered_at=row["ordered_at"],
+                items=items,
+                raw_data=row["raw_data"],
+            )
+        )
+
+    client = _StaticImportClient("MANUAL", external_orders)
+    result = await service.sync_platform_range(
+        "MANUAL",
+        client,
+        datetime(1970, 1, 1, tzinfo=timezone.utc),
+        datetime.now(timezone.utc),
+        source=source.value,
+    )
+
+    return SalesImportFileResponse(
+        source=source,
+        source_rows_seen=rows_seen,
+        source_rows_skipped=rows_skipped,
+        new_orders=result.new_orders,
+        new_items=result.new_items,
+        auto_matched=result.auto_matched,
+        skipped_duplicates=result.skipped_duplicates,
+        success=result.success,
+        errors=result.errors,
+    )
+
+
 # ============================================================================
 # ORDER CRUD ENDPOINTS
 # ============================================================================
@@ -270,6 +539,12 @@ async def list_orders(
     platform: Annotated[Optional[OrderPlatform], Query()] = None,
     status_filter: Annotated[Optional[str], Query(alias="status")] = None,
     item_status: Annotated[Optional[OrderItemStatus], Query()] = None,
+    ordered_at_from: Annotated[Optional[datetime], Query()] = None,
+    ordered_at_to: Annotated[Optional[datetime], Query()] = None,
+    zoho_sync_status: Annotated[Optional[str], Query()] = None,
+    source: Annotated[Optional[str], Query()] = None,
+    sort_by: Annotated[str, Query(pattern="^(ordered_at|created_at|total_amount|external_order_id)$")] = "ordered_at",
+    sort_dir: Annotated[str, Query(pattern="^(asc|desc)$")] = "desc",
     search: Annotated[Optional[str], Query()] = None,
     order_repo: OrderRepository = Depends(get_order_repo),
 ):
@@ -280,8 +555,10 @@ async def list_orders(
     item-level status (e.g. UNMATCHED), and free-text search.
     """
     from app.modules.orders.models import OrderStatus as OS
+    from app.models.entities import ZohoSyncStatus as ZS
 
     os_filter = None
+    zs_filter = None
     if status_filter:
         try:
             os_filter = OS(status_filter)
@@ -290,6 +567,14 @@ async def list_orders(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid order status: {status_filter}",
             )
+    if zoho_sync_status:
+        try:
+            zs_filter = ZS(zoho_sync_status)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid Zoho sync status: {zoho_sync_status}",
+            )
 
     orders, total = await order_repo.list_orders(
         skip=skip,
@@ -297,6 +582,12 @@ async def list_orders(
         platform=platform,
         status=os_filter,
         item_status=item_status,
+        ordered_at_from=ordered_at_from,
+        ordered_at_to=ordered_at_to,
+        zoho_sync_status=zs_filter,
+        source=source,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
         search=search,
     )
 
@@ -312,6 +603,7 @@ async def list_orders(
             OrderBrief(
                 id=o.id,
                 platform=o.platform,
+                source=o.source,
                 external_order_id=o.external_order_id,
                 external_order_number=o.external_order_number,
                 status=o.status,

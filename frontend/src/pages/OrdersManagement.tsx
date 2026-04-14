@@ -65,6 +65,7 @@ import type {
 
 import OrderSyncButton from '../components/orders/OrderSyncButton'
 import AdminDateRangeSync from '../components/orders/AdminDateRangeSync'
+import OrderImportButton from '../components/orders/OrderImportButton'
 import OrderItemsPanel from '../components/orders/OrderItemsPanel'
 import { useAuth } from '../hooks/useAuth'
 import SearchField from '../components/common/SearchField'
@@ -81,6 +82,7 @@ const PLATFORM_LABELS: Record<OrderPlatform, string> = {
   EBAY_USAV: 'eBay USAV',
   EBAY_DRAGON: 'eBay Dragon',
   ECWID: 'Ecwid',
+  WALMART: 'Walmart',
   ZOHO: 'Zoho',
   MANUAL: 'Manual',
 }
@@ -114,6 +116,13 @@ const SHIPPING_STATUS_OPTIONS: ShippingStatus[] = [
   'DELIVERED',
 ]
 
+const SORT_BY_OPTIONS = [
+  { value: 'ordered_at', label: 'Ordered At' },
+  { value: 'created_at', label: 'Created At' },
+  { value: 'total_amount', label: 'Total Amount' },
+  { value: 'external_order_id', label: 'External Order ID' },
+] as const
+
 const ZOHO_SYNC_COLOR: Record<ZohoSyncStatus, 'default' | 'success' | 'error' | 'warning'> = {
   PENDING: 'warning',
   DIRTY: 'warning',
@@ -135,6 +144,12 @@ export default function OrdersManagement() {
   const [platformFilter, setPlatformFilter] = useState<OrderPlatform | ''>('')
   const [statusFilter, setStatusFilter] = useState<OrderStatus | ''>('')
   const [itemStatusFilter, setItemStatusFilter] = useState<OrderItemStatus | ''>('')
+  const [zohoSyncFilter, setZohoSyncFilter] = useState<ZohoSyncStatus | ''>('')
+  const [sourceFilter, setSourceFilter] = useState('')
+  const [orderedFromFilter, setOrderedFromFilter] = useState('')
+  const [orderedToFilter, setOrderedToFilter] = useState('')
+  const [sortBy, setSortBy] = useState<(typeof SORT_BY_OPTIONS)[number]['value']>('ordered_at')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [searchInput, setSearchInput] = useState('')
   const debouncedSearch = useDebouncedValue(searchInput, 250)
 
@@ -178,7 +193,21 @@ export default function OrdersManagement() {
     data: ordersData,
     isLoading: ordersLoading,
   } = useQuery<OrderListResponse>({
-    queryKey: ['orders', page, rowsPerPage, platformFilter, statusFilter, itemStatusFilter, debouncedSearch],
+    queryKey: [
+      'orders',
+      page,
+      rowsPerPage,
+      platformFilter,
+      statusFilter,
+      itemStatusFilter,
+      zohoSyncFilter,
+      sourceFilter,
+      orderedFromFilter,
+      orderedToFilter,
+      sortBy,
+      sortDir,
+      debouncedSearch,
+    ],
     queryFn: () =>
       listOrders({
         skip: page * rowsPerPage,
@@ -186,6 +215,12 @@ export default function OrdersManagement() {
         platform: platformFilter || undefined,
         status: statusFilter || undefined,
         item_status: itemStatusFilter || undefined,
+        zoho_sync_status: zohoSyncFilter || undefined,
+        source: sourceFilter || undefined,
+        ordered_at_from: orderedFromFilter ? new Date(`${orderedFromFilter}T00:00:00`).toISOString() : undefined,
+        ordered_at_to: orderedToFilter ? new Date(`${orderedToFilter}T23:59:59.999`).toISOString() : undefined,
+        sort_by: sortBy,
+        sort_dir: sortDir,
         search: debouncedSearch || undefined,
       }),
   })
@@ -417,6 +452,12 @@ export default function OrdersManagement() {
     setPlatformFilter('')
     setStatusFilter('')
     setItemStatusFilter('')
+    setZohoSyncFilter('')
+    setSourceFilter('')
+    setOrderedFromFilter('')
+    setOrderedToFilter('')
+    setSortBy('ordered_at')
+    setSortDir('desc')
     setSearchInput('')
     setPage(0)
   }
@@ -428,7 +469,7 @@ export default function OrdersManagement() {
       && new Date(`${bulkFromDate}T00:00:00`) > new Date(`${bulkToDate}T23:59:59.999`),
   )
   const canStartBulkSync = Boolean(bulkFromDate && bulkToDate && !invalidBulkRange)
-  const columnCount = hasRole(['ADMIN']) ? 10 : 9
+  const columnCount = hasRole(['ADMIN']) ? 11 : 10
 
   const handleShippingStatusChange = (
     orderId: number,
@@ -475,6 +516,7 @@ export default function OrdersManagement() {
               Sync matched to Zoho
             </Button>
           )}
+          {hasRole(['ADMIN', 'SALES_REP']) && <OrderImportButton />}
           <OrderSyncButton />
         </Stack>
       </Box>
@@ -563,7 +605,7 @@ export default function OrdersManagement() {
       {/* Filters */}
       <Paper sx={{ p: 2, mb: 2 }}>
         <Grid container spacing={2} alignItems="center">
-          <Grid item xs={12} md={3}>
+          <Grid item xs={12} md={2.5}>
             <SearchField
               fullWidth
               size="small"
@@ -575,7 +617,7 @@ export default function OrdersManagement() {
               }}
             />
           </Grid>
-          <Grid item xs={6} md={2.5}>
+          <Grid item xs={6} md={2}>
             <FormControl fullWidth size="small">
               <InputLabel>Platform</InputLabel>
               <Select
@@ -595,7 +637,7 @@ export default function OrdersManagement() {
               </Select>
             </FormControl>
           </Grid>
-          <Grid item xs={6} md={2.5}>
+          <Grid item xs={6} md={2}>
             <FormControl fullWidth size="small">
               <InputLabel>Order Status</InputLabel>
               <Select
@@ -615,7 +657,7 @@ export default function OrdersManagement() {
               </Select>
             </FormControl>
           </Grid>
-          <Grid item xs={6} md={2.5}>
+          <Grid item xs={6} md={2}>
             <FormControl fullWidth size="small">
               <InputLabel>Item Status</InputLabel>
               <Select
@@ -636,6 +678,101 @@ export default function OrdersManagement() {
             </FormControl>
           </Grid>
           <Grid item xs={6} md={1.5}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Zoho Sync</InputLabel>
+              <Select
+                value={zohoSyncFilter}
+                onChange={(e) => {
+                  setZohoSyncFilter(e.target.value as ZohoSyncStatus | '')
+                  setPage(0)
+                }}
+                label="Zoho Sync"
+              >
+                <MenuItem value="">All</MenuItem>
+                <MenuItem value="PENDING">PENDING</MenuItem>
+                <MenuItem value="DIRTY">DIRTY</MenuItem>
+                <MenuItem value="SYNCED">SYNCED</MenuItem>
+                <MenuItem value="ERROR">ERROR</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid item xs={6} md={2}>
+            <TextField
+              fullWidth
+              size="small"
+              label="Source"
+              placeholder="e.g. EBAY_USAV_API"
+              value={sourceFilter}
+              onChange={(e) => {
+                setSourceFilter(e.target.value)
+                setPage(0)
+              }}
+            />
+          </Grid>
+          <Grid item xs={6} md={1.5}>
+            <TextField
+              fullWidth
+              size="small"
+              type="date"
+              label="Ordered From"
+              value={orderedFromFilter}
+              onChange={(e) => {
+                setOrderedFromFilter(e.target.value)
+                setPage(0)
+              }}
+              InputLabelProps={{ shrink: true }}
+            />
+          </Grid>
+          <Grid item xs={6} md={1.5}>
+            <TextField
+              fullWidth
+              size="small"
+              type="date"
+              label="Ordered To"
+              value={orderedToFilter}
+              onChange={(e) => {
+                setOrderedToFilter(e.target.value)
+                setPage(0)
+              }}
+              InputLabelProps={{ shrink: true }}
+            />
+          </Grid>
+          <Grid item xs={6} md={1.5}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Sort By</InputLabel>
+              <Select
+                value={sortBy}
+                onChange={(e) => {
+                  setSortBy(e.target.value as (typeof SORT_BY_OPTIONS)[number]['value'])
+                  setPage(0)
+                }}
+                label="Sort By"
+              >
+                {SORT_BY_OPTIONS.map((opt) => (
+                  <MenuItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid item xs={6} md={1.5}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Sort Dir</InputLabel>
+              <Select
+                value={sortDir}
+                onChange={(e) => {
+                  setSortDir(e.target.value as 'asc' | 'desc')
+                  setPage(0)
+                }}
+                label="Sort Dir"
+              >
+                <MenuItem value="desc">Desc</MenuItem>
+                <MenuItem value="asc">Asc</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid item xs={6} md={1}>
             <Tooltip title="Reset filters">
               <IconButton onClick={resetFilters} size="small">
                 <Refresh fontSize="small" />
@@ -654,6 +791,7 @@ export default function OrdersManagement() {
                 <TableCell sx={{ width: 40 }} />
                 <TableCell>Order #</TableCell>
                 <TableCell>Platform</TableCell>
+                <TableCell>Source</TableCell>
                 <TableCell>Customer</TableCell>
                 <TableCell align="center">Unmatched</TableCell>
                 <TableCell align="right">Total</TableCell>
@@ -705,6 +843,9 @@ export default function OrdersManagement() {
                             label={PLATFORM_LABELS[order.platform] ?? order.platform}
                             variant="outlined"
                           />
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2">{order.source}</Typography>
                         </TableCell>
                         <TableCell>
                           <Typography variant="body2">

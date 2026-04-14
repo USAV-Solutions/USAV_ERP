@@ -7,10 +7,11 @@ deduplication-safe upserts and filtered queries for the dashboard.
 from datetime import datetime
 from typing import Optional, Sequence
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.entities import ZohoSyncStatus
 from app.modules.orders.models import (
     Order,
     OrderItem,
@@ -64,6 +65,12 @@ class OrderRepository(BaseRepository[Order]):
         platform: Optional[OrderPlatform] = None,
         status: Optional[OrderStatus] = None,
         item_status: Optional[OrderItemStatus] = None,
+        ordered_at_from: Optional[datetime] = None,
+        ordered_at_to: Optional[datetime] = None,
+        zoho_sync_status: Optional[ZohoSyncStatus] = None,
+        source: Optional[str] = None,
+        sort_by: str = "ordered_at",
+        sort_dir: str = "desc",
         search: Optional[str] = None,
     ) -> tuple[Sequence[Order], int]:
         """
@@ -85,6 +92,14 @@ class OrderRepository(BaseRepository[Order]):
             stmt = stmt.where(
                 Order.items.any(OrderItem.status == item_status)
             )
+        if ordered_at_from is not None:
+            stmt = stmt.where(Order.ordered_at >= ordered_at_from)
+        if ordered_at_to is not None:
+            stmt = stmt.where(Order.ordered_at <= ordered_at_to)
+        if zoho_sync_status is not None:
+            stmt = stmt.where(Order.zoho_sync_status == zoho_sync_status)
+        if source:
+            stmt = stmt.where(Order.source.ilike(f"%{source.strip()}%"))
         if search:
             pattern = f"%{search}%"
             stmt = stmt.where(
@@ -96,8 +111,20 @@ class OrderRepository(BaseRepository[Order]):
         count_stmt = select(func.count()).select_from(stmt.subquery())
         total = (await self.session.execute(count_stmt)).scalar_one()
 
-        # Apply ordering + pagination
-        stmt = stmt.order_by(Order.ordered_at.desc()).offset(skip).limit(limit)
+        sort_columns = {
+            "ordered_at": Order.ordered_at,
+            "created_at": Order.created_at,
+            "total_amount": Order.total_amount,
+            "external_order_id": Order.external_order_id,
+        }
+        sort_column = sort_columns.get(sort_by.lower(), Order.ordered_at)
+
+        if sort_dir.lower() == "asc":
+            stmt = stmt.order_by(sort_column.asc(), Order.id.asc())
+        else:
+            stmt = stmt.order_by(desc(sort_column), desc(Order.id))
+
+        stmt = stmt.offset(skip).limit(limit)
         rows = (await self.session.execute(stmt)).scalars().all()
 
         return rows, total

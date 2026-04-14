@@ -96,6 +96,8 @@ export const ORDERS = {
   SYNC_RANGE: '/orders/sync/range',
   SYNC_STATUS: '/orders/sync/status',
   SYNC_RESET: (platform: string) => `/orders/sync/${platform}/reset`,
+  IMPORT_API: '/orders/import/api',
+  IMPORT_FILE: '/orders/import/file',
 
   // SKU Resolution
   MATCH_ITEM: (itemId: number) => `/orders/items/${itemId}/match`,

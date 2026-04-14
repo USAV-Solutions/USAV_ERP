@@ -170,7 +170,7 @@ export interface BundleComponent {
 }
 
 // Platform types
-export type Platform = 'AMAZON' | 'EBAY_MEKONG' | 'EBAY_USAV' | 'EBAY_DRAGON' | 'ECWID'
+export type Platform = 'AMAZON' | 'EBAY_MEKONG' | 'EBAY_USAV' | 'EBAY_DRAGON' | 'ECWID' | 'WALMART'
 export type PlatformSyncStatus = 'PENDING' | 'SYNCED' | 'ERROR'
 
 export interface PlatformListing {

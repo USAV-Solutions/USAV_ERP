@@ -23,6 +23,10 @@ import type {
   OrderStatus,
   OrderItemStatus,
   VariantSearchResult,
+  ZohoSyncStatus,
+  SalesImportApiRequest,
+  SalesImportFileResponse,
+  SalesImportFileSource,
 } from '../types/orders'
 
 // ── Order CRUD ───────────────────────────────────────────────────────
@@ -33,6 +37,12 @@ export interface ListOrdersParams {
   platform?: OrderPlatform
   status?: OrderStatus
   item_status?: OrderItemStatus
+  ordered_at_from?: string
+  ordered_at_to?: string
+  zoho_sync_status?: ZohoSyncStatus
+  source?: string
+  sort_by?: 'ordered_at' | 'created_at' | 'total_amount' | 'external_order_id'
+  sort_dir?: 'asc' | 'desc'
   search?: string
 }
 
@@ -43,6 +53,12 @@ export async function listOrders(params: ListOrdersParams = {}): Promise<OrderLi
   if (params.platform) query.set('platform', params.platform)
   if (params.status) query.set('status', params.status)
   if (params.item_status) query.set('item_status', params.item_status)
+  if (params.ordered_at_from) query.set('ordered_at_from', params.ordered_at_from)
+  if (params.ordered_at_to) query.set('ordered_at_to', params.ordered_at_to)
+  if (params.zoho_sync_status) query.set('zoho_sync_status', params.zoho_sync_status)
+  if (params.source) query.set('source', params.source)
+  if (params.sort_by) query.set('sort_by', params.sort_by)
+  if (params.sort_dir) query.set('sort_dir', params.sort_dir)
   if (params.search) query.set('search', params.search)
 
   const qs = query.toString()
@@ -95,6 +111,27 @@ export async function getSyncStatus(): Promise<SyncStatusResponse> {
 
 export async function resetSyncState(platform: string): Promise<IntegrationStateResponse> {
   const { data } = await axiosClient.post<IntegrationStateResponse>(ORDERS.SYNC_RESET(platform))
+  return data
+}
+
+export async function importOrdersFromApi(body: SalesImportApiRequest): Promise<SyncResponse> {
+  const { data } = await axiosClient.post<SyncResponse>(ORDERS.IMPORT_API, body)
+  return data
+}
+
+export async function importOrdersFromFile(
+  source: SalesImportFileSource,
+  file: File,
+): Promise<SalesImportFileResponse> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const { data } = await axiosClient.post<SalesImportFileResponse>(
+    `${ORDERS.IMPORT_FILE}?source=${encodeURIComponent(source)}`,
+    formData,
+    {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    },
+  )
   return data
 }
 

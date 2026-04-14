@@ -15,6 +15,10 @@ from app.modules.orders.schemas.orders import (
 )
 from app.modules.orders.schemas.sync import (
     IntegrationStateResponse,
+    SalesImportApiRequest,
+    SalesImportApiSource,
+    SalesImportFileResponse,
+    SalesImportFileSource,
     SyncRequest,
     SyncResponse,
     SyncStatusResponse,
@@ -34,6 +38,10 @@ __all__ = [
     "ShippingStatusUpdate",
     # Sync
     "IntegrationStateResponse",
+    "SalesImportApiRequest",
+    "SalesImportApiSource",
+    "SalesImportFileResponse",
+    "SalesImportFileSource",
     "SyncRequest",
     "SyncResponse",
     "SyncStatusResponse",

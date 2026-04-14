@@ -22,6 +22,7 @@ from app.integrations.base import (
 from app.integrations.amazon.client import AmazonClient
 from app.integrations.ebay.client import EbayClient
 from app.integrations.ecwid.client import EcwidClient
+from app.integrations.walmart.client import WalmartClient
 
 # Register all known adapters with the factory
 PlatformClientFactory.register("AMAZON", AmazonClient)
@@ -29,6 +30,7 @@ PlatformClientFactory.register("EBAY_MEKONG", EbayClient)
 PlatformClientFactory.register("EBAY_USAV", EbayClient)
 PlatformClientFactory.register("EBAY_DRAGON", EbayClient)
 PlatformClientFactory.register("ECWID", EcwidClient)
+PlatformClientFactory.register("WALMART", WalmartClient)
 
 __all__ = [
     "BasePlatformClient",
@@ -40,4 +42,5 @@ __all__ = [
     "AmazonClient",
     "EbayClient",
     "EcwidClient",
+    "WalmartClient",
 ]
