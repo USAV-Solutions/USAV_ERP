@@ -18,24 +18,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute(
-        """
-        DO $$ BEGIN
-            ALTER TYPE order_platform_enum ADD VALUE IF NOT EXISTS 'WALMART';
-        EXCEPTION
-            WHEN duplicate_object THEN null;
-        END $$;
-        """
-    )
-    op.execute(
-        """
-        DO $$ BEGIN
-            ALTER TYPE platform_enum ADD VALUE IF NOT EXISTS 'WALMART';
-        EXCEPTION
-            WHEN duplicate_object THEN null;
-        END $$;
-        """
-    )
+    # PostgreSQL requires enum value additions to be committed before use.
+    with op.get_context().autocommit_block():
+        op.execute("ALTER TYPE order_platform_enum ADD VALUE IF NOT EXISTS 'WALMART'")
+        op.execute("ALTER TYPE platform_enum ADD VALUE IF NOT EXISTS 'WALMART'")
 
     op.add_column(
         "orders",

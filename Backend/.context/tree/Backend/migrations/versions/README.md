@@ -10,6 +10,7 @@ Concrete Alembic revision files; source of truth for schema transitions.
 ## Common Pitfalls
 - Editing this folder without checking sibling tests and schema/type contracts.
 - Making cross-layer changes here but forgetting migration/frontend alignment.
+- In PostgreSQL, new enum values must be committed before they are used in the same migration (use Alembic autocommit blocks around `ALTER TYPE ... ADD VALUE`).
 
 ## Child Folders
 - (No child folders)
