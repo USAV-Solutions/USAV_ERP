@@ -7,7 +7,7 @@ Tables:
   - PurchaseOrderItem
 """
 import enum
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
@@ -15,6 +15,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Date,
+    DateTime,
     Enum,
     ForeignKey,
     Index,
@@ -123,6 +124,12 @@ class PurchaseOrder(Base, ZohoSyncMixin, TimestampMixin):
     source: Mapped[str] = mapped_column(String(50), nullable=False, default="MANUAL", server_default="MANUAL")
     is_stationery: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    zoho_bill_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    zoho_payment_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    zoho_billed_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    zoho_bill_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    zoho_payment_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    zoho_billing_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     zoho_sync_status: Mapped[ZohoSyncStatus] = mapped_column(
         Enum(ZohoSyncStatus, name="zoho_sync_status_enum", create_constraint=False),
         nullable=False,

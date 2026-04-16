@@ -68,6 +68,7 @@ class Settings(BaseSettings):
     zoho_po_stationery_delivery_address: str = ""
     zoho_item_stationery_purchase_account_id: str = ""
     zoho_item_stationery_purchase_account_name: str = "Office Supplies"
+    zoho_po_ebay_paid_through_account_id: str = "5623409000001937358"
     
     # Amazon SP-API Integration
     amazon_refresh_token: str = ""

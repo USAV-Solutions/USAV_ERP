@@ -7,6 +7,9 @@ import pytest
 from fastapi import HTTPException
 
 from app.integrations.zoho.sync_engine import (
+    _build_ebay_payment_payload,
+    _is_ebay_purchase_source,
+    _is_remote_purchase_order_billed,
     purchase_order_metadata_to_zoho_payload,
     purchase_order_to_zoho_payload,
     _verify_purchase_order_sku_parity,
@@ -180,6 +183,50 @@ def test_purchase_order_metadata_to_zoho_payload_excludes_line_items_and_keeps_a
     assert "line_items" not in payload
     assert payload["adjustment"] == 6.0
     assert payload["adjustment_description"] == "Shipping Fee + Tax + Handling Fee"
+
+
+@pytest.mark.parametrize(
+    "source,expected",
+    [
+        ("EBAY_MEKONG_API", True),
+        ("EBAY_USAV_API", True),
+        ("AMAZON_API", False),
+        (None, False),
+    ],
+)
+def test_is_ebay_purchase_source(source, expected):
+    assert _is_ebay_purchase_source(source) is expected
+
+
+@pytest.mark.parametrize(
+    "remote_po,expected",
+    [
+        ({"status": "billed"}, True),
+        ({"status": "open", "bills": [{"bill_id": "123"}]}, True),
+        ({"status": "open", "bills": []}, False),
+        ({}, False),
+        (None, False),
+    ],
+)
+def test_is_remote_purchase_order_billed(remote_po, expected):
+    assert _is_remote_purchase_order_billed(remote_po) is expected
+
+
+def test_build_ebay_payment_payload_maps_required_fields():
+    po = SimpleNamespace(
+        po_number="PO-980",
+        order_date=date(2026, 4, 10),
+        vendor=SimpleNamespace(zoho_id="999001"),
+    )
+
+    payload = _build_ebay_payment_payload(po, bill_id="bill-100", amount=45.5)
+
+    assert payload["date"] == "2026-04-10"
+    assert payload["payment_mode"] == "Credit Card"
+    assert payload["paid_through_account_id"]
+    assert payload["reference_number"] == "PO-980"
+    assert payload["bills"][0]["bill_id"] == "bill-100"
+    assert payload["bills"][0]["amount_applied"] == 45.5
 
 
 @pytest.mark.asyncio

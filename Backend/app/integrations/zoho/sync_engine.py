@@ -16,8 +16,10 @@ requires only changing ``_enqueue_*`` helpers.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Optional
 
 from sqlalchemy import event
@@ -34,6 +36,10 @@ logger = logging.getLogger(__name__)
 
 UNMATCHED_PLACEHOLDER_ITEM_NAME = "unmatched item"
 UNMATCHED_PLACEHOLDER_ITEM_SKU = "00000"
+EBAY_PO_SOURCE_PREFIX = "EBAY_"
+PAYMENT_TERMS_DUE_ON_RECEIPT = 0
+
+_UNMATCHED_PLACEHOLDER_ITEM_ID_CACHE: Optional[str] = None
 
 
 # =========================================================================
@@ -235,7 +241,9 @@ def purchase_order_to_zoho_payload(
 
     payload["custom_fields"] = custom_fields
 
-    stationery_location_id = "5623409000002952427" if getattr(po, "is_stationery", False) else None
+    stationery_location_id = (
+        str(getattr(settings, "zoho_po_stationery_location_id", "") or "").strip() or None
+    )
 
     if getattr(po, "is_stationery", False):
         if stationery_location_id:
@@ -374,6 +382,11 @@ async def _verify_purchase_order_sku_parity(
 
 async def _ensure_unmatched_placeholder_item(zoho: ZohoClient) -> Optional[str]:
     """Ensure the unmatched placeholder item exists in Zoho and return its item_id."""
+    global _UNMATCHED_PLACEHOLDER_ITEM_ID_CACHE
+
+    if _UNMATCHED_PLACEHOLDER_ITEM_ID_CACHE:
+        return _UNMATCHED_PLACEHOLDER_ITEM_ID_CACHE
+
     item = await zoho.ensure_item_by_sku(
         sku=UNMATCHED_PLACEHOLDER_ITEM_SKU,
         name=UNMATCHED_PLACEHOLDER_ITEM_NAME,
@@ -381,6 +394,8 @@ async def _ensure_unmatched_placeholder_item(zoho: ZohoClient) -> Optional[str]:
         description="Auto-created placeholder for unmatched purchase-order lines.",
     )
     item_id = str(item.get("item_id") or "").strip()
+    if item_id:
+        _UNMATCHED_PLACEHOLDER_ITEM_ID_CACHE = item_id
     return item_id or None
 
 
@@ -475,6 +490,355 @@ def _is_billed_po_update_error(exc: Exception) -> bool:
 def _is_bill_has_recorded_payments_delete_error(exc: Exception) -> bool:
     message = str(exc)
     return "1040" in message or "recorded payments cannot be deleted" in message.lower()
+
+
+def _is_invalid_branch_id_error(exc: Exception) -> bool:
+    message = str(exc)
+    message_lc = message.lower()
+    return "invalid value passed for branch_id" in message_lc or '"code":400002' in message_lc
+
+
+def _strip_po_location_fields(payload: dict[str, Any]) -> dict[str, Any]:
+    sanitized: dict[str, Any] = {k: v for k, v in payload.items() if k not in {"location_id", "branch_id"}}
+    line_items = payload.get("line_items")
+    if isinstance(line_items, list):
+        sanitized_lines: list[dict[str, Any]] = []
+        for line in line_items:
+            if isinstance(line, dict):
+                sanitized_lines.append({k: v for k, v in line.items() if k not in {"location_id", "branch_id"}})
+            else:
+                sanitized_lines.append(line)
+        sanitized["line_items"] = sanitized_lines
+    return sanitized
+
+
+def _is_ebay_purchase_source(source: Optional[str]) -> bool:
+    return str(source or "").strip().upper().startswith(EBAY_PO_SOURCE_PREFIX)
+
+
+def _to_decimal(value: object, default: str = "0") -> Decimal:
+    try:
+        text = str(value if value is not None else default).replace("$", "").replace(",", "").strip()
+        if not text:
+            text = default
+        return Decimal(text)
+    except Exception:
+        return Decimal(default)
+
+
+def _to_float_money(value: object) -> float:
+    return float(_to_decimal(value, default="0"))
+
+
+def _is_remote_purchase_order_billed(remote_po: Optional[dict[str, Any]]) -> bool:
+    if not remote_po:
+        return False
+
+    status = str(remote_po.get("status") or "").strip().lower()
+    if status == "billed":
+        return True
+
+    bills = remote_po.get("bills") or []
+    return isinstance(bills, list) and len(bills) > 0
+
+
+def _build_ebay_bill_payload(po: PurchaseOrder) -> dict[str, Any]:
+    if not po.vendor or not po.vendor.zoho_id:
+        raise ValueError("vendor is missing zoho_id")
+
+    line_items: list[dict[str, Any]] = []
+    if not po.zoho_id:
+        for item in po.items or []:
+            qty = int(getattr(item, "quantity", 0) or 0)
+            if qty <= 0:
+                continue
+
+            line: dict[str, Any] = {
+                "name": str(getattr(item, "external_item_name", "") or "Imported Item")[:255],
+                "quantity": qty,
+                "rate": _to_float_money(getattr(item, "unit_price", 0)),
+            }
+            variant = getattr(item, "variant", None)
+            if variant and getattr(variant, "zoho_item_id", None):
+                line["item_id"] = str(variant.zoho_item_id)
+            else:
+                line["description"] = "Auto-sync line without mapped Zoho item ID"
+
+            line_items.append(line)
+
+        if not line_items:
+            raise ValueError("no billable line items")
+
+    bill_date = po.order_date.isoformat()
+    payload: dict[str, Any] = {
+        "vendor_id": str(po.vendor.zoho_id),
+        "bill_number": po.po_number,
+        "reference_number": po.po_number,
+        "date": bill_date,
+        "due_date": bill_date,
+        "payment_terms": PAYMENT_TERMS_DUE_ON_RECEIPT,
+        "currency_code": str(po.currency or "USD"),
+    }
+
+    if po.zoho_id:
+        payload["purchaseorder_id"] = str(po.zoho_id)
+    else:
+        payload["line_items"] = line_items
+
+    charge_total = (
+        _to_decimal(getattr(po, "tax_amount", 0), "0")
+        + _to_decimal(getattr(po, "shipping_amount", 0), "0")
+        + _to_decimal(getattr(po, "handling_amount", 0), "0")
+    )
+    if charge_total != Decimal("0"):
+        payload["adjustment"] = float(charge_total)
+        payload["adjustment_description"] = "Shipping Fee + Tax + Handling Fee"
+
+    if po.notes:
+        payload["notes"] = str(po.notes)
+
+    return payload
+
+
+def _enrich_bill_payload_with_remote_po_lines(
+    *,
+    remote_po: dict[str, Any],
+    bill_payload: dict[str, Any],
+) -> dict[str, Any]:
+    purchaseorder_id = str(bill_payload.get("purchaseorder_id") or "").strip()
+    if not purchaseorder_id:
+        return bill_payload
+
+    po_lines = remote_po.get("line_items") or []
+    if not isinstance(po_lines, list) or not po_lines:
+        raise ValueError(f"Zoho PO {purchaseorder_id} has no line_items")
+
+    default_account_id = ""
+    for line in po_lines:
+        if not isinstance(line, dict):
+            continue
+        candidate = str(line.get("account_id") or "").strip()
+        if candidate:
+            default_account_id = candidate
+            break
+
+    linked_lines: list[dict[str, Any]] = []
+    for line in po_lines:
+        if not isinstance(line, dict):
+            continue
+
+        purchaseorder_item_id = str(line.get("purchaseorder_item_id") or line.get("line_item_id") or "").strip()
+        quantity = int(_to_decimal(line.get("quantity"), default="0"))
+        if not purchaseorder_item_id or quantity <= 0:
+            continue
+
+        line_payload: dict[str, Any] = {
+            "purchaseorder_item_id": purchaseorder_item_id,
+            "quantity": quantity,
+        }
+
+        for key in [
+            "item_id",
+            "name",
+            "description",
+            "rate",
+            "tax_id",
+            "tds_tax_id",
+            "location_id",
+            "account_id",
+        ]:
+            value = line.get(key)
+            if value is not None and str(value).strip() != "":
+                line_payload[key] = value
+
+        if not str(line_payload.get("account_id") or "").strip() and default_account_id:
+            line_payload["account_id"] = default_account_id
+
+        linked_lines.append(line_payload)
+
+    if not linked_lines:
+        raise ValueError(f"Zoho PO {purchaseorder_id} produced no valid bill line_items")
+
+    enriched = dict(bill_payload)
+    enriched["line_items"] = linked_lines
+
+    po_branch_id = str(remote_po.get("branch_id") or "").strip()
+    po_location_id = str(remote_po.get("location_id") or "").strip()
+    if po_branch_id:
+        enriched["branch_id"] = po_branch_id
+    if po_location_id:
+        enriched["location_id"] = po_location_id
+
+    return enriched
+
+
+async def _create_bill_with_inventory_fallback(
+    zoho: ZohoClient,
+    bill_payload: dict[str, Any],
+) -> dict[str, Any]:
+    result = await zoho._request(
+        "POST",
+        "/bills",
+        api="inventory",
+        data={"JSONString": json.dumps(bill_payload)},
+    )
+    return result.get("bill", {}) or {}
+
+
+async def _list_bill_payments_with_inventory_fallback(
+    zoho: ZohoClient,
+    bill_id: str,
+) -> list[dict[str, Any]]:
+    result = await zoho._request(
+        "GET",
+        "/vendorpayments",
+        api="inventory",
+        params={
+            "bill_id": bill_id,
+            "page": 1,
+            "per_page": 200,
+        },
+    )
+    return result.get("vendorpayments", []) or result.get("vendor_payments", []) or []
+
+
+def _resolve_bill_amount(po: PurchaseOrder, bill: dict[str, Any]) -> float:
+    bill_total = _to_float_money(bill.get("total"))
+    if bill_total > 0:
+        return bill_total
+
+    po_total = _to_float_money(po.total_amount)
+    if po_total > 0:
+        return po_total
+
+    line_total = sum(
+        _to_float_money(getattr(item, "unit_price", 0)) * int(getattr(item, "quantity", 0) or 0)
+        for item in (po.items or [])
+    )
+    if line_total > 0:
+        return line_total
+
+    return 0.0
+
+
+def _build_ebay_payment_payload(po: PurchaseOrder, bill_id: str, amount: float) -> dict[str, Any]:
+    if not po.vendor or not po.vendor.zoho_id:
+        raise ValueError("vendor is missing zoho_id")
+    if amount <= 0:
+        raise ValueError("payment amount must be > 0")
+
+    payment_date = po.order_date.isoformat()
+    return {
+        "vendor_id": str(po.vendor.zoho_id),
+        "date": payment_date,
+        "payment_mode": "Credit Card",
+        "paid_through_account_id": str(settings.zoho_po_ebay_paid_through_account_id),
+        "amount": amount,
+        "reference_number": po.po_number,
+        "description": "Auto-created from eBay purchase-order sync",
+        "bills": [
+            {
+                "bill_id": bill_id,
+                "amount_applied": amount,
+            }
+        ],
+    }
+
+
+async def _sync_ebay_bill_and_payment_for_purchase_order(
+    *,
+    po: PurchaseOrder,
+    zoho: ZohoClient,
+    remote_po_hint: Optional[dict[str, Any]] = None,
+) -> None:
+    if not _is_ebay_purchase_source(getattr(po, "source", None)):
+        return
+
+    if po.zoho_bill_created and po.zoho_payment_created:
+        return
+
+    if not po.zoho_id:
+        raise ValueError("Cannot sync EBAY bill/payment without purchase_order.zoho_id")
+
+    po.zoho_billing_error = None
+
+    bill_id = str(po.zoho_bill_id or "").strip()
+    remote_po = remote_po_hint
+
+    if not po.zoho_bill_created:
+        if not remote_po:
+            remote_po = await zoho.get_purchase_order(str(po.zoho_id))
+
+        po.zoho_billed_checked_at = datetime.now()
+        if _is_remote_purchase_order_billed(remote_po):
+            po.zoho_bill_created = True
+            remote_bills = (remote_po or {}).get("bills") or []
+            if isinstance(remote_bills, list):
+                for bill_ref in remote_bills:
+                    candidate_bill_id = str((bill_ref or {}).get("bill_id") or "").strip()
+                    if candidate_bill_id:
+                        po.zoho_bill_id = candidate_bill_id
+                        break
+            return
+
+    if not po.zoho_bill_created:
+        bill_payload = _build_ebay_bill_payload(po)
+        if po.zoho_id:
+            if not remote_po:
+                remote_po = await zoho.get_purchase_order(str(po.zoho_id))
+            bill_payload = _enrich_bill_payload_with_remote_po_lines(
+                remote_po=remote_po,
+                bill_payload=bill_payload,
+            )
+
+        created_bill = await _create_bill_with_inventory_fallback(zoho, bill_payload)
+        bill_id = str(created_bill.get("bill_id") or "").strip()
+        if not bill_id:
+            raise ValueError("Zoho bill creation succeeded but no bill_id was returned")
+
+        po.zoho_bill_created = True
+        po.zoho_bill_id = bill_id
+    elif bill_id:
+        po.zoho_bill_created = True
+
+    bill_id = str(po.zoho_bill_id or "").strip()
+    if not bill_id:
+        return
+
+    if po.zoho_payment_created:
+        return
+
+    existing_payments = await _list_bill_payments_with_inventory_fallback(zoho, bill_id)
+    if existing_payments:
+        po.zoho_payment_created = True
+        first_payment = existing_payments[0] if isinstance(existing_payments[0], dict) else {}
+        payment_id = str(
+            first_payment.get("payment_id")
+            or first_payment.get("vendorpayment_id")
+            or first_payment.get("vendor_payment_id")
+            or ""
+        ).strip()
+        if payment_id:
+            po.zoho_payment_id = payment_id
+        return
+
+    bill_payload_for_total = await zoho.get_bill(bill_id)
+    amount = _resolve_bill_amount(po, bill_payload_for_total or {})
+    if amount <= 0:
+        raise ValueError("payment amount must be > 0")
+
+    payment_payload = _build_ebay_payment_payload(po, bill_id, amount)
+    created_payment = await zoho.create_vendor_payment(payment_payload)
+
+    po.zoho_payment_created = True
+    payment_id = str(
+        (created_payment or {}).get("payment_id")
+        or (created_payment or {}).get("vendorpayment_id")
+        or (created_payment or {}).get("vendor_payment_id")
+        or ""
+    ).strip()
+    if payment_id:
+        po.zoho_payment_id = payment_id
 
 
 def _build_bill_recreate_payload(bill: dict[str, Any], *, purchaseorder_id: str) -> dict[str, Any]:
@@ -909,7 +1273,11 @@ async def sync_vendor_outbound(vendor_id: int) -> None:
             logger.exception("sync_vendor_outbound: vendor %s failed", vendor_id)
 
 
-async def sync_po_outbound(po_id: int, allow_billed_unbill_rebill: bool = False) -> None:
+async def sync_po_outbound(
+    po_id: int,
+    allow_billed_unbill_rebill: bool = False,
+    enable_ebay_billing: bool = False,
+) -> None:
     """Push a ``PurchaseOrder`` to Zoho Inventory as a purchase order."""
     from sqlalchemy import select
     from sqlalchemy.orm import selectinload
@@ -999,17 +1367,51 @@ async def sync_po_outbound(po_id: int, allow_billed_unbill_rebill: bool = False)
                         await zoho.update_purchase_order(resolved_zoho_po_id, metadata_payload)
                         metadata_updated = True
                     except Exception as metadata_exc:
-                        logger.warning(
-                            "sync_po_outbound: metadata update failed; continuing with full update | po_id=%s zoho_id=%s error=%s",
-                            po_id,
-                            resolved_zoho_po_id,
-                            metadata_exc,
-                        )
+                        if _is_invalid_branch_id_error(metadata_exc):
+                            try:
+                                fallback_metadata_payload = _strip_po_location_fields(metadata_payload)
+                                await zoho.update_purchase_order(
+                                    resolved_zoho_po_id,
+                                    fallback_metadata_payload,
+                                )
+                                metadata_payload = fallback_metadata_payload
+                                metadata_updated = True
+                                logger.warning(
+                                    "sync_po_outbound: metadata update retried without location fields after branch_id validation error | po_id=%s zoho_id=%s",
+                                    po_id,
+                                    resolved_zoho_po_id,
+                                )
+                            except Exception:
+                                logger.warning(
+                                    "sync_po_outbound: metadata update fallback without location fields failed | po_id=%s zoho_id=%s",
+                                    po_id,
+                                    resolved_zoho_po_id,
+                                )
+                        if metadata_updated:
+                            pass
+                        else:
+                            logger.warning(
+                                "sync_po_outbound: metadata update failed; continuing with full update | po_id=%s zoho_id=%s error=%s",
+                                po_id,
+                                resolved_zoho_po_id,
+                                metadata_exc,
+                            )
 
                 try:
                     zoho_po = await zoho.update_purchase_order(resolved_zoho_po_id, payload)
                 except Exception as update_exc:
                     handled_locked_lines = False
+                    if _is_invalid_branch_id_error(update_exc):
+                        fallback_payload = _strip_po_location_fields(payload)
+                        zoho_po = await zoho.update_purchase_order(resolved_zoho_po_id, fallback_payload)
+                        payload = fallback_payload
+                        new_hash = generate_payload_hash(payload)
+                        handled_locked_lines = True
+                        logger.warning(
+                            "sync_po_outbound: purchase-order update retried without location fields after branch_id validation error | po_id=%s zoho_id=%s",
+                            po_id,
+                            resolved_zoho_po_id,
+                        )
                     if _is_billed_po_update_error(update_exc) and metadata_updated:
                         refreshed_zoho_po = await zoho.get_purchase_order(resolved_zoho_po_id)
                         has_parity, parity_detail = await _verify_purchase_order_sku_parity(
@@ -1041,11 +1443,39 @@ async def sync_po_outbound(po_id: int, allow_billed_unbill_rebill: bool = False)
                     else:
                         raise
             else:
-                zoho_po = await zoho.create_purchase_order(payload)
+                try:
+                    zoho_po = await zoho.create_purchase_order(payload)
+                except Exception as create_exc:
+                    if _is_invalid_branch_id_error(create_exc):
+                        fallback_payload = _strip_po_location_fields(payload)
+                        zoho_po = await zoho.create_purchase_order(fallback_payload)
+                        payload = fallback_payload
+                        new_hash = generate_payload_hash(payload)
+                        logger.warning(
+                            "sync_po_outbound: purchase-order create retried without location fields after branch_id validation error | po_id=%s",
+                            po_id,
+                        )
+                    else:
+                        raise
 
             zoho_po_id = str(zoho_po.get("purchaseorder_id", ""))
             if zoho_po_id:
                 po.zoho_id = zoho_po_id
+
+            if enable_ebay_billing:
+                try:
+                    await _sync_ebay_bill_and_payment_for_purchase_order(
+                        po=po,
+                        zoho=zoho,
+                        remote_po_hint=zoho_po if resolved_zoho_po_id else None,
+                    )
+                except Exception as billing_exc:
+                    po.zoho_billing_error = str(billing_exc)[:2000]
+                    logger.exception(
+                        "sync_po_outbound: ebay bill/payment sync failed | po_id=%s zoho_po_id=%s",
+                        po_id,
+                        po.zoho_id,
+                    )
 
             po.zoho_last_sync_hash = new_hash
             po.zoho_last_synced_at = datetime.now()

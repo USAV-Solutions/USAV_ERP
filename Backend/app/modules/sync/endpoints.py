@@ -34,6 +34,7 @@ def _queue_purchase_orders_for_sync(
     *,
     purchase_orders: list[PurchaseOrder],
     background_tasks: BackgroundTasks,
+    enable_ebay_billing: bool = True,
 ) -> list[int]:
     queued_ids: list[int] = []
     for po in purchase_orders:
@@ -43,7 +44,7 @@ def _queue_purchase_orders_for_sync(
         po.zoho_sync_error = None
         po._updated_by_sync = True
         queued_ids.append(po.id)
-        background_tasks.add_task(sync_po_outbound, po.id)
+        background_tasks.add_task(sync_po_outbound, po.id, False, enable_ebay_billing)
     return queued_ids
 
 
@@ -172,6 +173,7 @@ async def force_sync_purchase_order(
     queued_ids = _queue_purchase_orders_for_sync(
         purchase_orders=[purchase_order],
         background_tasks=background_tasks,
+        enable_ebay_billing=True,
     )
     await db.commit()
 
@@ -232,6 +234,7 @@ async def force_sync_purchase_orders_by_period(
     queued_ids = _queue_purchase_orders_for_sync(
         purchase_orders=purchase_orders,
         background_tasks=background_tasks,
+        enable_ebay_billing=True,
     )
 
     await db.commit()
