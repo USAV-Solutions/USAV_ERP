@@ -482,6 +482,11 @@ async def update_variant(
                 target_condition.value if hasattr(target_condition, "value") else target_condition,
             )
 
+            # Thumbnail URLs are SKU-path based; once SKU changes, any existing
+            # cached thumbnail_url may point to a different folder.
+            if update_data["full_sku"] != variant.full_sku:
+                update_data["thumbnail_url"] = None
+
         # Any local edit means Zoho copy is stale unless this is still a first-time pending item.
         keep_pending = (
             variant.zoho_sync_status == ZohoSyncStatus.PENDING

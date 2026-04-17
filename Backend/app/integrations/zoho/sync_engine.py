@@ -39,6 +39,28 @@ UNMATCHED_PLACEHOLDER_ITEM_SKU = "00000"
 EBAY_PO_SOURCE_PREFIX = "EBAY_"
 PAYMENT_TERMS_DUE_ON_RECEIPT = 0
 
+VALID_ZOHO_PO_SOURCE_VALUES = {
+    "Ebay",
+    "Amazon",
+    "Goodwill",
+    "AliExpress",
+    "Local Pickup",
+    "Other",
+}
+
+EXACT_ZOHO_PO_SOURCE_MAP = {
+    "EBAY_MEKONG_API": "Ebay",
+    "EBAY_PURCHASING_API": "Ebay",
+    "EBAY_USAV_API": "Ebay",
+    "EBAY_DRAGON_API": "Ebay",
+    "AMAZON_CSV": "Amazon",
+    "GOODWILL_CSV": "Goodwill",
+    "ALIEXPRESS_JSON": "AliExpress",
+    "ALIEXPRESS_CSV": "AliExpress",
+    "MANUAL": "Other",
+    "ZOHO_IMPORT": "Other",
+}
+
 _UNMATCHED_PLACEHOLDER_ITEM_ID_CACHE: Optional[str] = None
 
 
@@ -135,6 +157,33 @@ def vendor_to_zoho_payload(vendor: Vendor) -> dict[str, Any]:
     if vendor.address:
         payload["billing_address"] = {"address": vendor.address}
     return payload
+
+
+def _normalize_source_to_zoho_dropdown(source: str) -> str:
+    text = str(source or "").strip().upper().replace("-", "_").replace(" ", "_")
+    if "EBAY" in text:
+        return "Ebay"
+    if "AMAZON" in text:
+        return "Amazon"
+    if "GOODWILL" in text:
+        return "Goodwill"
+    if "ALIEXPRESS" in text:
+        return "AliExpress"
+    if "LOCAL_PICKUP" in text or "LOCALPICKUP" in text:
+        return "Local Pickup"
+    return "Other"
+
+
+def _resolve_source_to_zoho_dropdown(source: str) -> str:
+    normalized = str(source or "").strip().upper()
+    mapped = EXACT_ZOHO_PO_SOURCE_MAP.get(normalized)
+    if mapped:
+        return mapped
+
+    fallback = _normalize_source_to_zoho_dropdown(source)
+    if fallback in VALID_ZOHO_PO_SOURCE_VALUES:
+        return fallback
+    return "Other"
 
 
 def purchase_order_to_zoho_payload(
@@ -238,6 +287,15 @@ def purchase_order_to_zoho_payload(
     if settings.zoho_po_cf_handling_fee_id:
         handling_field["customfield_id"] = settings.zoho_po_cf_handling_fee_id
     custom_fields.append(handling_field)
+
+    source_value = _resolve_source_to_zoho_dropdown(str(getattr(po, "source", "") or ""))
+    source_field: dict[str, Any] = {
+        "api_name": "cf_source",
+        "value": source_value,
+    }
+    if settings.zoho_po_cf_source_id:
+        source_field["customfield_id"] = settings.zoho_po_cf_source_id
+    custom_fields.append(source_field)
 
     payload["custom_fields"] = custom_fields
 

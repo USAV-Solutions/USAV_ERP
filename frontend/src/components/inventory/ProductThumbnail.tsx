@@ -12,14 +12,23 @@ interface ProductThumbnailProps {
 export default function ProductThumbnail({ sku, thumbnailUrl, size = 40, onClick }: ProductThumbnailProps) {
   const [hasError, setHasError] = useState(false)
   const [isLoaded, setIsLoaded] = useState(false)
+  const [fallbackMode, setFallbackMode] = useState(false)
   const imgRef = useRef<HTMLImageElement | null>(null)
 
-  const resolvedThumbnailUrl = thumbnailUrl || `/api/v1/images/${sku}/thumbnail`
+  const expectedSkuPrefix = `/product-images/sku/${sku}/`
+  const directThumbnailUrl = thumbnailUrl && thumbnailUrl.startsWith(expectedSkuPrefix)
+    ? thumbnailUrl
+    : null
+  const fallbackThumbnailUrl = `/api/v1/images/${sku}/thumbnail`
+  const resolvedThumbnailUrl = fallbackMode || !directThumbnailUrl
+    ? fallbackThumbnailUrl
+    : directThumbnailUrl
 
   useEffect(() => {
     setHasError(false)
     setIsLoaded(false)
-  }, [resolvedThumbnailUrl])
+    setFallbackMode(false)
+  }, [sku, thumbnailUrl])
 
   useEffect(() => {
     const imageEl = imgRef.current
@@ -85,7 +94,16 @@ export default function ProductThumbnail({ sku, thumbnailUrl, size = 40, onClick
         alt={sku}
         loading="lazy"
         onLoad={() => setIsLoaded(true)}
-        onError={() => setHasError(true)}
+        onError={() => {
+          if (!fallbackMode && directThumbnailUrl) {
+            // Retry once via dynamic thumbnail route if stored URL is stale.
+            setFallbackMode(true)
+            setHasError(false)
+            setIsLoaded(false)
+            return
+          }
+          setHasError(true)
+        }}
         sx={{
           width: size,
           height: size,

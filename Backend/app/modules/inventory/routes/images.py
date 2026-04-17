@@ -210,6 +210,25 @@ def _build_public_thumbnail_url(
     if listing_name == "flat":
         return f"/product-images/sku/{context.full_sku}/{image_filename}"
     return f"/product-images/sku/{context.full_sku}/{listing_name}/{image_filename}"
+
+
+def _resolve_thumbnail_file_path(thumbnail_url: str) -> Optional[Path]:
+    """Map a public thumbnail URL to its on-disk file path under IMAGES_ROOT."""
+    prefix = "/product-images/sku/"
+    if not thumbnail_url.startswith(prefix):
+        return None
+
+    relative = thumbnail_url[len(prefix):].lstrip("/")
+    if not relative:
+        return None
+
+    candidate = IMAGES_ROOT / "sku" / relative
+    try:
+        candidate.relative_to(IMAGES_ROOT)
+    except Exception:
+        return None
+
+    return candidate
 async def _recompute_thumbnail_url(
     db: AsyncSession,
     context: VariantImageContext,
@@ -270,12 +289,22 @@ async def _resolve_or_backfill_thumbnail_url(
         return None, None
 
     if context.thumbnail_url:
-        logger.debug("[DEBUG.INTERNAL_API][THUMB_TRACE] Cache hit for sku=%s variant_id=%s thumbnail_url=%s",
+        thumbnail_path = _resolve_thumbnail_file_path(context.thumbnail_url)
+        if thumbnail_path and thumbnail_path.is_file():
+            logger.debug("[DEBUG.INTERNAL_API][THUMB_TRACE] Cache hit for sku=%s variant_id=%s thumbnail_url=%s",
+                context.full_sku,
+                context.variant_id,
+                context.thumbnail_url,
+            )
+            return context, context.thumbnail_url
+
+        logger.warning(
+            "[THUMB_TRACE] Cached thumbnail_url is stale or invalid; recomputing | sku=%s variant_id=%s thumbnail_url=%s resolved_path=%s",
             context.full_sku,
             context.variant_id,
             context.thumbnail_url,
+            thumbnail_path,
         )
-        return context, context.thumbnail_url
 
     logger.debug("[DEBUG.INTERNAL_API][THUMB_TRACE] Cache miss for sku=%s variant_id=%s -> computing best listing",
         context.full_sku,

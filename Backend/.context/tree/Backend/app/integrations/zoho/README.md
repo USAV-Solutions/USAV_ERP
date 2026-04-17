@@ -11,6 +11,7 @@ Zoho client/sync engine used for outbound and inbound synchronization flows.
 - Editing this folder without checking sibling tests and schema/type contracts.
 - Making cross-layer changes here but forgetting migration/frontend alignment.
 - Stationery purchase-order sync should use `zoho_po_stationery_location_id` from settings; hardcoded location IDs can fail with Zoho `Invalid value passed for branch_id` errors.
+- Purchase-order outbound payload now includes `cf_source` mapping. Keep mapping aligned with script behavior (`EBAY_* -> Ebay`, `AMAZON_* -> Amazon`, `GOODWILL_* -> Goodwill`, `ALIEXPRESS_* -> AliExpress`, local pickup variants -> `Local Pickup`, fallback -> `Other`).
 
 ## Child Folders
 - (No child folders)

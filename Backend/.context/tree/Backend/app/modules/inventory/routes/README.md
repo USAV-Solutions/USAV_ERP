@@ -10,6 +10,8 @@ Inventory route handlers split by feature surface (variants, listings, images, e
 ## Common Pitfalls
 - Editing this folder without checking sibling tests and schema/type contracts.
 - Making cross-layer changes here but forgetting migration/frontend alignment.
+- Stored `thumbnail_url` values can become stale when files move or disappear; image routes should validate cached URLs and recompute from on-disk listing folders when missing.
+- `thumbnail_url` is SKU-path scoped; when `full_sku` changes, clear/recompute `thumbnail_url` to avoid cross-SKU thumbnails being shown.
 
 ## Child Folders
 - (No child folders)

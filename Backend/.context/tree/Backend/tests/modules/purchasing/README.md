@@ -10,6 +10,7 @@ Purchasing domain tests: imports, mapping, and PO workflow invariants.
 ## Common Pitfalls
 - Editing this folder without checking sibling tests and schema/type contracts.
 - Making cross-layer changes here but forgetting migration/frontend alignment.
+- Purchase-order Zoho payload mapping tests should assert `custom_fields` coverage, including `cf_source` mapping behavior.
 
 ## Child Folders
 - (No child folders)

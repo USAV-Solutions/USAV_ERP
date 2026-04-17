@@ -92,6 +92,9 @@ def test_purchase_order_to_zoho_payload_maps_header_custom_and_adjustment_fields
     assert "Tracking: TRK-123" in payload["notes"]
     assert payload["line_items"][0]["item_id"] == "it-100"
 
+    custom_fields_by_api_name = {field["api_name"]: field for field in payload["custom_fields"]}
+    assert custom_fields_by_api_name["cf_source"]["value"] == "Amazon"
+
 
 def test_purchase_order_to_zoho_payload_keeps_custom_charge_fields_and_rolls_adjustment_with_tax():
     po = SimpleNamespace(
@@ -125,6 +128,44 @@ def test_purchase_order_to_zoho_payload_keeps_custom_charge_fields_and_rolls_adj
     assert custom_fields_by_api_name["cf_tax"]["value"] == "1.25"
     assert custom_fields_by_api_name["cf_shipping_fee"]["value"] == "2.50"
     assert custom_fields_by_api_name["cf_handling_fee"]["value"] == "3.75"
+    assert custom_fields_by_api_name["cf_source"]["value"] == "Other"
+
+
+@pytest.mark.parametrize(
+    "source,expected",
+    [
+        ("EBAY_MEKONG_API", "Ebay"),
+        ("GOODWILL_CSV", "Goodwill"),
+        ("LOCAL_PICKUP", "Local Pickup"),
+        ("UNKNOWN_SOURCE", "Other"),
+    ],
+)
+def test_purchase_order_to_zoho_payload_maps_source_custom_field(source, expected):
+    po = SimpleNamespace(
+        po_number="PO-124A",
+        order_date=date(2026, 3, 17),
+        expected_delivery_date=None,
+        currency="USD",
+        notes=None,
+        source=source,
+        tracking_number=None,
+        tax_amount=Decimal("0"),
+        shipping_amount=Decimal("0"),
+        handling_amount=Decimal("0"),
+        vendor=SimpleNamespace(zoho_id="999001"),
+        items=[
+            SimpleNamespace(
+                external_item_name="External Item",
+                quantity=1,
+                unit_price=Decimal("1.00"),
+                variant=SimpleNamespace(zoho_item_id="it-100"),
+            )
+        ],
+    )
+
+    payload = purchase_order_to_zoho_payload(po)
+    custom_fields_by_api_name = {field["api_name"]: field for field in payload["custom_fields"]}
+    assert custom_fields_by_api_name["cf_source"]["value"] == expected
 
 
 def test_purchase_order_to_zoho_payload_maps_unmatched_lines_to_placeholder_item():

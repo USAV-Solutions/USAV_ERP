@@ -10,6 +10,7 @@ Core infrastructure configuration: environment settings, DB setup, and security 
 ## Common Pitfalls
 - Editing this folder without checking sibling tests and schema/type contracts.
 - Making cross-layer changes here but forgetting migration/frontend alignment.
+- Zoho PO source sync can use optional `zoho_po_cf_source_id`; if unset, payload falls back to `api_name=cf_source`.
 
 ## Child Folders
 - (No child folders)
