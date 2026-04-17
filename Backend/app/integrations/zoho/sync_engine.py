@@ -1412,6 +1412,20 @@ async def sync_po_outbound(
 
             if new_hash == po.zoho_last_sync_hash:
                 logger.debug("sync_po_outbound: purchase_order %s unchanged (hash match)", po_id)
+                if enable_ebay_billing:
+                    try:
+                        await _sync_ebay_bill_and_payment_for_purchase_order(
+                            po=po,
+                            zoho=zoho,
+                            remote_po_hint=resolved_zoho_po if resolved_zoho_po_id else None,
+                        )
+                    except Exception as billing_exc:
+                        po.zoho_billing_error = str(billing_exc)[:2000]
+                        logger.exception(
+                            "sync_po_outbound: ebay bill/payment sync failed on hash-match path | po_id=%s zoho_po_id=%s",
+                            po_id,
+                            po.zoho_id,
+                        )
                 po.zoho_sync_error = None
                 po.zoho_sync_status = ZohoSyncStatus.SYNCED
                 po._updated_by_sync = True
