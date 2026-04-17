@@ -11,6 +11,7 @@ One-off operational scripts for backfills, cleanup, reconciliation, and migratio
 - Reusing script-only assumptions in production request paths.
 - Running destructive scripts without dry-run guardrails.
 - Leaving script output formats undocumented for future operators.
+- Zoho bill backfills can fail with `code:36510` when PO has un-billed purchase receives; retry with receive-linked bill lines (`receive_item_id`) instead of PO-only line mapping.
 
 ## Child Folders
 - (No child folders)

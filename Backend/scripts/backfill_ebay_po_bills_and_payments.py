@@ -56,6 +56,7 @@ class Stats:
     skipped_existing_payment: int = 0
     would_create_bills: int = 0
     created_bills: int = 0
+    created_bills_from_receives: int = 0
     would_create_payments: int = 0
     created_payments: int = 0
     failed: int = 0
@@ -153,6 +154,11 @@ def _to_float_money(value: object) -> float:
 def _is_zoho_unauthorized(exc: Exception) -> bool:
     text = str(exc)
     return '"code":57' in text or "not authorized" in text.lower()
+
+
+def _is_unbilled_receive_bill_error(exc: Exception) -> bool:
+    text = str(exc)
+    return "\"code\":36510" in text or "un-billed receive" in text.lower()
 
 
 def _build_bill_payload(po: PurchaseOrder, variant_zoho_item_by_id: dict[int, str]) -> dict[str, Any]:
@@ -424,6 +430,149 @@ async def _create_bill_with_fallback(client: ZohoClient, bill_payload: dict[str,
     return result.get("bill", {}) or {}
 
 
+async def _get_purchase_receive_with_fallback(client: ZohoClient, receive_id: str) -> dict[str, Any]:
+    result = await client._request("GET", f"/purchasereceives/{receive_id}", api="inventory")
+    receive = result.get("purchasereceive")
+    if receive is None:
+        receive = result.get("purchase_receive", {})
+    return receive or {}
+
+
+def _extract_receive_line_quantity(line: dict[str, Any]) -> int:
+    for key in [
+        "billable_quantity",
+        "quantity",
+        "received_quantity",
+        "quantity_received",
+    ]:
+        raw = line.get(key)
+        if raw is None:
+            continue
+        qty = int(_to_decimal(raw, default="0"))
+        if qty > 0:
+            return qty
+    return 0
+
+
+def _build_receive_linked_bill_payload(
+    *,
+    base_bill_payload: dict[str, Any],
+    receives: list[dict[str, Any]],
+) -> dict[str, Any]:
+    line_items: list[dict[str, Any]] = []
+
+    default_account_id = ""
+    for receive in receives:
+        for line in (receive or {}).get("line_items") or []:
+            if not isinstance(line, dict):
+                continue
+            candidate = str(line.get("account_id") or "").strip()
+            if candidate:
+                default_account_id = candidate
+                break
+        if default_account_id:
+            break
+
+    for receive in receives:
+        for line in (receive or {}).get("line_items") or []:
+            if not isinstance(line, dict):
+                continue
+
+            receive_item_id = str(line.get("receive_item_id") or line.get("line_item_id") or "").strip()
+            quantity = _extract_receive_line_quantity(line)
+            if not receive_item_id or quantity <= 0:
+                continue
+
+            line_payload: dict[str, Any] = {
+                "receive_item_id": receive_item_id,
+                "quantity": quantity,
+            }
+
+            for key in [
+                "purchaseorder_item_id",
+                "item_id",
+                "name",
+                "description",
+                "rate",
+                "tax_id",
+                "tds_tax_id",
+                "location_id",
+                "account_id",
+            ]:
+                value = line.get(key)
+                if value is not None and str(value).strip() != "":
+                    line_payload[key] = value
+
+            if not str(line_payload.get("account_id") or "").strip() and default_account_id:
+                line_payload["account_id"] = default_account_id
+
+            line_items.append(line_payload)
+
+    if not line_items:
+        raise ValueError("purchase receives found but no billable receive line_items were available")
+
+    payload = dict(base_bill_payload)
+    payload["line_items"] = line_items
+    return payload
+
+
+async def _create_bill_with_receive_retry(
+    *,
+    client: ZohoClient,
+    po: PurchaseOrder,
+    bill_payload: dict[str, Any],
+) -> tuple[dict[str, Any], bool]:
+    """Create bill; on Zoho 36510 retry with receive-linked line items.
+
+    Returns (bill, used_receive_retry).
+    """
+    try:
+        return await _create_bill_with_fallback(client, bill_payload), False
+    except Exception as exc:
+        if not (_is_unbilled_receive_bill_error(exc) and po.zoho_id):
+            raise
+
+        receive_rows: list[dict[str, Any]] = []
+        page = 1
+        while page <= 50:
+            receives = await client.list_purchase_receives(
+                purchaseorder_id=str(po.zoho_id),
+                page=page,
+                per_page=200,
+            )
+            if not receives:
+                break
+
+            for receive in receives:
+                receive_data = receive if isinstance(receive, dict) else {}
+                line_items = receive_data.get("line_items") or []
+                if not line_items:
+                    receive_id = str(
+                        receive_data.get("receive_id")
+                        or receive_data.get("purchasereceive_id")
+                        or ""
+                    ).strip()
+                    if receive_id:
+                        receive_data = await _get_purchase_receive_with_fallback(client, receive_id)
+                receive_rows.append(receive_data)
+
+            if len(receives) < 200:
+                break
+            page += 1
+
+        if not receive_rows:
+            raise ValueError(
+                f"Zoho bill create failed with un-billed receives (36510) but no purchase receives were found for PO {po.po_number}"
+            ) from exc
+
+        retry_payload = _build_receive_linked_bill_payload(
+            base_bill_payload=bill_payload,
+            receives=receive_rows,
+        )
+        created = await _create_bill_with_fallback(client, retry_payload)
+        return created, True
+
+
 async def _list_bill_payments_with_fallback(client: ZohoClient, bill_id: str) -> list[dict[str, Any]]:
     result = await client._request(
         "GET",
@@ -495,8 +644,14 @@ async def _process_po(
     else:
         if apply:
             try:
-                bill = await _create_bill_with_fallback(client, bill_payload)
+                bill, used_receive_retry = await _create_bill_with_receive_retry(
+                    client=client,
+                    po=po,
+                    bill_payload=bill_payload,
+                )
                 stats.created_bills += 1
+                if used_receive_retry:
+                    stats.created_bills_from_receives += 1
             except Exception as exc:
                 stats.failed += 1
                 stats.failures.append(f"PO {po_number} bill create failed: {exc}")
@@ -651,6 +806,7 @@ async def main() -> None:
     print(f"- skipped_existing_payment: {stats.skipped_existing_payment}")
     print(f"- would_create_bills: {stats.would_create_bills}")
     print(f"- created_bills: {stats.created_bills}")
+    print(f"- created_bills_from_receives: {stats.created_bills_from_receives}")
     print(f"- would_create_payments: {stats.would_create_payments}")
     print(f"- created_payments: {stats.created_payments}")
     print(f"- failed: {stats.failed}")
