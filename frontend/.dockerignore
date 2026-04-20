@@ -1,0 +1,30 @@
+# Ignore version control
+.git
+.gitignore
+
+# Ignore dependencies (let Docker build its own)
+node_modules
+npm-debug.log
+
+# Ignore environment secrets
+.env
+.env.local
+.env.development
+.env.test
+
+# Ignore IDE settings
+.vscode
+.idea
+.DS_Store
+
+# Ignore build outputs (if you are building inside the container)
+dist
+build
+
+package-lock.json*
+yarn.lock*
+*.bak
+*.old
+.env
+.git
+node_modules
