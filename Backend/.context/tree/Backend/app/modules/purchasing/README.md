@@ -12,6 +12,7 @@ Purchase order domain: import pipelines, vendor workflows, receiving, and matchi
 - Breaking source tagging used downstream in Zoho notes/reconciliation.
 - Editing PO status transitions without test updates.
 - Mixing dependency styles in route signatures; prefer `Annotated[..., Depends(...)]` and `Annotated[..., Query(...)]` for maintainable, consistent FastAPI typing.
+- In Python signatures, non-default dependency params must come before optional/default query params to avoid `SyntaxError: parameter without a default follows parameter with a default`.
 
 ## Child Folders
 - `schemas/`

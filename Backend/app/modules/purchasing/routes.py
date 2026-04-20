@@ -2069,12 +2069,12 @@ async def import_purchasing_from_file(
 async def import_purchasing_from_ebay_api(
     _current_user: Annotated[User, Depends(get_current_user)],
     source: Annotated[PurchaseFileImportSource, Query(...)],
-    order_date_from: Annotated[date | None, Query()] = None,
-    order_date_to: Annotated[date | None, Query()] = None,
     vendor_repo: Annotated[VendorRepository, Depends(get_vendor_repo)],
     po_repo: Annotated[PurchaseOrderRepository, Depends(get_purchase_order_repo)],
     po_item_repo: Annotated[PurchaseOrderItemRepository, Depends(get_purchase_order_item_repo)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    order_date_from: Annotated[date | None, Query()] = None,
+    order_date_to: Annotated[date | None, Query()] = None,
 ):
     logger.debug(
         "[DEBUG.INTERNAL_API] eBay purchase import endpoint called | source=%s order_date_from=%s order_date_to=%s",
