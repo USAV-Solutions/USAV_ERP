@@ -55,6 +55,7 @@ EXACT_ZOHO_PO_SOURCE_MAP = {
     "EBAY_DRAGON_API": "Ebay",
     "AMAZON_CSV": "Amazon",
     "GOODWILL_CSV": "Goodwill",
+    "GOODWILL_PICKUP": "Goodwill",
     "ALIEXPRESS_JSON": "AliExpress",
     "ALIEXPRESS_CSV": "AliExpress",
     "MANUAL": "Other",
