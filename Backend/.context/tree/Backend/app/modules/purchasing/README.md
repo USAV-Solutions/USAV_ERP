@@ -11,6 +11,7 @@ Purchase order domain: import pipelines, vendor workflows, receiving, and matchi
 - Changing import-source behavior without updating schema enums and UI source selectors.
 - Breaking source tagging used downstream in Zoho notes/reconciliation.
 - Editing PO status transitions without test updates.
+- Mixing dependency styles in route signatures; prefer `Annotated[..., Depends(...)]` and `Annotated[..., Query(...)]` for maintainable, consistent FastAPI typing.
 
 ## Child Folders
 - `schemas/`

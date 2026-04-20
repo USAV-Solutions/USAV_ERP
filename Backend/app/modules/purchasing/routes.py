@@ -11,12 +11,12 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import AdminOrWarehouseUser, CurrentUser
+from app.api.deps import AdminOrWarehouseUser, CurrentUser, get_current_user
 from app.core.config import settings
 from app.core.database import get_db
 from app.integrations.ebay.client import EbayClient
 from app.integrations.zoho.client import ZohoClient
-from app.models import PurchaseDeliverStatus, PurchaseOrderItemStatus, ZohoSyncStatus
+from app.models import PurchaseDeliverStatus, PurchaseOrderItemStatus, User, ZohoSyncStatus
 from app.models.entities import ProductVariant
 from app.models.purchasing import PurchaseOrder, PurchaseOrderItem
 from app.modules.purchasing.dependencies import (
@@ -2067,14 +2067,14 @@ async def import_purchasing_from_file(
 
 @router.post("/purchases/import/ebay", response_model=PurchaseFileImportResponse)
 async def import_purchasing_from_ebay_api(
-    _current_user: CurrentUser,
-    source: PurchaseFileImportSource = Query(...),
+    _current_user: Annotated[User, Depends(get_current_user)],
+    source: Annotated[PurchaseFileImportSource, Query(...)],
     order_date_from: Annotated[date | None, Query()] = None,
     order_date_to: Annotated[date | None, Query()] = None,
-    vendor_repo: VendorRepository = Depends(get_vendor_repo),
-    po_repo: PurchaseOrderRepository = Depends(get_purchase_order_repo),
-    po_item_repo: PurchaseOrderItemRepository = Depends(get_purchase_order_item_repo),
-    db: AsyncSession = Depends(get_db),
+    vendor_repo: Annotated[VendorRepository, Depends(get_vendor_repo)],
+    po_repo: Annotated[PurchaseOrderRepository, Depends(get_purchase_order_repo)],
+    po_item_repo: Annotated[PurchaseOrderItemRepository, Depends(get_purchase_order_item_repo)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     logger.debug(
         "[DEBUG.INTERNAL_API] eBay purchase import endpoint called | source=%s order_date_from=%s order_date_to=%s",

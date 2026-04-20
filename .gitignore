@@ -65,9 +65,6 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 
-# Docker
-.dockerignore
-
 # Database
 *.db
 *.sqlite
