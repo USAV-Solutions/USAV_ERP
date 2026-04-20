@@ -10,6 +10,7 @@ eBay integration client and API-specific transport/auth/order normalization beha
 ## Common Pitfalls
 - Editing this folder without checking sibling tests and schema/type contracts.
 - Making cross-layer changes here but forgetting migration/frontend alignment.
+- Reintroducing duplicated hardcoded eBay timestamp formats; use `EBAY_ISO_DATE_FORMAT` in `client.py` for all eBay ISO datetime string generation.
 
 ## Child Folders
 - (No child folders)

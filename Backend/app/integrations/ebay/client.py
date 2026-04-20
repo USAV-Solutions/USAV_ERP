@@ -29,6 +29,7 @@ _TRANSPORT_RETRIES = 3          # retries at the httpcore transport layer
 _TOKEN_REFRESH_ATTEMPTS = 3     # higher-level retries around OAuth token refresh
 _TOKEN_RETRY_DELAY_SECS = 2     # pause between token-refresh retries
 _TRADING_NS = {"eb": "urn:ebay:apis:eBLBaseComponents"}
+EBAY_ISO_DATE_FORMAT = "%Y-%m-%dT%H:%M:%S.000Z"
 
 
 class EbayClient(BasePlatformClient):
@@ -248,8 +249,8 @@ class EbayClient(BasePlatformClient):
             page_skipped_out_of_range = 0
             page_skipped_deduped = 0
 
-            since_str = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-            until_str = until.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+            since_str = since.strftime(EBAY_ISO_DATE_FORMAT)
+            until_str = until.strftime(EBAY_ISO_DATE_FORMAT)
             request_xml = f"""<?xml version=\"1.0\" encoding=\"utf-8\"?>
 <GetOrdersRequest xmlns=\"urn:ebay:apis:eBLBaseComponents\">
     <CreateTimeFrom>{since_str}</CreateTimeFrom>
@@ -639,9 +640,9 @@ class EbayClient(BasePlatformClient):
             filters = []
             logger.debug(f"eBay {self.store_name}: Building filter params")
             if since:
-                since_str = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                since_str = since.strftime(EBAY_ISO_DATE_FORMAT)
                 if until:
-                    until_str = until.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                    until_str = until.strftime(EBAY_ISO_DATE_FORMAT)
                     filters.append(f"creationdate:[{since_str}..{until_str}]")
                     logger.debug(f"eBay {self.store_name}: Date range filter: {since_str} to {until_str}")
                 else:
