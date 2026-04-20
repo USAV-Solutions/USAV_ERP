@@ -161,6 +161,8 @@ class ZohoPurchaseImportResponse(BaseModel):
 
 class PurchaseFileImportSource(str, Enum):
     GOODWILL = "goodwill"
+    GOODWILL_SHIPPED = "goodwill_shipped"
+    GOODWILL_OPEN = "goodwill_open"
     AMAZON = "amazon"
     ALIEXPRESS = "aliexpress"
     EBAY_MEKONG = "ebay_mekong"

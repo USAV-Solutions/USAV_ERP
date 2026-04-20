@@ -10,6 +10,7 @@ SQLAlchemy ORM entities and enums for inventory, orders, purchasing, and users.
 ## Common Pitfalls
 - Adding enum values in Python without DB enum migration.
 - Adding non-null columns without safe default/backfill.
+- New purchase-order Zoho billing columns are intentionally deferred at ORM load time to keep legacy databases (without migration `0023`) from failing simple list/read queries.
 - Changing constraints/index names without migration compatibility checks.
 
 ## Child Folders

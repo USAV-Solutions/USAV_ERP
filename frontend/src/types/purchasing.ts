@@ -153,6 +153,8 @@ export interface ZohoPurchaseImportResponse {
 
 export type PurchaseFileImportSource =
   | 'goodwill'
+  | 'goodwill_shipped'
+  | 'goodwill_open'
   | 'amazon'
   | 'aliexpress'
   | 'ebay_mekong'

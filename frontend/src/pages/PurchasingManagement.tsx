@@ -101,6 +101,10 @@ function getPurchaseImportSourceLabel(source: PurchaseFileImportSource): string 
   switch (source) {
     case 'goodwill':
       return 'Goodwill CSV'
+    case 'goodwill_shipped':
+      return 'Goodwill Shipped Orders'
+    case 'goodwill_open':
+      return 'Goodwill Open Orders'
     case 'amazon':
       return 'Amazon CSV'
     case 'aliexpress':
@@ -575,7 +579,7 @@ export default function PurchasingManagement() {
   const [importZohoRangeOpen, setImportZohoRangeOpen] = useState(false)
   const [importZohoRangeFrom, setImportZohoRangeFrom] = useState('')
   const [importZohoRangeTo, setImportZohoRangeTo] = useState('')
-  const [purchaseImportSource, setPurchaseImportSource] = useState<PurchaseFileImportSource>('goodwill')
+  const [purchaseImportSource, setPurchaseImportSource] = useState<PurchaseFileImportSource>('amazon')
   const [expandedPoId, setExpandedPoId] = useState<number | null>(null)
   const [snackbar, setSnackbar] = useState<{ open: boolean; msg: string; severity: 'success' | 'error' }>({
     open: false,
@@ -1683,6 +1687,7 @@ export default function PurchasingManagement() {
                 <MenuItem value="ALL">All</MenuItem>
                 <MenuItem value="MANUAL">MANUAL</MenuItem>
                 <MenuItem value="GOODWILL_CSV">GOODWILL_CSV</MenuItem>
+                <MenuItem value="GOODWILL_PICKUP">GOODWILL_PICKUP</MenuItem>
                 <MenuItem value="AMAZON_CSV">AMAZON_CSV</MenuItem>
                 <MenuItem value="ALIEXPRESS_JSON">ALIEXPRESS_JSON</MenuItem>
                 <MenuItem value="ALIEXPRESS_CSV">ALIEXPRESS_CSV</MenuItem>
@@ -1852,7 +1857,8 @@ export default function PurchasingManagement() {
                 label="Source"
                 onChange={(e) => setPurchaseImportSource(e.target.value as PurchaseFileImportSource)}
               >
-                <MenuItem value="goodwill">Goodwill (CSV)</MenuItem>
+                <MenuItem value="goodwill_shipped">Goodwill Shipped Orders (CSV)</MenuItem>
+                <MenuItem value="goodwill_open">Goodwill Open Orders (CSV)</MenuItem>
                 <MenuItem value="amazon">Amazon (CSV)</MenuItem>
                 <MenuItem value="aliexpress">AliExpress (CSV / JSON)</MenuItem>
                 <MenuItem value="ebay_mekong">eBay Mekong (API)</MenuItem>
@@ -1862,7 +1868,9 @@ export default function PurchasingManagement() {
               </Select>
             </FormControl>
             <Alert severity="info">
-              {purchaseImportSource === 'aliexpress'
+              {purchaseImportSource === 'goodwill_open'
+                ? 'Only rows with Status = View Order will be imported from open orders CSV.'
+                : purchaseImportSource === 'aliexpress'
                 ? 'Upload a CSV or JSON file exported from AliExpress orders.'
                 : isEbayPurchaseSource
                   ? 'After continuing, choose the date range to import from eBay API.'

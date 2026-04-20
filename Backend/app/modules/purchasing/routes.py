@@ -221,7 +221,11 @@ def _build_purchase_item_link(source: PurchaseFileImportSource, *, asin: str | N
 
     if source == PurchaseFileImportSource.AMAZON and normalized_asin:
         return f"https://amazon.com/dp/{normalized_asin}"
-    if source == PurchaseFileImportSource.GOODWILL and normalized_item_id:
+    if source in {
+        PurchaseFileImportSource.GOODWILL,
+        PurchaseFileImportSource.GOODWILL_SHIPPED,
+        PurchaseFileImportSource.GOODWILL_OPEN,
+    } and normalized_item_id:
         return f"https://shopgoodwill.com/item/{normalized_item_id}"
     if source in {
         PurchaseFileImportSource.EBAY_MEKONG,
@@ -1086,12 +1090,15 @@ async def _import_goodwill_csv(
     po_repo: PurchaseOrderRepository,
     po_item_repo: PurchaseOrderItemRepository,
     db: AsyncSession,
+    goodwill_source: PurchaseFileImportSource = PurchaseFileImportSource.GOODWILL,
+    only_view_order_status: bool = False,
 ) -> PurchaseFileImportResponse:
     reader = csv.DictReader(io.StringIO(content))
     if not reader.fieldnames:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="CSV header row is missing")
 
     header_aliases: dict[str, list[str]] = {
+        "status": ["Status"],
         "order_number": ["Order #", "Order#"],
         "item_id": ["Item Id", "Item #"],
         "item_name": ["Item"],
@@ -1115,6 +1122,8 @@ async def _import_goodwill_csv(
         "unit_price",
         "order_date",
     ]
+    if only_view_order_status:
+        required_header_keys.append("status")
 
     def _pick(row_data: dict[str, object], keys: list[str]) -> object:
         for key in keys:
@@ -1134,17 +1143,23 @@ async def _import_goodwill_csv(
             detail=f"CSV is missing required columns: {', '.join(missing_headers)}",
         )
 
-    result = PurchaseFileImportResponse(source=PurchaseFileImportSource.GOODWILL)
+    result = PurchaseFileImportResponse(source=goodwill_source)
     vendor_cache: dict[str, int] = {}
     goodwill_vendor_id = await _resolve_vendor_id("Goodwill", vendor_repo, db, vendor_cache)
 
     for row in reader:
         result.source_rows_seen += 1
 
+        if only_view_order_status:
+            status_text = str(_pick(row, header_aliases["status"]) or "").strip().lower()
+            if status_text != "view order":
+                result.source_rows_skipped += 1
+                continue
+
         po_number = _normalize_external_po_number(_pick(row, header_aliases["order_number"]))
         item_id = str(_pick(row, header_aliases["item_id"]) or "").strip() or None
         purchase_item_link = _build_purchase_item_link(
-            PurchaseFileImportSource.GOODWILL,
+            goodwill_source,
             item_id=item_id,
         )
         item_name = str(_pick(row, header_aliases["item_name"]) or "").strip()
@@ -1166,6 +1181,8 @@ async def _import_goodwill_csv(
         total_amount = (unit_price * quantity) + tax_amount + shipping_amount + handling_amount
 
         existing_po = await _find_existing_po_by_external_id(db, po_number)
+        import_mode_note = "open-orders" if only_view_order_status else "shipped-orders"
+        import_source_value = "GOODWILL_PICKUP" if only_view_order_status else "GOODWILL_CSV"
         po_payload = {
             "po_number": po_number,
             "vendor_id": goodwill_vendor_id,
@@ -1178,8 +1195,8 @@ async def _import_goodwill_csv(
             "tax_amount": tax_amount,
             "shipping_amount": shipping_amount,
             "handling_amount": handling_amount,
-            "source": "GOODWILL_CSV",
-            "notes": "Imported from Goodwill shipped-orders CSV.",
+            "source": import_source_value,
+            "notes": f"Imported from Goodwill {import_mode_note} CSV.",
             "zoho_sync_status": ZohoSyncStatus.DIRTY,
             "zoho_sync_error": None,
         }
@@ -1752,8 +1769,26 @@ async def _import_purchase_file_by_source(
             detail="eBay sources require date-range API import endpoint, not file upload",
         )
 
-    if source == PurchaseFileImportSource.GOODWILL:
-        return await _import_goodwill_csv(content, vendor_repo, po_repo, po_item_repo, db)
+    if source in {PurchaseFileImportSource.GOODWILL, PurchaseFileImportSource.GOODWILL_SHIPPED}:
+        return await _import_goodwill_csv(
+            content,
+            vendor_repo,
+            po_repo,
+            po_item_repo,
+            db,
+            goodwill_source=PurchaseFileImportSource.GOODWILL_SHIPPED,
+            only_view_order_status=False,
+        )
+    if source == PurchaseFileImportSource.GOODWILL_OPEN:
+        return await _import_goodwill_csv(
+            content,
+            vendor_repo,
+            po_repo,
+            po_item_repo,
+            db,
+            goodwill_source=PurchaseFileImportSource.GOODWILL_OPEN,
+            only_view_order_status=True,
+        )
     if source == PurchaseFileImportSource.AMAZON:
         return await _import_amazon_csv(content, vendor_repo, po_repo, po_item_repo, db)
     if source == PurchaseFileImportSource.ALIEXPRESS:
@@ -2148,7 +2183,7 @@ async def import_purchasing_from_goodwill_csv(
 ):
     """Legacy endpoint kept for compatibility; delegates to source-based importer."""
     result = await _import_purchase_file_by_source(
-        source=PurchaseFileImportSource.GOODWILL,
+        source=PurchaseFileImportSource.GOODWILL_SHIPPED,
         file=file,
         vendor_repo=vendor_repo,
         po_repo=po_repo,
