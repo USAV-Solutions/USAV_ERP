@@ -101,6 +101,10 @@ export async function updatePurchaseOrder(poId: number, body: PurchaseOrderUpdat
   return data
 }
 
+export async function deletePurchaseOrder(poId: number): Promise<void> {
+  await axiosClient.delete(PURCHASING.PURCHASE(poId))
+}
+
 export async function addPurchaseOrderItem(
   poId: number,
   body: PurchaseOrderItemCreate,

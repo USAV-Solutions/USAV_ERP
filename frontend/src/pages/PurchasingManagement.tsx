@@ -49,6 +49,7 @@ import {
   addPurchaseOrderItem,
   createPurchaseOrder,
   createVendor,
+  deletePurchaseOrder,
   deletePurchaseItem,
   importPurchasesFromEbay,
   importPurchasesFromFile,
@@ -561,6 +562,7 @@ export default function PurchasingManagement() {
   const [selectedPoId, setSelectedPoId] = useState<number | null>(null)
   const [createPoOpen, setCreatePoOpen] = useState(false)
   const [editPoOpen, setEditPoOpen] = useState(false)
+  const [editPoDeleteConfirmOpen, setEditPoDeleteConfirmOpen] = useState(false)
   const [editingPoId, setEditingPoId] = useState<number | null>(null)
   const [editVendorSearchInput, setEditVendorSearchInput] = useState('')
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false)
@@ -708,6 +710,33 @@ export default function PurchasingManagement() {
       setSnackbar({
         open: true,
         msg: error.response?.data?.detail || error.message || 'Failed to update purchase order.',
+        severity: 'error',
+      })
+    },
+  })
+
+  const deletePoMutation = useMutation({
+    mutationFn: (poId: number) => deletePurchaseOrder(poId),
+    onSuccess: async () => {
+      const deletedPoId = editingPoId
+      setEditPoDeleteConfirmOpen(false)
+      setEditPoOpen(false)
+      setEditingPoId(null)
+      if (deletedPoId !== null) {
+        if (selectedPoId === deletedPoId) {
+          setSelectedPoId(null)
+        }
+        if (expandedPoId === deletedPoId) {
+          setExpandedPoId(null)
+        }
+      }
+      await queryClient.invalidateQueries({ queryKey: ['purchases'] })
+      setSnackbar({ open: true, msg: 'Purchase order deleted.', severity: 'success' })
+    },
+    onError: (error: { response?: { data?: { detail?: string } }; message?: string }) => {
+      setSnackbar({
+        open: true,
+        msg: error.response?.data?.detail || error.message || 'Failed to delete purchase order.',
         severity: 'error',
       })
     },
@@ -1402,9 +1431,10 @@ export default function PurchasingManagement() {
       <Dialog
         open={editPoOpen}
         onClose={() => {
-          if (!updatePoMutation.isPending) {
+          if (!updatePoMutation.isPending && !deletePoMutation.isPending) {
             setEditPoOpen(false)
             setEditingPoId(null)
+            setEditPoDeleteConfirmOpen(false)
           }
         }}
         fullWidth
@@ -1538,15 +1568,25 @@ export default function PurchasingManagement() {
             onClick={() => {
               setEditPoOpen(false)
               setEditingPoId(null)
+              setEditPoDeleteConfirmOpen(false)
             }}
-            disabled={updatePoMutation.isPending}
+            disabled={updatePoMutation.isPending || deletePoMutation.isPending}
           >
             Cancel
+          </Button>
+          <Button
+            color="error"
+            variant="outlined"
+            disabled={editingPoId === null || updatePoMutation.isPending || deletePoMutation.isPending}
+            onClick={() => setEditPoDeleteConfirmOpen(true)}
+          >
+            Delete PO
           </Button>
           <Button
             variant="contained"
             disabled={
               updatePoMutation.isPending ||
+              deletePoMutation.isPending ||
               editingPoId === null ||
               !editPoForm.po_number.trim() ||
               !editPoForm.vendor_id ||
@@ -1577,6 +1617,42 @@ export default function PurchasingManagement() {
             }}
           >
             {updatePoMutation.isPending ? 'Saving...' : 'Save Metadata'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={editPoDeleteConfirmOpen}
+        onClose={() => {
+          if (!deletePoMutation.isPending) {
+            setEditPoDeleteConfirmOpen(false)
+          }
+        }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Delete Purchase Order</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Delete purchase order <strong>{editPoForm.po_number || '-'}</strong>? This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditPoDeleteConfirmOpen(false)} disabled={deletePoMutation.isPending}>
+            Cancel
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            disabled={editingPoId === null || deletePoMutation.isPending}
+            onClick={() => {
+              if (editingPoId === null) {
+                return
+              }
+              deletePoMutation.mutate(editingPoId)
+            }}
+          >
+            {deletePoMutation.isPending ? 'Deleting...' : 'Delete'}
           </Button>
         </DialogActions>
       </Dialog>

@@ -1,7 +1,7 @@
 ﻿# Backend\app\modules\purchasing
 
 ## What This Folder Does
-Purchase order domain: import pipelines, vendor workflows, receiving, and matching.
+Purchase order domain: import pipelines, vendor workflows, receiving, matching, and purchase-order/item mutation endpoints (including guarded deletes).
 
 ## Typical Contents
 - Python modules, schemas, or support assets scoped to this domain.
@@ -15,6 +15,7 @@ Purchase order domain: import pipelines, vendor workflows, receiving, and matchi
 - Editing PO status transitions without test updates.
 - Mixing dependency styles in route signatures; prefer `Annotated[..., Depends(...)]` and `Annotated[..., Query(...)]` for maintainable, consistent FastAPI typing.
 - In Python signatures, non-default dependency params must come before optional/default query params to avoid `SyntaxError: parameter without a default follows parameter with a default`.
+- Purchase-order deletes are blocked when any line item is already `RECEIVED`; frontend should surface API detail text for this guardrail.
 
 ## Child Folders
 - `schemas/`

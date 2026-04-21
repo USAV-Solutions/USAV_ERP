@@ -518,6 +518,26 @@ async def update_purchase_order(
     return PurchaseOrderResponse.model_validate(fresh)
 
 
+@router.delete("/purchases/{po_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_purchase_order(
+    po_id: int,
+    po_repo: PurchaseOrderRepository = Depends(get_purchase_order_repo),
+    db: AsyncSession = Depends(get_db),
+):
+    po = await po_repo.get_with_items_and_vendor(po_id)
+    if po is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchase order not found")
+
+    if any(item.status == PurchaseOrderItemStatus.RECEIVED for item in po.items):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Purchase orders with received items cannot be deleted",
+        )
+
+    await po_repo.delete(po_id)
+    await db.commit()
+
+
 @router.post(
     "/purchases/{po_id}/items",
     response_model=PurchaseOrderItemResponse,
