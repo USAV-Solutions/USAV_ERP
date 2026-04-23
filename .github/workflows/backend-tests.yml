@@ -1,0 +1,92 @@
+name: Backend Tests
+
+on:
+  push:
+    branches: ["dev"]
+  pull_request:
+    branches: ["main"]
+
+concurrency:
+  group: backend-tests-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      PYTHONUNBUFFERED: 1
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect whether backend-related files changed
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BASE_REF="origin/${{ github.base_ref }}"
+            git fetch origin "${{ github.base_ref }}"
+            CHANGED_FILES="$(git diff --name-only "$BASE_REF"...HEAD)"
+          else
+            BEFORE="${{ github.event.before }}"
+            if [[ "$BEFORE" == "0000000000000000000000000000000000000000" ]]; then
+              CHANGED_FILES="$(git ls-files)"
+            else
+              CHANGED_FILES="$(git diff --name-only "$BEFORE" HEAD)"
+            fi
+          fi
+
+          echo "Changed files:"
+          printf '%s\n' "$CHANGED_FILES"
+
+          if printf '%s\n' "$CHANGED_FILES" | grep -Eq '^(Backend/|\.github/workflows/backend-tests\.yml)'; then
+            echo "run_tests=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_tests=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python with caching
+        if: steps.changes.outputs.run_tests == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install backend dependencies
+        if: steps.changes.outputs.run_tests == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r Backend/requirements.txt
+
+      - name: Run backend pytest folder
+        if: steps.changes.outputs.run_tests == 'true'
+        run: |
+          set -euo pipefail
+
+          if [[ ! -d "Backend/tests" ]]; then
+            echo "Backend/tests not found; skipping pytest and marking workflow successful."
+            exit 0
+          fi
+
+          set +e
+          python -m pytest -v --tb=short Backend/tests
+          rc=$?
+          set -e
+
+          if [[ $rc -eq 5 ]]; then
+            echo "No tests collected under Backend/tests; marking workflow successful."
+            exit 0
+          fi
+
+          exit $rc
+
+      - name: Skip because backend was unchanged
+        if: steps.changes.outputs.run_tests != 'true'
+        run: echo "No backend-related changes detected; marking workflow successful."

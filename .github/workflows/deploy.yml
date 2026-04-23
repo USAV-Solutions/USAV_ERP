@@ -1,29 +1,35 @@
-name: Deploy to Proxmox
+name: Deploy
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
 
 jobs:
   deploy:
-    # This tells GitHub to run strictly on YOUR server
     runs-on: self-hosted
+    environment: production
 
     steps:
-      - name: Update and Restart Containers
+      - name: Deploy on server
+        shell: bash
         run: |
-          # 1. Go to your existing project folder
+          set -euo pipefail
+
           cd ~/USAV_Inventory
-          
-          # 2. Pull the latest code
-          git pull origin main
-          
-          # 3. Run Migrations
+
+          echo "Fetching latest code..."
+          git fetch origin main
+          git reset --hard origin/main
+
+          echo "Running migrations..."
           docker compose --profile migrate up --build --remove-orphans migrations
-          
-          # 4. Rebuild and Restart (Production Profile)
-          # Note: We use full path to docker just in case, but usually 'docker' works
-          docker compose --profile prod up -d --build
-          
-          # 5. Cleanup space
+
+          echo "Restarting production containers..."
+          docker compose --profile prod up -d --build --remove-orphans
+
+          echo "Cleaning unused Docker images..."
           docker image prune -f
