@@ -1339,7 +1339,7 @@ async def sync_po_outbound(
 ) -> None:
     """Push a ``PurchaseOrder`` to Zoho Inventory as a purchase order."""
     from sqlalchemy import select
-    from sqlalchemy.orm import selectinload
+    from sqlalchemy.orm import selectinload, undefer
 
     payload: Optional[dict[str, Any]] = None
 
@@ -1349,6 +1349,12 @@ async def sync_po_outbound(
             .options(
                 selectinload(PurchaseOrder.vendor),
                 selectinload(PurchaseOrder.items).selectinload(PurchaseOrderItem.variant),
+                undefer(PurchaseOrder.zoho_bill_created),
+                undefer(PurchaseOrder.zoho_payment_created),
+                undefer(PurchaseOrder.zoho_billed_checked_at),
+                undefer(PurchaseOrder.zoho_bill_id),
+                undefer(PurchaseOrder.zoho_payment_id),
+                undefer(PurchaseOrder.zoho_billing_error),
             )
             .where(PurchaseOrder.id == po_id)
         )
