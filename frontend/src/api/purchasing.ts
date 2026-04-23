@@ -158,11 +158,11 @@ export async function importPurchasesFromZoho(params: {
   return data
 }
 
-export async function importPurchasesFromGoodwillCsv(file: File): Promise<GoodwillCsvImportResponse> {
+export async function importPurchasesFromGoodwillShippedCsv(file: File): Promise<GoodwillCsvImportResponse> {
   const formData = new FormData()
   formData.append('file', file)
   const { data } = await axiosClient.post<GoodwillCsvImportResponse>(
-    PURCHASING.IMPORT_GOODWILL_CSV,
+    PURCHASING.IMPORT_GOODWILL_SHIPPED_CSV,
     formData,
     {
       headers: { 'Content-Type': 'multipart/form-data' },

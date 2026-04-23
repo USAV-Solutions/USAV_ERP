@@ -1104,7 +1104,7 @@ async def _upsert_purchase_item(
         return True
 
 
-async def _import_goodwill_csv(
+async def _import_goodwill_shipped_csv(
     content: str,
     vendor_repo: VendorRepository,
     po_repo: PurchaseOrderRepository,
@@ -1202,7 +1202,7 @@ async def _import_goodwill_csv(
 
         existing_po = await _find_existing_po_by_external_id(db, po_number)
         import_mode_note = "open-orders" if only_view_order_status else "shipped-orders"
-        import_source_value = "GOODWILL_PICKUP" if only_view_order_status else "GOODWILL_CSV"
+        import_source_value = "GOODWILL_PICKUP" if only_view_order_status else "GOODWILL_SHIPPED"
         po_payload = {
             "po_number": po_number,
             "vendor_id": goodwill_vendor_id,
@@ -1790,7 +1790,7 @@ async def _import_purchase_file_by_source(
         )
 
     if source in {PurchaseFileImportSource.GOODWILL, PurchaseFileImportSource.GOODWILL_SHIPPED}:
-        return await _import_goodwill_csv(
+        return await _import_goodwill_shipped_csv(
             content,
             vendor_repo,
             po_repo,
@@ -1800,7 +1800,7 @@ async def _import_purchase_file_by_source(
             only_view_order_status=False,
         )
     if source == PurchaseFileImportSource.GOODWILL_OPEN:
-        return await _import_goodwill_csv(
+        return await _import_goodwill_shipped_csv(
             content,
             vendor_repo,
             po_repo,
@@ -2193,7 +2193,7 @@ async def import_purchasing_from_ebay_api(
 
 
 @router.post("/purchases/import/goodwill-csv", response_model=GoodwillCsvImportResponse)
-async def import_purchasing_from_goodwill_csv(
+async def import_purchasing_from_goodwill_shipped_csv(
     _current_user: CurrentUser,
     file: UploadFile = File(...),
     vendor_repo: VendorRepository = Depends(get_vendor_repo),

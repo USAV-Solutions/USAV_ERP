@@ -17,7 +17,7 @@ from app.integrations.zoho.sync_engine import (
 from app.modules.purchasing.routes import (
     _extract_zoho_po_charges,
     _import_ebay_purchase_api,
-    _import_goodwill_csv,
+    _import_goodwill_shipped_csv,
     _resolve_zoho_external_item_name,
     _upsert_purchase_item,
     import_purchasing_from_zoho,
@@ -135,7 +135,7 @@ def test_purchase_order_to_zoho_payload_keeps_custom_charge_fields_and_rolls_adj
     "source,expected",
     [
         ("EBAY_MEKONG_API", "Ebay"),
-        ("GOODWILL_CSV", "Goodwill"),
+        ("GOODWILL_SHIPPED", "Goodwill"),
         ("LOCAL_PICKUP", "Local Pickup"),
         ("UNKNOWN_SOURCE", "Other"),
     ],
@@ -574,7 +574,7 @@ async def test_upsert_purchase_item_matches_by_purchase_link_when_item_id_missin
 
 
 @pytest.mark.asyncio
-async def test_import_goodwill_csv_supports_open_orders_format_and_skips_rows_without_order_number(monkeypatch):
+async def test_import_goodwill_shipped_csv_supports_open_orders_format_and_skips_rows_without_order_number(monkeypatch):
     content = (
         '"Status","Order #","Item #","Item","Seller","Qty","Price","Ended (PT)"\n'
         '"View Order","61595664","259341242","Bose Solo 5 TV Sound System","Goodwill - West Texas","1","$29.97","03/29/2026 06:02:00 PM"\n'
@@ -600,7 +600,7 @@ async def test_import_goodwill_csv_supports_open_orders_format_and_skips_rows_wi
     monkeypatch.setattr("app.modules.purchasing.routes._find_existing_po_by_external_id", _fake_find_existing_po)
     monkeypatch.setattr("app.modules.purchasing.routes._upsert_purchase_item", _fake_upsert_purchase_item)
 
-    result = await _import_goodwill_csv(content, vendor_repo, po_repo, po_item_repo, db)
+    result = await _import_goodwill_shipped_csv(content, vendor_repo, po_repo, po_item_repo, db)
 
     assert result.source_rows_seen == 2
     assert result.source_rows_skipped == 1

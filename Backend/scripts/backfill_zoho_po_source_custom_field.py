@@ -50,7 +50,7 @@ EXACT_SOURCE_MAP = {
     "EBAY_USAV_API": "Ebay",
     "EBAY_DRAGON_API": "Ebay",
     "AMAZON_CSV": "Amazon",
-    "GOODWILL_CSV": "Goodwill",
+    "GOODWILL_SHIPPED": "Goodwill",
     "ALIEXPRESS_JSON": "AliExpress",
     "ALIEXPRESS_CSV": "AliExpress",
     "MANUAL": "Other",

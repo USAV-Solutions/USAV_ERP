@@ -12,6 +12,7 @@ One-off operational scripts for backfills, cleanup, reconciliation, and migratio
 - Running destructive scripts without dry-run guardrails.
 - Leaving script output formats undocumented for future operators.
 - Zoho bill backfills can fail with `code:36510` when PO has un-billed purchase receives; retry with receive-linked bill lines (`receive_item_id`) instead of PO-only line mapping.
+- Source backfill scripts should treat `GOODWILL_SHIPPED` as the canonical shipped Goodwill PO source value; normalize legacy shipped-source rows upstream before running source-based reconciliation.
 
 ## Child Folders
 - (No child folders)
