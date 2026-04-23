@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 UNMATCHED_PLACEHOLDER_ITEM_NAME = "unmatched item"
 UNMATCHED_PLACEHOLDER_ITEM_SKU = "00000"
 EBAY_PO_SOURCE_PREFIX = "EBAY_"
+GOODWILL_SHIPPED_PO_SOURCE = "GOODWILL_SHIPPED"
 PAYMENT_TERMS_DUE_ON_RECEIPT = 0
 
 VALID_ZOHO_PO_SOURCE_VALUES = {
@@ -572,7 +573,11 @@ def _strip_po_location_fields(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _is_ebay_purchase_source(source: Optional[str]) -> bool:
-    return str(source or "").strip().upper().startswith(EBAY_PO_SOURCE_PREFIX)
+    normalized = str(source or "").strip().upper()
+    return (
+        normalized.startswith(EBAY_PO_SOURCE_PREFIX)
+        or normalized == GOODWILL_SHIPPED_PO_SOURCE
+    )
 
 
 def _to_decimal(value: object, default: str = "0") -> Decimal:
