@@ -11,6 +11,7 @@ Purchasing domain tests: imports, mapping, and PO workflow invariants.
 - Editing this folder without checking sibling tests and schema/type contracts.
 - Making cross-layer changes here but forgetting migration/frontend alignment.
 - Purchase-order Zoho payload mapping tests should assert `custom_fields` coverage, including `cf_source` mapping behavior.
+- Goodwill shipped-source tests should assert the canonical stored value `GOODWILL_SHIPPED` when validating source-to-Zoho mapping.
 
 ## Child Folders
 - (No child folders)

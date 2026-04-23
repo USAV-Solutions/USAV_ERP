@@ -1762,7 +1762,7 @@ export default function PurchasingManagement() {
               >
                 <MenuItem value="ALL">All</MenuItem>
                 <MenuItem value="MANUAL">MANUAL</MenuItem>
-                <MenuItem value="GOODWILL_CSV">GOODWILL_CSV</MenuItem>
+                <MenuItem value="GOODWILL_SHIPPED">GOODWILL_SHIPPED</MenuItem>
                 <MenuItem value="GOODWILL_PICKUP">GOODWILL_PICKUP</MenuItem>
                 <MenuItem value="AMAZON_CSV">AMAZON_CSV</MenuItem>
                 <MenuItem value="ALIEXPRESS_JSON">ALIEXPRESS_JSON</MenuItem>
