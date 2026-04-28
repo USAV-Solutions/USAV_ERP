@@ -36,6 +36,11 @@ from app.repositories.orders.sync_repository import SyncRepository
 
 logger = logging.getLogger(__name__)
 
+_NON_BLOCKING_AUTH_ERROR_MARKERS = (
+    "unable to obtain access token",
+    "credentials not configured",
+)
+
 # Mapping from IntegrationState platform_name → OrderPlatform enum
 _PLATFORM_MAP: dict[str, OrderPlatform] = {
     "AMAZON": OrderPlatform.AMAZON,
@@ -111,6 +116,21 @@ class OrderSyncService:
         logger.debug(f"[DEBUG.INTERNAL_API] {platform_name}: Attempting to acquire sync lock")
         locked = await self.sync_repo.acquire_sync_lock(platform_name)
         logger.debug(f"[DEBUG.INTERNAL_API] {platform_name}: Lock acquired={locked}")
+        if not locked:
+            state = await self.sync_repo.get_by_platform(platform_name)
+            state_error = (state.last_error_message or "").lower() if state else ""
+            if state and state.current_status == IntegrationSyncStatus.ERROR and any(
+                marker in state_error for marker in _NON_BLOCKING_AUTH_ERROR_MARKERS
+            ):
+                logger.info(
+                    "%s: Auto-resetting prior auth/config error state to retry sync.",
+                    platform_name,
+                )
+                await self.sync_repo.reset_to_idle(platform_name)
+                await self.session.flush()
+                locked = await self.sync_repo.acquire_sync_lock(platform_name)
+                logger.debug(f"[DEBUG.INTERNAL_API] {platform_name}: Lock acquired after auto-reset={locked}")
+
         if not locked:
             response.success = False
             error_msg = f"Platform '{platform_name}' is currently syncing or in error. Reset the state before retrying."

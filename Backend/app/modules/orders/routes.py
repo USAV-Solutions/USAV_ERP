@@ -204,54 +204,91 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
     seen = 0
     skipped = 0
 
+    def _pick(*keys: str) -> str:
+        for key in keys:
+            value = (row.get(key) or "").strip()
+            if value:
+                return value
+        return ""
+
+    def _as_float(*keys: str, default: float = 0.0) -> float:
+        value = _pick(*keys)
+        if not value:
+            return default
+        try:
+            return float(value)
+        except ValueError:
+            return default
+
+    def _as_int(*keys: str, default: int = 1) -> int:
+        value = _pick(*keys)
+        if not value:
+            return default
+        try:
+            parsed = int(value)
+            return parsed if parsed > 0 else default
+        except ValueError:
+            return default
+
     for row in reader:
         seen += 1
-        ext_order_id = (row.get("external_order_id") or row.get("order_id") or "").strip()
-        item_name = (row.get("item_name") or row.get("title") or "").strip()
-        if not ext_order_id or not item_name:
+        ext_order_id = _pick("external_order_id", "order_id", "Order - CustomerID", "Order - Number")
+        item_name = _pick("item_name", "title", "Item Name", "Product Name")
+
+        # ShipStation order export rows usually don't include per-item columns.
+        # Keep those rows importable by creating a synthetic line item.
+        quantity = _as_int("quantity", "Count - Number of Items", default=1)
+        subtotal_amount = _as_float("subtotal_amount", "subtotal", "Amount - Order Subtotal", default=0.0)
+        total_amount = _as_float("total_amount", "total", "Amount - Order Total", default=0.0)
+        item_total = subtotal_amount if subtotal_amount > 0 else total_amount
+        if not item_name:
+            item_name = "Imported order line"
+
+        if not ext_order_id:
             skipped += 1
             continue
 
-        external_item_id = (row.get("external_item_id") or "").strip() or None
-        external_sku = (row.get("external_sku") or row.get("sku") or "").strip() or None
-        quantity_text = (row.get("quantity") or "1").strip()
-        unit_price_text = (row.get("unit_price") or "0").strip()
-        total_price_text = (row.get("total_price") or "").strip()
+        external_item_id = _pick("external_item_id", "Order - Number") or None
+        external_sku = _pick("external_sku", "sku", "SKU") or None
+        unit_price_text = _pick("unit_price")
+        total_price_text = _pick("total_price")
 
         try:
-            quantity = int(quantity_text)
-            unit_price = float(unit_price_text)
-            total_price = float(total_price_text) if total_price_text else unit_price * quantity
+            unit_price = float(unit_price_text) if unit_price_text else (item_total / quantity if quantity > 0 else 0.0)
+            total_price = float(total_price_text) if total_price_text else item_total
         except ValueError:
             skipped += 1
             continue
 
         ordered_at = None
-        ordered_at_raw = (row.get("ordered_at") or "").strip()
+        ordered_at_raw = _pick("ordered_at", "Date - Order Date")
         if ordered_at_raw:
             try:
                 ordered_at = datetime.fromisoformat(ordered_at_raw.replace("Z", "+00:00"))
             except ValueError:
-                ordered_at = None
+                try:
+                    ordered_at = datetime.strptime(ordered_at_raw, "%m/%d/%Y %I:%M:%S %p")
+                except ValueError:
+                    ordered_at = None
 
         order_entry = grouped.setdefault(
             ext_order_id,
             {
                 "platform_order_id": ext_order_id,
-                "platform_order_number": (row.get("external_order_number") or row.get("order_number") or "").strip() or None,
-                "customer_name": (row.get("customer_name") or "").strip() or None,
-                "customer_email": (row.get("customer_email") or "").strip() or None,
-                "ship_address_line1": (row.get("shipping_address_line1") or "").strip() or None,
-                "ship_address_line2": (row.get("shipping_address_line2") or "").strip() or None,
-                "ship_city": (row.get("shipping_city") or "").strip() or None,
-                "ship_state": (row.get("shipping_state") or "").strip() or None,
-                "ship_postal_code": (row.get("shipping_postal_code") or "").strip() or None,
-                "ship_country": (row.get("shipping_country") or "").strip() or "US",
-                "subtotal": float((row.get("subtotal_amount") or row.get("subtotal") or "0").strip() or "0"),
-                "tax": float((row.get("tax_amount") or row.get("tax") or "0").strip() or "0"),
-                "shipping": float((row.get("shipping_amount") or row.get("shipping") or "0").strip() or "0"),
-                "total": float((row.get("total_amount") or row.get("total") or "0").strip() or "0"),
-                "currency": (row.get("currency") or "USD").strip() or "USD",
+                "platform_order_number": _pick("external_order_number", "order_number", "Order - Number") or None,
+                "customer_name": _pick("customer_name", "Bill To - Name", "Ship To - Name") or None,
+                "customer_email": _pick("customer_email", "Customer Email") or None,
+                "ship_address_line1": _pick("shipping_address_line1", "Ship To - Address 1") or None,
+                "ship_address_line2": _pick("shipping_address_line2", "Ship To - Address 2") or None,
+                "ship_city": _pick("shipping_city", "Ship To - City") or None,
+                "ship_state": _pick("shipping_state", "Ship To - State") or None,
+                "ship_postal_code": _pick("shipping_postal_code", "Ship To - Postal Code") or None,
+                "ship_country": _pick("shipping_country", "Ship To - Country") or "US",
+                "subtotal": subtotal_amount,
+                "tax": _as_float("tax_amount", "tax", "Amount - Order Tax", default=0.0),
+                "shipping": _as_float("shipping_amount", "shipping", "Amount - Order Shipping", default=0.0),
+                "total": total_amount,
+                "currency": _pick("currency") or "USD",
                 "ordered_at": ordered_at,
                 "items": [],
                 "raw_data": {"import_source": "CSV_GENERIC"},
