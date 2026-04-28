@@ -10,6 +10,7 @@ interface ProductThumbnailProps {
 }
 
 export default function ProductThumbnail({ sku, thumbnailUrl, size = 40, onClick }: ProductThumbnailProps) {
+  const disableProductImages = import.meta.env.VITE_DISABLE_PRODUCT_IMAGES === 'true'
   const [hasError, setHasError] = useState(false)
   const [isLoaded, setIsLoaded] = useState(false)
   const [fallbackMode, setFallbackMode] = useState(false)
@@ -31,6 +32,9 @@ export default function ProductThumbnail({ sku, thumbnailUrl, size = 40, onClick
   }, [sku, thumbnailUrl])
 
   useEffect(() => {
+    if (disableProductImages) {
+      return
+    }
     const imageEl = imgRef.current
     if (!imageEl) return
 
@@ -42,7 +46,27 @@ export default function ProductThumbnail({ sku, thumbnailUrl, size = 40, onClick
         setHasError(true)
       }
     }
-  }, [resolvedThumbnailUrl])
+  }, [disableProductImages, resolvedThumbnailUrl])
+
+  if (disableProductImages) {
+    return (
+      <Box
+        sx={{
+          width: size,
+          height: size,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          bgcolor: 'grey.100',
+          borderRadius: 0.5,
+          color: 'grey.400',
+          cursor: 'default',
+        }}
+      >
+        <ImageNotSupported sx={{ fontSize: size * 0.5 }} />
+      </Box>
+    )
+  }
 
   if (hasError) {
     return (

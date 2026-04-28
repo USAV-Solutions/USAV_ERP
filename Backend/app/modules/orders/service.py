@@ -36,6 +36,11 @@ from app.repositories.orders.sync_repository import SyncRepository
 
 logger = logging.getLogger(__name__)
 
+_NON_BLOCKING_AUTH_ERROR_MARKERS = (
+    "unable to obtain access token",
+    "credentials not configured",
+)
+
 # Mapping from IntegrationState platform_name → OrderPlatform enum
 _PLATFORM_MAP: dict[str, OrderPlatform] = {
     "AMAZON": OrderPlatform.AMAZON,
@@ -111,6 +116,21 @@ class OrderSyncService:
         logger.debug(f"[DEBUG.INTERNAL_API] {platform_name}: Attempting to acquire sync lock")
         locked = await self.sync_repo.acquire_sync_lock(platform_name)
         logger.debug(f"[DEBUG.INTERNAL_API] {platform_name}: Lock acquired={locked}")
+        if not locked:
+            state = await self.sync_repo.get_by_platform(platform_name)
+            state_error = (state.last_error_message or "").lower() if state else ""
+            if state and state.current_status == IntegrationSyncStatus.ERROR and any(
+                marker in state_error for marker in _NON_BLOCKING_AUTH_ERROR_MARKERS
+            ):
+                logger.info(
+                    "%s: Auto-resetting prior auth/config error state to retry sync.",
+                    platform_name,
+                )
+                await self.sync_repo.reset_to_idle(platform_name)
+                await self.session.flush()
+                locked = await self.sync_repo.acquire_sync_lock(platform_name)
+                logger.debug(f"[DEBUG.INTERNAL_API] {platform_name}: Lock acquired after auto-reset={locked}")
+
         if not locked:
             response.success = False
             error_msg = f"Platform '{platform_name}' is currently syncing or in error. Reset the state before retrying."
@@ -343,7 +363,7 @@ class OrderSyncService:
             return False
 
         # Upsert/lookup Customer (if any data is available)
-        customer_id = await self._get_or_create_customer(ext)
+        customer_id = await self._get_or_create_customer(ext, source=source)
 
         # Build the Order header
         order_data = {
@@ -389,9 +409,62 @@ class OrderSyncService:
     def _platform_source(platform_name: str) -> str:
         return f"{platform_name.upper()}_API"
 
-    async def _get_or_create_customer(self, ext: ExternalOrder) -> Optional[int]:
+    @staticmethod
+    def _coalesce(value: Optional[str]) -> Optional[str]:
+        text = str(value or "").strip()
+        return text or None
+
+    def _merge_customer_fields(self, customer: Customer, ext: ExternalOrder, source: Optional[str]) -> bool:
+        changed = False
+
+        incoming_name = self._coalesce(ext.customer_name)
+        incoming_email = self._coalesce(ext.customer_email)
+        incoming_phone = self._coalesce(ext.customer_phone)
+        incoming_company = self._coalesce(ext.customer_company)
+        incoming_source = self._coalesce(ext.customer_source) or self._coalesce(source)
+
+        if incoming_name and (not self._coalesce(customer.name) or customer.name == "Unknown"):
+            customer.name = incoming_name
+            changed = True
+        if incoming_email and not self._coalesce(customer.email):
+            customer.email = incoming_email
+            changed = True
+        if incoming_phone and not self._coalesce(customer.phone):
+            customer.phone = incoming_phone
+            changed = True
+        if incoming_company and not self._coalesce(customer.company_name):
+            customer.company_name = incoming_company
+            changed = True
+
+        if ext.ship_address_line1 and not self._coalesce(customer.address_line1):
+            customer.address_line1 = ext.ship_address_line1
+            changed = True
+        if ext.ship_address_line2 and not self._coalesce(customer.address_line2):
+            customer.address_line2 = ext.ship_address_line2
+            changed = True
+        if ext.ship_city and not self._coalesce(customer.city):
+            customer.city = ext.ship_city
+            changed = True
+        if ext.ship_state and not self._coalesce(customer.state):
+            customer.state = ext.ship_state
+            changed = True
+        if ext.ship_postal_code and not self._coalesce(customer.postal_code):
+            customer.postal_code = ext.ship_postal_code
+            changed = True
+        if ext.ship_country and not self._coalesce(customer.country):
+            customer.country = ext.ship_country
+            changed = True
+
+        # Keep latest known source; this is intentionally overwrite-oriented.
+        if incoming_source and incoming_source != customer.source:
+            customer.source = incoming_source
+            changed = True
+
+        return changed
+
+    async def _get_or_create_customer(self, ext: ExternalOrder, *, source: Optional[str]) -> Optional[int]:
         """Find or create a Customer from external order details."""
-        if not (ext.customer_name or ext.customer_email):
+        if not (ext.customer_name or ext.customer_email or ext.customer_phone):
             return None
 
         # Prefer email for deterministic matching
@@ -401,6 +474,8 @@ class OrderSyncService:
             )
             customer = existing.scalar_one_or_none()
             if customer:
+                if self._merge_customer_fields(customer, ext, source):
+                    self.session.add(customer)
                 return customer.id
 
         # Fallback: match by name + postal code if available
@@ -411,20 +486,23 @@ class OrderSyncService:
             existing = await self.session.execute(query)
             customer = existing.scalar_one_or_none()
             if customer:
+                if self._merge_customer_fields(customer, ext, source):
+                    self.session.add(customer)
                 return customer.id
 
         # Create new customer
         customer = Customer(
             name=ext.customer_name or "Unknown",
             email=ext.customer_email,
-            phone=None,
-            company_name=None,
+            phone=ext.customer_phone,
+            company_name=ext.customer_company,
             address_line1=ext.ship_address_line1,
             address_line2=ext.ship_address_line2,
             city=ext.ship_city,
             state=ext.ship_state,
             postal_code=ext.ship_postal_code,
             country=ext.ship_country or "US",
+            source=self._coalesce(ext.customer_source) or self._coalesce(source),
             is_active=True,
         )
         self.session.add(customer)

@@ -70,6 +70,8 @@ This will:
 - Start database, database backups normally
 - Run backend with code reloading
 - Run frontend with Vite hot reload
+- Skip host `/mnt/product_images` mounts (not required in local dev)
+- Run Zoho sync actions without image upload in dev UI by default
 - Changes to code are reflected immediately without rebuilding
 
 **Access:**
@@ -197,6 +199,11 @@ docker-compose restart backend
 ### Hot reload not working in dev mode:
 - Ensure volumes are correctly mounted
 - Restart the container: `docker-compose --profile dev restart frontend-dev`
+
+### `/mnt/product_images` missing on local machine:
+- Dev profile no longer requires `/mnt/product_images`.
+- `backend-dev` uses container-local `PRODUCT_IMAGES_PATH=/tmp/usav_product_images`.
+- Product thumbnails/uploads are intentionally disabled in dev UI (`VITE_DISABLE_PRODUCT_IMAGES=true`).
 
 ### Out of disk space:
 ```bash

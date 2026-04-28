@@ -49,6 +49,27 @@ VALID_ZOHO_PO_SOURCE_VALUES = {
     "Other",
 }
 
+VALID_ZOHO_CONTACT_SOURCE_VALUES = {
+    "Ebay",
+    "Walmart",
+    "Ecwid",
+    "Amazon",
+    "ShipStation",
+    "Other",
+}
+
+EXACT_ZOHO_CONTACT_SOURCE_MAP = {
+    "EBAY_MEKONG_API": "Ebay",
+    "EBAY_USAV_API": "Ebay",
+    "EBAY_DRAGON_API": "Ebay",
+    "WALMART_API": "Walmart",
+    "ECWID_API": "Ecwid",
+    "AMAZON_API": "Amazon",
+    "SHIPSTATION_CSV": "ShipStation",
+    "MANUAL": "Other",
+    "ZOHO_IMPORT": "Other",
+}
+
 EXACT_ZOHO_PO_SOURCE_MAP = {
     "EBAY_MEKONG_API": "Ebay",
     "EBAY_PURCHASING_API": "Ebay",
@@ -142,6 +163,19 @@ def customer_to_zoho_payload(customer: Customer) -> dict[str, Any]:
         address["country"] = customer.country
     if address:
         payload["billing_address"] = address
+        payload["shipping_address"] = dict(address)
+
+    source_raw = str(getattr(customer, "source", "") or "").strip()
+    if source_raw:
+        source_value = _resolve_customer_source_to_zoho_dropdown(source_raw)
+        source_api_name = str(settings.zoho_contact_cf_source_api_name or "cf_source").strip() or "cf_source"
+        source_field: dict[str, Any] = {
+            "api_name": source_api_name,
+            "value": source_value,
+        }
+        if settings.zoho_contact_cf_source_id:
+            source_field["customfield_id"] = settings.zoho_contact_cf_source_id
+        payload["custom_fields"] = [source_field]
 
     return payload
 
@@ -186,6 +220,54 @@ def _resolve_source_to_zoho_dropdown(source: str) -> str:
     if fallback in VALID_ZOHO_PO_SOURCE_VALUES:
         return fallback
     return "Other"
+
+
+def _normalize_customer_source_to_zoho_dropdown(source: str) -> str:
+    text = str(source or "").strip().upper().replace("-", "_").replace(" ", "_")
+    if "EBAY" in text:
+        return "Ebay"
+    if "WALMART" in text:
+        return "Walmart"
+    if "ECWID" in text:
+        return "Ecwid"
+    if "AMAZON" in text:
+        return "Amazon"
+    if "SHIPSTATION" in text:
+        return "ShipStation"
+    return "Other"
+
+
+def _resolve_customer_source_to_zoho_dropdown(source: str) -> str:
+    normalized = str(source or "").strip().upper()
+    mapped = EXACT_ZOHO_CONTACT_SOURCE_MAP.get(normalized)
+    if mapped:
+        return mapped
+
+    fallback = _normalize_customer_source_to_zoho_dropdown(source)
+    if fallback in VALID_ZOHO_CONTACT_SOURCE_VALUES:
+        return fallback
+    return "Other"
+
+
+def _extract_contact_source_custom_field(data: dict[str, Any]) -> Optional[str]:
+    custom_fields = data.get("custom_fields") or []
+    if not isinstance(custom_fields, list):
+        return None
+
+    target_api_name = str(settings.zoho_contact_cf_source_api_name or "cf_source").strip().lower()
+    for field in custom_fields:
+        if not isinstance(field, dict):
+            continue
+        api_name = str(field.get("api_name") or "").strip().lower()
+        label = str(field.get("label") or "").strip().lower()
+        if api_name == target_api_name or label in {"source", "customer source", "channel"}:
+            value = field.get("value")
+            if value is None:
+                continue
+            text_value = str(value).strip()
+            return text_value or None
+
+    return None
 
 
 def purchase_order_to_zoho_payload(
@@ -1102,6 +1184,9 @@ def zoho_contact_to_customer_fields(data: dict) -> dict[str, Any]:
         fields["postal_code"] = addr["zip"]
     if addr.get("country"):
         fields["country"] = addr["country"]
+    source_value = _extract_contact_source_custom_field(data)
+    if source_value:
+        fields["source"] = source_value
     return fields
 
 

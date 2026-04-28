@@ -21,6 +21,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -723,11 +724,11 @@ class PlatformListing(Base, TimestampMixin):
         primary_key=True,
         autoincrement=True,
     )
-    variant_id: Mapped[int] = mapped_column(
+    variant_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
         ForeignKey("product_variant.id", ondelete="CASCADE"),
-        nullable=False,
-        comment="The specific item being sold.",
+        nullable=True,
+        comment="Matched internal SKU variant; NULL means unresolved listing.",
     )
     platform: Mapped[Platform] = mapped_column(
         Enum(Platform, name="platform_enum"),
@@ -737,7 +738,12 @@ class PlatformListing(Base, TimestampMixin):
     external_ref_id: Mapped[Optional[str]] = mapped_column(
         String(100),
         nullable=True,
-        comment="The ID on the remote platform (Zoho Item ID, ASIN).",
+        comment="Canonical platform listing ID (not merchant SKU).",
+    )
+    merchant_sku: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Marketplace merchant SKU for fallback lookup only.",
     )
     listed_name: Mapped[Optional[str]] = mapped_column(
         String(500),
@@ -777,21 +783,23 @@ class PlatformListing(Base, TimestampMixin):
     )
     
     # Relationships
-    variant: Mapped["ProductVariant"] = relationship(
+    variant: Mapped[Optional["ProductVariant"]] = relationship(
         "ProductVariant",
         back_populates="listings",
     )
     
     __table_args__ = (
-        # One listing per variant per platform
-        UniqueConstraint(
-            "variant_id", "platform",
-            name="uq_listing_variant_platform",
-        ),
         Index("ix_listing_variant_id", "variant_id"),
         Index("ix_listing_platform", "platform"),
         Index("ix_listing_sync_status", "sync_status"),
-        Index("ix_listing_external_ref", "platform", "external_ref_id"),
+        Index(
+            "ix_listing_external_ref",
+            "platform",
+            "external_ref_id",
+            unique=True,
+            postgresql_where=text("external_ref_id IS NOT NULL"),
+        ),
+        Index("ix_listing_platform_merchant_sku", "platform", "merchant_sku"),
     )
     
     def __repr__(self) -> str:
@@ -919,6 +927,11 @@ class Customer(Base, ZohoSyncMixin, TimestampMixin):
         nullable=True,
         comment="Company / organisation name.",
     )
+    source: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Latest known customer acquisition source (ECWID_API, WALMART_API, SHIPSTATION_CSV, etc.).",
+    )
 
     # ---- Address ----
     address_line1: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -947,6 +960,7 @@ class Customer(Base, ZohoSyncMixin, TimestampMixin):
     __table_args__ = (
         Index("ix_customer_email", "email"),
         Index("ix_customer_name", "name"),
+        Index("ix_customer_source", "source"),
         Index("ix_customer_zoho_id", "zoho_id"),
     )
 

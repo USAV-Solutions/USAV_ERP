@@ -60,6 +60,8 @@ services:
       - EBAY_REFRESH_TOKEN_PURCHASING=${EBAY_REFRESH_TOKEN_PURCHASING:-}
       - EBAY_REFRESH_TOKEN_USAV=${EBAY_REFRESH_TOKEN_USAV:-}
       - EBAY_REFRESH_TOKEN_DRAGON=${EBAY_REFRESH_TOKEN_DRAGON:-}
+      - WALMART_CLIENT_ID=${WALMART_CLIENT_ID:-}
+      - WALMART_CLIENT_SECRET=${WALMART_CLIENT_SECRET:-}
     ports:
       - "8080:8080"
     depends_on:
@@ -87,10 +89,10 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
     volumes:
       - ./Backend:/app
-      - /mnt/product_images:/mnt/product_images
     environment:
       - DEBUG=true
       - ENVIRONMENT=development
+      - SEATALK_REDIRECT_URI=${SEATALK_REDIRECT_URI_DEVELOPMENT:-`}
       - DB_HOST=db
       - DB_PORT=5432
       - DB_USER=${DB_USER:-postgres}
@@ -110,8 +112,11 @@ services:
       - ZOHO_CLIENT_SECRET=${ZOHO_CLIENT_SECRET:-}
       - ZOHO_REFRESH_TOKEN=${ZOHO_REFRESH_TOKEN:-}
       - ZOHO_ORGANIZATION_ID=${ZOHO_ORGANIZATION_ID:-}
+      - WALMART_CLIENT_ID=${WALMART_CLIENT_ID:-}
+      - WALMART_CLIENT_SECRET=${WALMART_CLIENT_SECRET:-}
       - ZOHO_AUTO_OUTBOUND_SYNC_ENABLED=false
       - ZOHO_AUTO_INBOUND_SYNC_ENABLED=false
+      - PRODUCT_IMAGES_PATH=/tmp/usav_product_images
     ports:
       - "8080:8080"
     depends_on:
@@ -221,10 +226,10 @@ services:
       - ./frontend/vite.config.ts:/app/vite.config.ts
       - ./frontend/tsconfig.json:/app/tsconfig.json
       - ./frontend/tsconfig.node.json:/app/tsconfig.node.json
-      - /mnt/product_images:/app/public/product-images:ro
     environment:
       - VITE_SEATALK_APP_ID=${SEATALK_APP_ID:-}
-      - VITE_SEATALK_REDIRECT_URI=${SEATALK_REDIRECT_URI:-}
+      - VITE_SEATALK_REDIRECT_URI=http://localhost:3636/auth/seatalk/callback
+      - VITE_DISABLE_PRODUCT_IMAGES=true
     ports:
       - "3636:3636"
     depends_on:

@@ -10,6 +10,7 @@ Ecwid integration client and Ecwid payload mapping utilities.
 ## Common Pitfalls
 - Editing this folder without checking sibling tests and schema/type contracts.
 - Making cross-layer changes here but forgetting migration/frontend alignment.
+- Ecwid order normalization should populate optional customer enrichment fields (`customer_phone`, `customer_company`, `customer_source`) when present, otherwise downstream Zoho customer sync loses fidelity.
 
 ## Child Folders
 - (No child folders)

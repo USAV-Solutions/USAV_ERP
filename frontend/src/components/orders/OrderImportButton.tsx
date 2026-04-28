@@ -45,8 +45,8 @@ export default function OrderImportButton() {
     mutationFn: () =>
       importOrdersFromApi({
         source: apiSource,
-        since: new Date(since).toISOString(),
-        until: new Date(until).toISOString(),
+        since: new Date(`${since}T00:00:00`).toISOString(),
+        until: new Date(`${until}T23:59:59.999`).toISOString(),
       }),
     onSuccess: (data) => {
       setMessage(`Imported ${data.new_orders} orders (${data.new_items} items).`)
@@ -99,7 +99,7 @@ export default function OrderImportButton() {
     csvMutation.mutate()
   }
 
-  const canRunApi = Boolean(since && until && new Date(since) < new Date(until))
+  const canRunApi = Boolean(since && until && new Date(since) <= new Date(until))
   const canRun = mode === 'api' ? canRunApi : Boolean(csvFile)
 
   return (
@@ -136,7 +136,7 @@ export default function OrderImportButton() {
                   </Select>
                 </FormControl>
                 <TextField
-                  type="datetime-local"
+                  type="date"
                   label="Since"
                   value={since}
                   onChange={(e) => setSince(e.target.value)}
@@ -144,7 +144,7 @@ export default function OrderImportButton() {
                   fullWidth
                 />
                 <TextField
-                  type="datetime-local"
+                  type="date"
                   label="Until"
                   value={until}
                   onChange={(e) => setUntil(e.target.value)}
@@ -190,4 +190,3 @@ export default function OrderImportButton() {
     </>
   )
 }
-

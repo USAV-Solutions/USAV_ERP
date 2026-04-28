@@ -12,9 +12,6 @@ import {
   Box,
   Typography,
   Paper,
-  Grid,
-  Card,
-  CardContent,
   Chip,
   Table,
   TableBody,
@@ -43,10 +40,10 @@ import {
 } from '@mui/material'
 import {
   Refresh,
-  Warning,
   KeyboardArrowDown,
   KeyboardArrowUp,
   CloudSync,
+  FilterList,
 } from '@mui/icons-material'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 
@@ -67,6 +64,7 @@ import OrderSyncButton from '../components/orders/OrderSyncButton'
 import AdminDateRangeSync from '../components/orders/AdminDateRangeSync'
 import OrderImportButton from '../components/orders/OrderImportButton'
 import OrderItemsPanel from '../components/orders/OrderItemsPanel'
+import OrderSummaryCards from '../components/common/OrderSummaryCards'
 import { useAuth } from '../hooks/useAuth'
 import SearchField from '../components/common/SearchField'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
@@ -152,6 +150,7 @@ export default function OrdersManagement() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [searchInput, setSearchInput] = useState('')
   const debouncedSearch = useDebouncedValue(searchInput, 250)
+  const [filtersDialogOpen, setFiltersDialogOpen] = useState(false)
 
   // Expanded order rows
   const [expandedOrderId, setExpandedOrderId] = useState<number | null>(null)
@@ -223,6 +222,54 @@ export default function OrdersManagement() {
         sort_dir: sortDir,
         search: debouncedSearch || undefined,
       }),
+  })
+
+  const { data: orderSummary } = useQuery({
+    queryKey: [
+      'orders-summary',
+      platformFilter,
+      statusFilter,
+      itemStatusFilter,
+      zohoSyncFilter,
+      sourceFilter,
+      orderedFromFilter,
+      orderedToFilter,
+      debouncedSearch,
+    ],
+    queryFn: async () => {
+      const params = {
+        platform: platformFilter || undefined,
+        status: statusFilter || undefined,
+        item_status: itemStatusFilter || undefined,
+        zoho_sync_status: zohoSyncFilter || undefined,
+        source: sourceFilter || undefined,
+        ordered_at_from: orderedFromFilter ? new Date(`${orderedFromFilter}T00:00:00`).toISOString() : undefined,
+        ordered_at_to: orderedToFilter ? new Date(`${orderedToFilter}T23:59:59.999`).toISOString() : undefined,
+        search: debouncedSearch || undefined,
+      } as const
+
+      const pageSize = 500
+      let skip = 0
+      let totalOrders = 0
+      let unmatchedOrders = 0
+      let unmatchedItems = 0
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const batch = await listOrders({ ...params, skip, limit: pageSize })
+        if (skip === 0) {
+          totalOrders = batch.total
+        }
+        unmatchedOrders += batch.items.filter((order) => order.unmatched_count > 0).length
+        unmatchedItems += batch.items.reduce((sum, order) => sum + order.unmatched_count, 0)
+        if (batch.items.length < pageSize) {
+          break
+        }
+        skip += pageSize
+      }
+
+      return { totalOrders, unmatchedOrders, unmatchedItems }
+    },
   })
 
   // ── Handlers ─────────────────────────────────────────────────────
@@ -469,7 +516,19 @@ export default function OrdersManagement() {
       && new Date(`${bulkFromDate}T00:00:00`) > new Date(`${bulkToDate}T23:59:59.999`),
   )
   const canStartBulkSync = Boolean(bulkFromDate && bulkToDate && !invalidBulkRange)
-  const columnCount = hasRole(['ADMIN']) ? 11 : 10
+  const columnCount = 10
+  const activeFilterCount = [
+    platformFilter !== '',
+    statusFilter !== '',
+    itemStatusFilter !== '',
+    zohoSyncFilter !== '',
+    sourceFilter !== '',
+    !!orderedFromFilter,
+    !!orderedToFilter,
+    sortBy !== 'ordered_at',
+    sortDir !== 'desc',
+  ].filter(Boolean).length
+  const hasActiveFilters = activeFilterCount > 0 || !!searchInput
 
   const handleShippingStatusChange = (
     orderId: number,
@@ -521,91 +580,37 @@ export default function OrdersManagement() {
         </Stack>
       </Box>
 
-      {/* Summary Cards */}
+      <OrderSummaryCards
+        totalOrders={orderSummary?.totalOrders ?? ordersData?.total ?? 0}
+        unmatchedOrders={orderSummary?.unmatchedOrders ?? 0}
+        unmatchedItems={orderSummary?.unmatchedItems ?? 0}
+      />
       {syncStatus && (
-        <Grid container spacing={2} sx={{ mb: 3 }}>
-          <Grid item xs={6} sm={3}>
-            <Card>
-              <CardContent sx={{ py: 1.5 }}>
-                <Typography color="text.secondary" variant="body2">
-                  Total Orders
-                </Typography>
-                <Typography variant="h5">{syncStatus.total_orders}</Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={6} sm={3}>
-            <Card>
-              <CardContent sx={{ py: 1.5 }}>
-                <Typography color="text.secondary" variant="body2">
-                  Unmatched Items
-                </Typography>
-                <Typography variant="h5" color="error.main">
-                  {syncStatus.total_unmatched_items}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={6} sm={3}>
-            <Card>
-              <CardContent sx={{ py: 1.5 }}>
-                <Typography color="text.secondary" variant="body2">
-                  Matched Items
-                </Typography>
-                <Typography variant="h5" color="info.main">
-                  {syncStatus.total_matched_items}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={6} sm={3}>
-            <Card>
-              <CardContent sx={{ py: 1.5 }}>
-                <Typography color="text.secondary" variant="body2">
-                  Platforms
-                </Typography>
-                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                  {syncStatus.platforms.map((p) => (
-                    <Chip
-                      key={p.platform_name}
-                      label={p.platform_name}
-                      size="small"
-                      color={
-                        p.current_status === 'SYNCING'
-                          ? 'primary'
-                          : p.current_status === 'ERROR'
-                            ? 'error'
-                            : 'default'
-                      }
-                      variant="outlined"
-                    />
-                  ))}
-                </Stack>
-              </CardContent>
-            </Card>
-          </Grid>
-        </Grid>
+        <Paper sx={{ p: 1.5, mb: 2 }}>
+          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+            {syncStatus.platforms.map((p) => (
+              <Chip
+                key={p.platform_name}
+                label={p.platform_name}
+                size="small"
+                color={
+                  p.current_status === 'SYNCING'
+                    ? 'primary'
+                    : p.current_status === 'ERROR'
+                      ? 'error'
+                      : 'default'
+                }
+                variant="outlined"
+              />
+            ))}
+          </Stack>
+        </Paper>
       )}
 
-      {/* Platform error alerts */}
-      {syncStatus?.platforms
-        .filter((p) => p.current_status === 'ERROR')
-        .map((p) => (
-          <Alert
-            key={p.platform_name}
-            severity="warning"
-            icon={<Warning />}
-            sx={{ mb: 1 }}
-          >
-            <strong>{p.platform_name}</strong> sync is in ERROR state.{' '}
-            {p.last_error_message && <em>{p.last_error_message}</em>}
-          </Alert>
-        ))}
-
-      {/* Filters */}
+      {/* Search + Filters */}
       <Paper sx={{ p: 2, mb: 2 }}>
-        <Grid container spacing={2} alignItems="center">
-          <Grid item xs={12} md={2.5}>
+        <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', md: 'center' }}>
+          <Box sx={{ minWidth: 280, flex: 1 }}>
             <SearchField
               fullWidth
               size="small"
@@ -616,170 +621,18 @@ export default function OrdersManagement() {
                 setPage(0)
               }}
             />
-          </Grid>
-          <Grid item xs={6} md={2}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Platform</InputLabel>
-              <Select
-                value={platformFilter}
-                onChange={(e) => {
-                  setPlatformFilter(e.target.value as OrderPlatform | '')
-                  setPage(0)
-                }}
-                label="Platform"
-              >
-                <MenuItem value="">All</MenuItem>
-                {(Object.keys(PLATFORM_LABELS) as OrderPlatform[]).map((p) => (
-                  <MenuItem key={p} value={p}>
-                    {PLATFORM_LABELS[p]}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={6} md={2}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Order Status</InputLabel>
-              <Select
-                value={statusFilter}
-                onChange={(e) => {
-                  setStatusFilter(e.target.value as OrderStatus | '')
-                  setPage(0)
-                }}
-                label="Order Status"
-              >
-                <MenuItem value="">All</MenuItem>
-                {ORDER_STATUS_OPTIONS.map((s) => (
-                  <MenuItem key={s} value={s}>
-                    {s.replace(/_/g, ' ')}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={6} md={2}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Item Status</InputLabel>
-              <Select
-                value={itemStatusFilter}
-                onChange={(e) => {
-                  setItemStatusFilter(e.target.value as OrderItemStatus | '')
-                  setPage(0)
-                }}
-                label="Item Status"
-              >
-                <MenuItem value="">All</MenuItem>
-                {ITEM_STATUS_OPTIONS.map((s) => (
-                  <MenuItem key={s} value={s}>
-                    {s}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={6} md={1.5}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Zoho Sync</InputLabel>
-              <Select
-                value={zohoSyncFilter}
-                onChange={(e) => {
-                  setZohoSyncFilter(e.target.value as ZohoSyncStatus | '')
-                  setPage(0)
-                }}
-                label="Zoho Sync"
-              >
-                <MenuItem value="">All</MenuItem>
-                <MenuItem value="PENDING">PENDING</MenuItem>
-                <MenuItem value="DIRTY">DIRTY</MenuItem>
-                <MenuItem value="SYNCED">SYNCED</MenuItem>
-                <MenuItem value="ERROR">ERROR</MenuItem>
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={6} md={2}>
-            <TextField
-              fullWidth
-              size="small"
-              label="Source"
-              placeholder="e.g. EBAY_USAV_API"
-              value={sourceFilter}
-              onChange={(e) => {
-                setSourceFilter(e.target.value)
-                setPage(0)
-              }}
-            />
-          </Grid>
-          <Grid item xs={6} md={1.5}>
-            <TextField
-              fullWidth
-              size="small"
-              type="date"
-              label="Ordered From"
-              value={orderedFromFilter}
-              onChange={(e) => {
-                setOrderedFromFilter(e.target.value)
-                setPage(0)
-              }}
-              InputLabelProps={{ shrink: true }}
-            />
-          </Grid>
-          <Grid item xs={6} md={1.5}>
-            <TextField
-              fullWidth
-              size="small"
-              type="date"
-              label="Ordered To"
-              value={orderedToFilter}
-              onChange={(e) => {
-                setOrderedToFilter(e.target.value)
-                setPage(0)
-              }}
-              InputLabelProps={{ shrink: true }}
-            />
-          </Grid>
-          <Grid item xs={6} md={1.5}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Sort By</InputLabel>
-              <Select
-                value={sortBy}
-                onChange={(e) => {
-                  setSortBy(e.target.value as (typeof SORT_BY_OPTIONS)[number]['value'])
-                  setPage(0)
-                }}
-                label="Sort By"
-              >
-                {SORT_BY_OPTIONS.map((opt) => (
-                  <MenuItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={6} md={1.5}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Sort Dir</InputLabel>
-              <Select
-                value={sortDir}
-                onChange={(e) => {
-                  setSortDir(e.target.value as 'asc' | 'desc')
-                  setPage(0)
-                }}
-                label="Sort Dir"
-              >
-                <MenuItem value="desc">Desc</MenuItem>
-                <MenuItem value="asc">Asc</MenuItem>
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={6} md={1}>
-            <Tooltip title="Reset filters">
-              <IconButton onClick={resetFilters} size="small">
-                <Refresh fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          </Grid>
-        </Grid>
+          </Box>
+          <Button
+            variant={activeFilterCount > 0 ? 'contained' : 'outlined'}
+            startIcon={<FilterList />}
+            onClick={() => setFiltersDialogOpen(true)}
+          >
+            Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+          </Button>
+          <Button size="small" onClick={resetFilters} disabled={!hasActiveFilters}>
+            Clear
+          </Button>
+        </Stack>
       </Paper>
 
       {/* Orders Table */}
@@ -798,7 +651,6 @@ export default function OrdersManagement() {
                 <TableCell>Shipping Status</TableCell>
                 <TableCell>Zoho Sync</TableCell>
                 <TableCell>Ordered</TableCell>
-                {hasRole(['ADMIN']) && <TableCell align="center">Zoho</TableCell>}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -901,32 +753,27 @@ export default function OrdersManagement() {
                               : '—'}
                           </Typography>
                         </TableCell>
-                        {hasRole(['ADMIN']) && (
-                          <TableCell align="center">
-                            <Tooltip title="Sync this order to Zoho">
-                              <span>
-                                <IconButton
-                                  size="small"
-                                  color="primary"
-                                  onClick={(e) => handleForceSync(order.id, e)}
-                                  disabled={syncingOrderId === order.id}
-                                >
-                                  {syncingOrderId === order.id ? (
-                                    <CircularProgress size={18} />
-                                  ) : (
-                                    <CloudSync fontSize="small" />
-                                  )}
-                                </IconButton>
-                              </span>
-                            </Tooltip>
-                          </TableCell>
-                        )}
                       </LongPressTableRow>
                       {/* Expandable items panel */}
                       <TableRow>
                         <TableCell sx={{ py: 0 }} colSpan={columnCount}>
                           <Collapse in={isExpanded} timeout="auto" unmountOnExit>
-                            <OrderItemsPanel orderId={order.id} />
+                            <OrderItemsPanel
+                              orderId={order.id}
+                              headerAction={
+                                hasRole(['ADMIN']) ? (
+                                  <Button
+                                    size="small"
+                                    variant="outlined"
+                                    startIcon={syncingOrderId === order.id ? <CircularProgress size={14} /> : <CloudSync />}
+                                    disabled={syncingOrderId === order.id}
+                                    onClick={(e) => handleForceSync(order.id, e)}
+                                  >
+                                    Zoho Sync
+                                  </Button>
+                                ) : undefined
+                              }
+                            />
                           </Collapse>
                         </TableCell>
                       </TableRow>
@@ -1043,6 +890,154 @@ export default function OrdersManagement() {
           <Button onClick={handleBulkSync} variant="contained" disabled={bulkLoading || !canStartBulkSync}>
             {bulkLoading ? 'Syncing…' : 'Start sync'}
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={filtersDialogOpen} onClose={() => setFiltersDialogOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>Order Filters</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <FormControl size="small" fullWidth>
+              <InputLabel>Sort By</InputLabel>
+              <Select
+                value={sortBy}
+                onChange={(e) => {
+                  setSortBy(e.target.value as (typeof SORT_BY_OPTIONS)[number]['value'])
+                  setPage(0)
+                }}
+                label="Sort By"
+              >
+                {SORT_BY_OPTIONS.map((opt) => (
+                  <MenuItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl size="small" fullWidth>
+              <InputLabel>Sort Direction</InputLabel>
+              <Select
+                value={sortDir}
+                onChange={(e) => {
+                  setSortDir(e.target.value as 'asc' | 'desc')
+                  setPage(0)
+                }}
+                label="Sort Direction"
+              >
+                <MenuItem value="desc">Newest first</MenuItem>
+                <MenuItem value="asc">Oldest first</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl size="small" fullWidth>
+              <InputLabel>Platform</InputLabel>
+              <Select
+                value={platformFilter}
+                onChange={(e) => {
+                  setPlatformFilter(e.target.value as OrderPlatform | '')
+                  setPage(0)
+                }}
+                label="Platform"
+              >
+                <MenuItem value="">All</MenuItem>
+                {(Object.keys(PLATFORM_LABELS) as OrderPlatform[]).map((p) => (
+                  <MenuItem key={p} value={p}>
+                    {PLATFORM_LABELS[p]}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl size="small" fullWidth>
+              <InputLabel>Order Status</InputLabel>
+              <Select
+                value={statusFilter}
+                onChange={(e) => {
+                  setStatusFilter(e.target.value as OrderStatus | '')
+                  setPage(0)
+                }}
+                label="Order Status"
+              >
+                <MenuItem value="">All</MenuItem>
+                {ORDER_STATUS_OPTIONS.map((s) => (
+                  <MenuItem key={s} value={s}>
+                    {s.replace(/_/g, ' ')}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl size="small" fullWidth>
+              <InputLabel>Item Status</InputLabel>
+              <Select
+                value={itemStatusFilter}
+                onChange={(e) => {
+                  setItemStatusFilter(e.target.value as OrderItemStatus | '')
+                  setPage(0)
+                }}
+                label="Item Status"
+              >
+                <MenuItem value="">All</MenuItem>
+                {ITEM_STATUS_OPTIONS.map((s) => (
+                  <MenuItem key={s} value={s}>
+                    {s}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl size="small" fullWidth>
+              <InputLabel>Zoho Sync</InputLabel>
+              <Select
+                value={zohoSyncFilter}
+                onChange={(e) => {
+                  setZohoSyncFilter(e.target.value as ZohoSyncStatus | '')
+                  setPage(0)
+                }}
+                label="Zoho Sync"
+              >
+                <MenuItem value="">All</MenuItem>
+                <MenuItem value="PENDING">PENDING</MenuItem>
+                <MenuItem value="DIRTY">DIRTY</MenuItem>
+                <MenuItem value="SYNCED">SYNCED</MenuItem>
+                <MenuItem value="ERROR">ERROR</MenuItem>
+              </Select>
+            </FormControl>
+            <TextField
+              fullWidth
+              size="small"
+              label="Source"
+              placeholder="e.g. EBAY_USAV_API"
+              value={sourceFilter}
+              onChange={(e) => {
+                setSourceFilter(e.target.value)
+                setPage(0)
+              }}
+            />
+            <TextField
+              fullWidth
+              size="small"
+              type="date"
+              label="Ordered From"
+              value={orderedFromFilter}
+              onChange={(e) => {
+                setOrderedFromFilter(e.target.value)
+                setPage(0)
+              }}
+              InputLabelProps={{ shrink: true }}
+            />
+            <TextField
+              fullWidth
+              size="small"
+              type="date"
+              label="Ordered To"
+              value={orderedToFilter}
+              onChange={(e) => {
+                setOrderedToFilter(e.target.value)
+                setPage(0)
+              }}
+              InputLabelProps={{ shrink: true }}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setFiltersDialogOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
 

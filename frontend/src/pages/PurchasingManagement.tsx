@@ -75,6 +75,7 @@ import VariantSearchAutocomplete from '../components/common/VariantSearchAutocom
 import HoldActionPromptDialog from '../components/common/HoldActionPromptDialog'
 import LongPressTableRow from '../components/common/LongPressTableRow'
 import TablePaginationWithPageJump from '../components/common/TablePaginationWithPageJump'
+import OrderSummaryCards from '../components/common/OrderSummaryCards'
 import type { VariantSearchResult } from '../types/orders'
 
 const statusColor = {
@@ -652,6 +653,62 @@ export default function PurchasingManagement() {
       }),
   })
 
+  const { data: purchaseSummary } = useQuery({
+    queryKey: [
+      'purchases-summary',
+      sortBy,
+      sortDir,
+      deliverStatusFilter,
+      itemMatchFilter,
+      zohoSyncFilter,
+      sourceFilter,
+      poNumberSearch,
+      orderDateFrom,
+      orderDateTo,
+    ],
+    queryFn: async () => {
+      const pageSize = 500
+      let skip = 0
+      let totalOrders = 0
+      let unmatchedOrders = 0
+      let unmatchedItems = 0
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const batch = await listPurchaseOrdersPaged({
+          skip,
+          limit: pageSize,
+          sortBy,
+          sortDir,
+          poNumber: poNumberSearch || undefined,
+          deliverStatus: deliverStatusFilter === 'ALL' ? undefined : deliverStatusFilter,
+          itemMatchStatus:
+            itemMatchFilter === 'ALL' ? undefined : itemMatchFilter === 'MATCHED' ? 'matched' : 'unmatched',
+          zohoSyncStatus: zohoSyncFilter === 'ALL' ? undefined : zohoSyncFilter,
+          source: sourceFilter === 'ALL' ? undefined : sourceFilter,
+          orderDateFrom: orderDateFrom || undefined,
+          orderDateTo: orderDateTo || undefined,
+        })
+
+        totalOrders += batch.length
+        for (const po of batch) {
+          const poUnmatchedItems = (po.items || []).filter((item) => item.status === 'UNMATCHED').length
+          unmatchedItems += poUnmatchedItems
+          if (poUnmatchedItems > 0) {
+            unmatchedOrders += 1
+          }
+        }
+
+        if (batch.length < pageSize) {
+          break
+        }
+        skip += pageSize
+      }
+
+      return { totalOrders, unmatchedOrders, unmatchedItems }
+    },
+  })
+
   const hasNextPage = pagedOrders.length > rowsPerPage
   const orders = hasNextPage ? pagedOrders.slice(0, rowsPerPage) : pagedOrders
   const paginationCount = page * rowsPerPage + orders.length + (hasNextPage ? 1 : 0)
@@ -970,6 +1027,12 @@ export default function PurchasingManagement() {
           </Button>
         </Stack>
       </Box>
+
+      <OrderSummaryCards
+        totalOrders={purchaseSummary?.totalOrders ?? orders.length}
+        unmatchedOrders={purchaseSummary?.unmatchedOrders ?? 0}
+        unmatchedItems={purchaseSummary?.unmatchedItems ?? 0}
+      />
 
       <Grid container spacing={2}>
         <Grid item xs={12}>

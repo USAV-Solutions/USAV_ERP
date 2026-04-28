@@ -11,6 +11,7 @@ eBay integration client and API-specific transport/auth/order normalization beha
 - Editing this folder without checking sibling tests and schema/type contracts.
 - Making cross-layer changes here but forgetting migration/frontend alignment.
 - Reintroducing duplicated hardcoded eBay timestamp formats; use `EBAY_ISO_DATE_FORMAT` in `client.py` for all eBay ISO datetime string generation.
+- Keep `_convert_order` customer enrichment mapping aligned with the normalized contract (`customer_phone`, `customer_source`) so `OrderSyncService` can persist the latest channel context.
 
 ## Child Folders
 - (No child folders)

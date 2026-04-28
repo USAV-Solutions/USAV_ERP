@@ -5,7 +5,7 @@ Loads from environment variables with .env file support.
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import PostgresDsn, computed_field
+from pydantic import PostgresDsn, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     zoho_po_cf_handling_fee_id: str = ""
     zoho_po_cf_source_id: str = ""
     zoho_po_cf_is_stationery_id: str = ""
+    zoho_contact_cf_source_id: str = ""
+    zoho_contact_cf_source_api_name: str = "cf_source"
     zoho_po_stationery_purchase_account_id: str = ""
     zoho_po_stationery_location_id: str = ""
     zoho_po_stationery_delivery_address: str = ""
@@ -101,6 +103,16 @@ class Settings(BaseSettings):
     
     # Product Images
     product_images_path: str = "/mnt/product_images"
+
+    @model_validator(mode="after")
+    def _apply_dev_overrides(self) -> "Settings":
+        """
+        Apply deterministic development defaults that should not depend on
+        external environment file values.
+        """
+        if self.environment == "development":
+            self.seatalk_redirect_uri = "http://localhost:3636/auth/seatalk/callback"
+        return self
     
     @computed_field
     @property

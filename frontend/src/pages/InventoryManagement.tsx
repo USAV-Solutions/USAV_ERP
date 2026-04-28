@@ -72,6 +72,7 @@ interface ExpandedRowProps {
   onSyncVariant: (variant: EnhancedVariant) => void
   syncingVariantId: number | null
   syncDisabled: boolean
+  imagesEnabled: boolean
   onManageImages: (sku: string) => void
   canAdmin: boolean
   onOpenHoldPrompt: (variant: EnhancedVariant) => void
@@ -150,6 +151,7 @@ function ExpandedRow({
   onSyncVariant,
   syncingVariantId,
   syncDisabled,
+  imagesEnabled,
   onManageImages,
   canAdmin,
   onOpenHoldPrompt,
@@ -254,6 +256,7 @@ function ExpandedRow({
                         variant="outlined"
                         startIcon={<PhotoLibrary fontSize="small" />}
                         onClick={() => onManageImages(variant.full_sku)}
+                        sx={{ display: imagesEnabled ? 'inline-flex' : 'none' }}
                       >
                         Manage Images
                       </Button>
@@ -292,6 +295,8 @@ function ExpandedRow({
 }
 
 export default function InventoryManagement() {
+  const disableProductImages = import.meta.env.VITE_DISABLE_PRODUCT_IMAGES === 'true'
+  const includeImagesInZohoSync = !disableProductImages
   const [viewMode, setViewMode] = useState<ViewMode>('list')
   const [searchInput, setSearchInput] = useState('')
   const debouncedSearch = useDebouncedValue(searchInput, 200)
@@ -493,7 +498,7 @@ export default function InventoryManagement() {
   const zohoSingleSyncMutation = useMutation({
     mutationFn: async (variant: EnhancedVariant) => {
       const response = await axiosClient.post(ZOHO.SYNC_SINGLE_ITEM(variant.id), {
-        include_images: true,
+        include_images: includeImagesInZohoSync,
         include_composites: true,
         force_resync: true,
       })
@@ -516,7 +521,7 @@ export default function InventoryManagement() {
   })
 
   const handleStartZohoSync = async () => {
-    await zohoBulkSyncMutation.mutateAsync({ includeImages: true, limit: 5000 })
+    await zohoBulkSyncMutation.mutateAsync({ includeImages: includeImagesInZohoSync, limit: 5000 })
   }
 
   const handleStartZohoSyncNoImages = async () => {
@@ -524,7 +529,7 @@ export default function InventoryManagement() {
   }
 
   const handleStartZohoBundleSync = async () => {
-    await zohoBulkSyncMutation.mutateAsync({ includeImages: true, limit: 5000, bundleOnly: true })
+    await zohoBulkSyncMutation.mutateAsync({ includeImages: includeImagesInZohoSync, limit: 5000, bundleOnly: true })
   }
 
   const handleSyncSingleVariant = async (variant: EnhancedVariant) => {
@@ -841,7 +846,7 @@ export default function InventoryManagement() {
                 }}
                 disabled={zohoBulkSyncMutation.isPending || isZohoSyncRunning}
               >
-                Sync All to Zoho
+                {includeImagesInZohoSync ? 'Sync All to Zoho' : 'Sync All to Zoho (Dev: No Images)'}
               </MenuItem>
               <MenuItem
                 onClick={() => {
@@ -1180,6 +1185,7 @@ export default function InventoryManagement() {
                             variant="outlined"
                             startIcon={<PhotoLibrary fontSize="small" />}
                             onClick={() => setManageImagesSku(variant.full_sku)}
+                            sx={{ display: disableProductImages ? 'none' : 'inline-flex' }}
                           >
                             Manage Images
                           </Button>
@@ -1259,6 +1265,7 @@ export default function InventoryManagement() {
                           onSyncVariant={(variant) => void handleSyncSingleVariant(variant)}
                           syncingVariantId={syncingVariantId}
                           syncDisabled={isZohoSyncRunning || zohoSingleSyncMutation.isPending}
+                          imagesEnabled={!disableProductImages}
                           onManageImages={(sku) => setManageImagesSku(sku)}
                           canAdmin={canAdmin}
                           onOpenHoldPrompt={openHoldPrompt}

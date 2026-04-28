@@ -806,6 +806,8 @@ class EbayClient(BasePlatformClient):
             platform_order_number=ebay_order.get("legacyOrderId"),
             customer_name=shipping.get("fullName"),
             customer_email=ebay_order.get("buyer", {}).get("email"),
+            customer_phone=shipping.get("primaryPhone", {}).get("phoneNumber") if isinstance(shipping.get("primaryPhone"), dict) else None,
+            customer_source=f"{self.platform_name}_API",
             ship_address_line1=shipping.get("contactAddress", {}).get("addressLine1"),
             ship_address_line2=shipping.get("contactAddress", {}).get("addressLine2"),
             ship_city=shipping.get("contactAddress", {}).get("city"),

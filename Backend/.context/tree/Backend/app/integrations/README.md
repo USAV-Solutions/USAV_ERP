@@ -11,6 +11,7 @@ External system adapters and normalization clients (Amazon/eBay/Ecwid/Walmart/Zo
 - Returning raw platform payloads instead of normalized dataclasses.
 - Leaking secrets/tokens in logs.
 - Inconsistent platform_name values causing sync mapping failures.
+- `ExternalOrder` now carries optional `customer_phone`, `customer_company`, and `customer_source`; adapters should fill these when payloads include them.
 
 ## Child Folders
 - `amazon/`

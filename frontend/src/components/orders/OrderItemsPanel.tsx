@@ -7,7 +7,7 @@
  * Match action uses an Autocomplete that searches variants by product
  * name or SKU via GET /variants/search?q=...
  */
-import { useState, type MouseEvent } from 'react'
+import { useState, type MouseEvent, type ReactNode } from 'react'
 import {
   Box,
   Typography,
@@ -48,9 +48,10 @@ import type {
 
 interface OrderItemsPanelProps {
   orderId: number
+  headerAction?: ReactNode
 }
 
-export default function OrderItemsPanel({ orderId }: OrderItemsPanelProps) {
+export default function OrderItemsPanel({ orderId, headerAction }: OrderItemsPanelProps) {
   const queryClient = useQueryClient()
 
   const { data: order, isLoading, error } = useQuery<OrderDetail>({
@@ -89,20 +90,72 @@ export default function OrderItemsPanel({ orderId }: OrderItemsPanelProps) {
   }
 
   return (
-    <Box sx={{ py: 1, px: 2 }}>
-      {/* Mini header with order info */}
-      <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 1 }}>
-        <Typography variant="subtitle2" color="text.secondary">
-          {order.customer_name || 'No customer'} — {order.items.length} item(s)
-        </Typography>
-        {order.customer_email && (
-          <Typography variant="caption" color="text.secondary">
-            {order.customer_email}
+    <Box sx={{ p: 1.5, bgcolor: 'action.hover' }}>
+      <Stack
+        direction="row"
+        spacing={2}
+        alignItems="center"
+        sx={{ mb: 1.25, flexWrap: 'nowrap', overflow: 'hidden' }}
+      >
+        <Box sx={{ minWidth: 160, maxWidth: 260, flexShrink: 1, overflow: 'hidden' }}>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            Customer
           </Typography>
+          <Typography variant="body2" sx={{ fontSize: '0.82rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {order.customer_name || 'No customer'}
+          </Typography>
+        </Box>
+        <Box sx={{ minWidth: 180, maxWidth: 300, flexShrink: 1, overflow: 'hidden' }}>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            Email
+          </Typography>
+          <Typography variant="body2" sx={{ fontSize: '0.82rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {order.customer_email || '-'}
+          </Typography>
+        </Box>
+        <Box sx={{ minWidth: 120, maxWidth: 180, flexShrink: 0 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            External ID
+          </Typography>
+          <Typography variant="body2" sx={{ fontSize: '0.82rem' }}>
+            {order.external_order_number || order.external_order_id}
+          </Typography>
+        </Box>
+        <Box sx={{ minWidth: 80, flexShrink: 0 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            Items
+          </Typography>
+          <Typography variant="body2" sx={{ fontSize: '0.82rem' }}>
+            {order.items.length}
+          </Typography>
+        </Box>
+        {headerAction && (
+          <Box sx={{ marginLeft: 'auto', flexShrink: 0 }}>
+            {headerAction}
+          </Box>
         )}
       </Stack>
-
-      <Table size="small" sx={{ backgroundColor: 'action.hover', borderRadius: 1 }}>
+      <Box sx={{ mb: 1.25 }}>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+          Shipping Address
+        </Typography>
+        <Typography variant="body2" sx={{ fontSize: '0.82rem' }}>
+          {[
+            order.shipping_address_line1,
+            order.shipping_address_line2,
+            order.shipping_city,
+            order.shipping_state,
+            order.shipping_postal_code,
+            order.shipping_country,
+          ]
+            .filter(Boolean)
+            .join(', ') || '—'}
+        </Typography>
+      </Box>
+      <Typography variant="subtitle2" sx={{ mb: 1 }}>
+        Line Items
+      </Typography>
+      <Table size="small">
         <TableHead>
           <TableRow>
             <TableCell>Item Name</TableCell>
@@ -119,6 +172,18 @@ export default function OrderItemsPanel({ orderId }: OrderItemsPanelProps) {
           {order.items.map((item: OrderItemDetail) => (
             <ItemRow key={item.id} item={item} onAction={invalidate} />
           ))}
+          <TableRow>
+            <TableCell colSpan={3} />
+            <TableCell align="right" sx={{ fontWeight: 600 }}>
+              Line Total
+            </TableCell>
+            <TableCell align="right" sx={{ fontWeight: 600 }}>
+              {order.items
+                .reduce((sum, item) => sum + Number(item.total_price || 0), 0)
+                .toFixed(2)}
+            </TableCell>
+            <TableCell colSpan={3} />
+          </TableRow>
         </TableBody>
       </Table>
     </Box>
