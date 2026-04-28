@@ -54,6 +54,27 @@ def upgrade() -> None:
     op.drop_constraint("uq_listing_variant_platform", "platform_listing", type_="unique")
     op.drop_index("ix_listing_external_ref", table_name="platform_listing")
 
+    # Normalize blank external refs and dedupe existing rows before
+    # enforcing unique (platform, external_ref_id).
+    op.execute(
+        """
+        UPDATE platform_listing
+        SET external_ref_id = NULL
+        WHERE external_ref_id IS NOT NULL
+          AND btrim(external_ref_id) = ''
+        """
+    )
+    op.execute(
+        """
+        DELETE FROM platform_listing pl
+        USING platform_listing dup
+        WHERE pl.platform = dup.platform
+          AND pl.external_ref_id = dup.external_ref_id
+          AND pl.external_ref_id IS NOT NULL
+          AND pl.id > dup.id
+        """
+    )
+
     op.create_index(
         "ix_listing_external_ref",
         "platform_listing",
