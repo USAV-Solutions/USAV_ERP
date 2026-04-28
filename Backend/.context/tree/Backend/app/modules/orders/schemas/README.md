@@ -1,7 +1,7 @@
 ﻿# Backend\app\modules\orders\schemas
 
 ## What This Folder Does
-Sales orders request/response and sync/import schema contracts.
+Sales orders request/response and sync/import schema contracts, including customer-only CSV imports.
 
 ## Typical Contents
 - Python modules, schemas, or support assets scoped to this domain.
@@ -10,6 +10,7 @@ Sales orders request/response and sync/import schema contracts.
 ## Common Pitfalls
 - Editing this folder without checking sibling tests and schema/type contracts.
 - Making cross-layer changes here but forgetting migration/frontend alignment.
+- Keep `SalesImportFileSource` and `SalesImportFileResponse` in sync with route behavior (for `SHIPSTATION_CUSTOMER_CSV`, customer counters are populated while order counters remain zero).
 
 ## Child Folders
 - (No child folders)

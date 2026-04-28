@@ -43,7 +43,6 @@ import {
 } from '@mui/material'
 import {
   Refresh,
-  Warning,
   KeyboardArrowDown,
   KeyboardArrowUp,
   CloudSync,
@@ -586,21 +585,6 @@ export default function OrdersManagement() {
           </Grid>
         </Grid>
       )}
-
-      {/* Platform error alerts */}
-      {syncStatus?.platforms
-        .filter((p) => p.current_status === 'ERROR')
-        .map((p) => (
-          <Alert
-            key={p.platform_name}
-            severity="warning"
-            icon={<Warning />}
-            sx={{ mb: 1 }}
-          >
-            <strong>{p.platform_name}</strong> sync is in ERROR state.{' '}
-            {p.last_error_message && <em>{p.last_error_message}</em>}
-          </Alert>
-        ))}
 
       {/* Filters */}
       <Paper sx={{ p: 2, mb: 2 }}>

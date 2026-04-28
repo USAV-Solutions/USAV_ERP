@@ -1,7 +1,7 @@
 ﻿# Backend\app\modules\orders
 
 ## What This Folder Does
-Sales orders domain: ingestion/import, matching, filtering, and order sync state.
+Sales orders domain: ingestion/import, listing-centric matching, filtering, customer CSV upsert, and order sync state.
 
 ## Typical Contents
 - Python modules, schemas, or support assets scoped to this domain.
@@ -11,6 +11,9 @@ Sales orders domain: ingestion/import, matching, filtering, and order sync state
 - Forgetting to align platform/source enums across model, schema, migration, and frontend types.
 - Adding filters in route layer but not implementing repository query logic.
 - Bypassing OrderSyncService ingestion path and breaking dedupe/matching consistency.
+- Customer upsert during ingestion is merge-based (fills missing phone/company/address fields) and source is overwrite-based (latest channel replaces prior `Customer.source`).
+- `SHIPSTATION_CUSTOMER_CSV` is intentionally customer-only (no order rows created); keep frontend messaging aligned with `customers_created/customers_updated` counters.
+- `order_item.variant_id` is denormalized once `platform_listing_id` is introduced; code paths that update listing assignments must keep `order_item.variant_id` in sync.
 
 ## Child Folders
 - `schemas/`

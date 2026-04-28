@@ -85,6 +85,7 @@ class SalesImportApiSource(str, Enum):
 
 class SalesImportFileSource(str, Enum):
     CSV_GENERIC = "CSV_GENERIC"
+    SHIPSTATION_CUSTOMER_CSV = "SHIPSTATION_CUSTOMER_CSV"
 
 
 class SalesImportApiRequest(BaseModel):
@@ -97,6 +98,8 @@ class SalesImportFileResponse(BaseModel):
     source: SalesImportFileSource
     source_rows_seen: int = 0
     source_rows_skipped: int = 0
+    customers_created: int = 0
+    customers_updated: int = 0
     new_orders: int = 0
     new_items: int = 0
     auto_matched: int = 0

@@ -36,7 +36,7 @@ from app.models.entities import TimestampMixin, ZohoSyncMixin, ZohoSyncStatus
 
 if TYPE_CHECKING:
     from typing import List
-    from app.models.entities import ProductVariant, InventoryItem, Customer
+    from app.models.entities import ProductVariant, InventoryItem, Customer, PlatformListing
 
 
 # ============================================================================
@@ -366,11 +366,17 @@ class OrderItem(Base, TimestampMixin):
     )
 
     # ---- Internal Matching ----
+    platform_listing_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("platform_listing.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Resolved platform listing for this order line.",
+    )
     variant_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
         ForeignKey("product_variant.id", ondelete="SET NULL"),
         nullable=True,
-        comment="Matched internal product variant.",
+        comment="Denormalized matched variant for query speed.",
     )
     allocated_inventory_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
@@ -418,6 +424,10 @@ class OrderItem(Base, TimestampMixin):
         "Order",
         back_populates="items",
     )
+    platform_listing: Mapped[Optional["PlatformListing"]] = relationship(
+        "PlatformListing",
+        lazy="selectin",
+    )
     variant: Mapped[Optional["ProductVariant"]] = relationship(
         "ProductVariant",
         lazy="selectin",
@@ -431,6 +441,7 @@ class OrderItem(Base, TimestampMixin):
         CheckConstraint("quantity > 0", name="ck_order_item_positive_quantity"),
         CheckConstraint("unit_price >= 0", name="ck_order_item_non_negative_price"),
         Index("ix_order_item_order_id", "order_id"),
+        Index("ix_order_item_platform_listing_id", "platform_listing_id"),
         Index("ix_order_item_variant_id", "variant_id"),
         Index("ix_order_item_status", "status"),
         Index("ix_order_item_external_sku", "external_sku"),

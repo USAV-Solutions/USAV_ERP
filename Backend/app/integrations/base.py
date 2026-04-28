@@ -47,6 +47,9 @@ class ExternalOrder:
     
     # Raw data
     raw_data: Optional[dict] = None
+    customer_phone: Optional[str] = None
+    customer_company: Optional[str] = None
+    customer_source: Optional[str] = None
 
 
 @dataclass 

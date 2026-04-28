@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -63,6 +64,7 @@ from app.modules.orders.schemas.sync import (
     SyncResponse,
     SyncStatusResponse,
 )
+from app.models.entities import Customer
 from app.modules.orders.service import OrderSyncService
 from app.repositories.orders.order_repository import OrderItemRepository, OrderRepository
 from app.repositories.orders.sync_repository import SyncRepository
@@ -272,6 +274,86 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
     return list(grouped.values()), seen, skipped
 
 
+def _coalesce(value: Optional[str]) -> Optional[str]:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _pick_first_nonempty(row: dict[str, str], keys: list[str]) -> Optional[str]:
+    for key in keys:
+        value = _coalesce(row.get(key))
+        if value:
+            return value
+    return None
+
+
+def _parse_shipstation_customer_csv(file_text: str) -> tuple[list[dict], int, int]:
+    reader = csv.DictReader(io.StringIO(file_text))
+    seen = 0
+    skipped = 0
+    deduped: dict[str, dict] = {}
+
+    for row in reader:
+        seen += 1
+        email = _pick_first_nonempty(row, ["Customer Email", "Buyer Email"])
+        name = _pick_first_nonempty(row, ["Bill To Name", "Ship To Name", "Customer Name"])
+        phone = _pick_first_nonempty(row, ["Bill To Phone", "Ship To Phone", "Customer Phone"])
+        company = _pick_first_nonempty(row, ["Bill To Company", "Ship To Company", "Company"])
+
+        address_line1 = _pick_first_nonempty(row, ["Bill To Address 1", "Ship To Address 1"])
+        address_line2 = _pick_first_nonempty(row, ["Bill To Address 2", "Ship To Address 2"])
+        city = _pick_first_nonempty(row, ["Bill To City", "Ship To City"])
+        state = _pick_first_nonempty(row, ["Bill To State", "Ship To State"])
+        postal_code = _pick_first_nonempty(row, ["Bill To Postal", "Ship To Postal", "Bill To Zip", "Ship To Zip"])
+        country = _pick_first_nonempty(row, ["Bill To Country", "Ship To Country", "Ship To Country Code"]) or "US"
+
+        source = (
+            _pick_first_nonempty(row, ["Advanced Options Source", "Order Source", "Source"])
+            or "SHIPSTATION_CSV"
+        )
+
+        if not (email or name or phone):
+            skipped += 1
+            continue
+
+        dedupe_key = (email or "").lower() or f"{(name or '').lower()}|{(postal_code or '').lower()}"
+        existing = deduped.get(dedupe_key)
+        if not existing:
+            deduped[dedupe_key] = {
+                "name": name,
+                "email": email,
+                "phone": phone,
+                "company_name": company,
+                "address_line1": address_line1,
+                "address_line2": address_line2,
+                "city": city,
+                "state": state,
+                "postal_code": postal_code,
+                "country": country,
+                "source": source,
+            }
+            continue
+
+        # Keep the richest row when the same customer appears in multiple orders.
+        for key, value in {
+            "name": name,
+            "email": email,
+            "phone": phone,
+            "company_name": company,
+            "address_line1": address_line1,
+            "address_line2": address_line2,
+            "city": city,
+            "state": state,
+            "postal_code": postal_code,
+            "country": country,
+            "source": source,
+        }.items():
+            if value and not _coalesce(existing.get(key)):
+                existing[key] = value
+
+    return list(deduped.values()), seen, skipped
+
+
 # ============================================================================
 # SYNC ENDPOINTS
 # ============================================================================
@@ -445,8 +527,9 @@ async def import_orders_from_file(
     source: Annotated[SalesImportFileSource, Query()],
     file: UploadFile = File(...),
     service: OrderSyncService = Depends(get_order_sync_service),
+    db: AsyncSession = Depends(get_db),
 ):
-    if source != SalesImportFileSource.CSV_GENERIC:
+    if source not in {SalesImportFileSource.CSV_GENERIC, SalesImportFileSource.SHIPSTATION_CUSTOMER_CSV}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Unsupported import source",
@@ -466,6 +549,109 @@ async def import_orders_from_file(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="CSV must be UTF-8 encoded.",
         ) from exc
+
+    if source == SalesImportFileSource.SHIPSTATION_CUSTOMER_CSV:
+        customers, rows_seen, rows_skipped = _parse_shipstation_customer_csv(text)
+        created = 0
+        updated = 0
+
+        for payload in customers:
+            email = _coalesce(payload.get("email"))
+            name = _coalesce(payload.get("name"))
+            postal_code = _coalesce(payload.get("postal_code"))
+            phone = _coalesce(payload.get("phone"))
+            source_value = _coalesce(payload.get("source")) or "SHIPSTATION_CSV"
+
+            customer: Optional[Customer] = None
+
+            if email:
+                existing = await db.execute(select(Customer).where(Customer.email == email))
+                customer = existing.scalar_one_or_none()
+
+            if customer is None and name:
+                query = select(Customer).where(Customer.name == name)
+                if postal_code:
+                    query = query.where(Customer.postal_code == postal_code)
+                existing = await db.execute(query)
+                customer = existing.scalar_one_or_none()
+
+            if customer is None and phone:
+                existing = await db.execute(select(Customer).where(Customer.phone == phone))
+                customer = existing.scalar_one_or_none()
+
+            if customer is None:
+                customer = Customer(
+                    name=name or "Unknown",
+                    email=email,
+                    phone=phone,
+                    company_name=_coalesce(payload.get("company_name")),
+                    address_line1=_coalesce(payload.get("address_line1")),
+                    address_line2=_coalesce(payload.get("address_line2")),
+                    city=_coalesce(payload.get("city")),
+                    state=_coalesce(payload.get("state")),
+                    postal_code=postal_code,
+                    country=_coalesce(payload.get("country")) or "US",
+                    source=source_value,
+                    is_active=True,
+                )
+                db.add(customer)
+                created += 1
+                continue
+
+            changed = False
+            if name and (not _coalesce(customer.name) or customer.name == "Unknown"):
+                customer.name = name
+                changed = True
+            if email and not _coalesce(customer.email):
+                customer.email = email
+                changed = True
+            if phone and not _coalesce(customer.phone):
+                customer.phone = phone
+                changed = True
+            if _coalesce(payload.get("company_name")) and not _coalesce(customer.company_name):
+                customer.company_name = _coalesce(payload.get("company_name"))
+                changed = True
+            if _coalesce(payload.get("address_line1")) and not _coalesce(customer.address_line1):
+                customer.address_line1 = _coalesce(payload.get("address_line1"))
+                changed = True
+            if _coalesce(payload.get("address_line2")) and not _coalesce(customer.address_line2):
+                customer.address_line2 = _coalesce(payload.get("address_line2"))
+                changed = True
+            if _coalesce(payload.get("city")) and not _coalesce(customer.city):
+                customer.city = _coalesce(payload.get("city"))
+                changed = True
+            if _coalesce(payload.get("state")) and not _coalesce(customer.state):
+                customer.state = _coalesce(payload.get("state"))
+                changed = True
+            if postal_code and not _coalesce(customer.postal_code):
+                customer.postal_code = postal_code
+                changed = True
+            if _coalesce(payload.get("country")) and not _coalesce(customer.country):
+                customer.country = _coalesce(payload.get("country"))
+                changed = True
+            if source_value != customer.source:
+                customer.source = source_value
+                changed = True
+
+            if changed:
+                db.add(customer)
+                updated += 1
+
+        await db.commit()
+
+        return SalesImportFileResponse(
+            source=source,
+            source_rows_seen=rows_seen,
+            source_rows_skipped=rows_skipped,
+            customers_created=created,
+            customers_updated=updated,
+            new_orders=0,
+            new_items=0,
+            auto_matched=0,
+            skipped_duplicates=0,
+            success=True,
+            errors=[],
+        )
 
     rows, rows_seen, rows_skipped = _parse_order_csv(text)
     external_orders: list[ExternalOrder] = []

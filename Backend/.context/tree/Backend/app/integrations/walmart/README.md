@@ -2,14 +2,20 @@
 
 ## What This Folder Does
 Walmart integration client layer and Walmart-specific order synchronization behavior.
+The client now performs OAuth client-credentials token exchange against
+`/v3/token`, calls `/v3/orders` with cursor pagination, and normalizes Walmart
+order payloads into `ExternalOrder`/`ExternalOrderItem` for the shared
+OrderSyncService ingestion path.
 
 ## Typical Contents
 - Python modules, schemas, or support assets scoped to this domain.
 - Folder-specific logic that should remain cohesive inside this boundary.
 
 ## Common Pitfalls
-- Editing this folder without checking sibling tests and schema/type contracts.
-- Making cross-layer changes here but forgetting migration/frontend alignment.
+- Token responses can be wrapped in different envelope shapes (`tokenAPIRes`, `clientCredentialsRes`, or flat JSON); parser must handle all.
+- Walmart APIs require request headers like `WM_SEC.ACCESS_TOKEN`, `WM_SVC.NAME`, and a unique `WM_QOS.CORRELATION_ID` per call.
+- `list.meta.nextCursor` returns a query fragment that must be appended to `/v3/orders` for pagination.
+- Walmart order normalization should map `shippingInfo.phone` and set `customer_source="WALMART_API"` so customer sync captures contact/source metadata.
 
 ## Child Folders
 - (No child folders)
