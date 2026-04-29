@@ -58,6 +58,16 @@ VALID_ZOHO_CONTACT_SOURCE_VALUES = {
     "Other",
 }
 
+VALID_ZOHO_SO_SOURCE_VALUES = {
+    "Ebay_Dragon",
+    "Ebay_Mekong",
+    "Ebay_USAV",
+    "ECWID",
+    "Amazon",
+    "Other",
+    "Walmart",
+}
+
 EXACT_ZOHO_CONTACT_SOURCE_MAP = {
     "EBAY_MEKONG_API": "Ebay",
     "EBAY_USAV_API": "Ebay",
@@ -80,6 +90,23 @@ EXACT_ZOHO_PO_SOURCE_MAP = {
     "GOODWILL_PICKUP": "Goodwill",
     "ALIEXPRESS_JSON": "AliExpress",
     "ALIEXPRESS_CSV": "AliExpress",
+    "MANUAL": "Other",
+    "ZOHO_IMPORT": "Other",
+}
+
+EXACT_ZOHO_SO_SOURCE_MAP = {
+    "EBAY_DRAGON": "Ebay_Dragon",
+    "EBAY_DRAGON_API": "Ebay_Dragon",
+    "EBAY_MEKONG": "Ebay_Mekong",
+    "EBAY_MEKONG_API": "Ebay_Mekong",
+    "EBAY_USAV": "Ebay_USAV",
+    "EBAY_USAV_API": "Ebay_USAV",
+    "WALMART": "Walmart",
+    "WALMART_API": "Walmart",
+    "ECWID": "ECWID",
+    "ECWID_API": "ECWID",
+    "AMAZON": "Amazon",
+    "AMAZON_API": "Amazon",
     "MANUAL": "Other",
     "ZOHO_IMPORT": "Other",
 }
@@ -245,6 +272,35 @@ def _resolve_customer_source_to_zoho_dropdown(source: str) -> str:
 
     fallback = _normalize_customer_source_to_zoho_dropdown(source)
     if fallback in VALID_ZOHO_CONTACT_SOURCE_VALUES:
+        return fallback
+    return "Other"
+
+
+def _normalize_so_source_to_zoho_dropdown(source: str) -> str:
+    text = str(source or "").strip().upper().replace("-", "_").replace(" ", "_")
+    if "EBAY_DRAGON" in text:
+        return "Ebay_Dragon"
+    if "EBAY_MEKONG" in text:
+        return "Ebay_Mekong"
+    if "EBAY_USAV" in text:
+        return "Ebay_USAV"
+    if "ECWID" in text:
+        return "ECWID"
+    if "AMAZON" in text:
+        return "Amazon"
+    if "WALMART" in text:
+        return "Walmart"
+    return "Other"
+
+
+def _resolve_so_source_to_zoho_dropdown(source: str) -> str:
+    normalized = str(source or "").strip().upper()
+    mapped = EXACT_ZOHO_SO_SOURCE_MAP.get(normalized)
+    if mapped:
+        return mapped
+
+    fallback = _normalize_so_source_to_zoho_dropdown(source)
+    if fallback in VALID_ZOHO_SO_SOURCE_VALUES:
         return fallback
     return "Other"
 
@@ -1805,10 +1861,19 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
     if not (customer and customer.zoho_id):
         raise ValueError("Order is missing customer.zoho_id; sync customer first.")
 
+    salesorder_number = str(order.external_order_number or order.external_order_id or "").strip()
+    reference_number = str(order.tracking_number or "").strip()
+
     payload: dict[str, Any] = {
-        "reference_number": order.external_order_id,
+        "salesorder_number": salesorder_number,
         "date": (order.ordered_at or order.created_at).strftime("%Y-%m-%d"),
     }
+    if reference_number:
+        payload["reference_number"] = reference_number
+    if order.shipped_at:
+        payload["shipment_date"] = order.shipped_at.strftime("%Y-%m-%d")
+    if order.carrier:
+        payload["delivery_method"] = str(order.carrier)
 
     # Customer
     payload["customer_id"] = customer.zoho_id
@@ -1821,11 +1886,29 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
             "quantity": item.quantity,
             "rate": float(item.unit_price),
         }
+        if item.external_sku:
+            li["sku"] = str(item.external_sku)
+        description_parts: list[str] = []
+        if item.external_item_id:
+            description_parts.append(f"External Item ID: {item.external_item_id}")
+        if item.external_asin:
+            description_parts.append(f"ASIN: {item.external_asin}")
+        if description_parts:
+            li["description"] = " | ".join(description_parts)
         variant = getattr(item, "variant", None)
         if variant and variant.zoho_item_id:
             li["item_id"] = variant.zoho_item_id
         line_items.append(li)
     payload["line_items"] = line_items
+
+    source_raw = str(getattr(order, "source", "") or "").strip()
+    if source_raw:
+        payload["custom_fields"] = [
+            {
+                "api_name": "cf_source",
+                "value": _resolve_so_source_to_zoho_dropdown(source_raw),
+            }
+        ]
 
     # Shipping address
     addr_fields = {
@@ -1986,9 +2069,12 @@ async def sync_order_outbound(order_id: int) -> None:
             zoho = ZohoClient()
 
             # If we don't yet have a zoho_id, try to locate an existing SalesOrder
-            # by reference_number to avoid duplicates when re-queuing the same order.
+            # by salesorder_number first (fallback to legacy reference_number)
+            # to avoid duplicates when re-queuing the same order.
             if not order.zoho_id:
                 existing_so_id: Optional[str] = None
+                target_salesorder_number = str(order.external_order_number or order.external_order_id or "").strip()
+                legacy_reference_number = str(order.external_order_id or "").strip()
                 try:
                     for page in range(1, 4):  # scan first ~600 orders to keep quota safe
                         salesorders = await zoho.list_salesorders(page=page, per_page=200)
@@ -1996,7 +2082,8 @@ async def sync_order_outbound(order_id: int) -> None:
                             (
                                 so
                                 for so in salesorders
-                                if str(so.get("reference_number", "")) == order.external_order_id
+                                if str(so.get("salesorder_number", "")).strip() == target_salesorder_number
+                                or str(so.get("reference_number", "")).strip() == legacy_reference_number
                             ),
                             None,
                         )

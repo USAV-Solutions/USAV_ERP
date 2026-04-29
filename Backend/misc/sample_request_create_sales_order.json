@@ -1,0 +1,124 @@
+
+{
+    "salesorder_id": 4815000000044895,
+    "salesorder_number": "SO-00003",
+    "date": "2015-05-28",
+    "status": "fulfilled",
+    "shipment_date": "2015-06-02",
+    "reference_number": "REF-S-00003",
+    "customer_id": 4815000000044080,
+    "customer_name": "Molly",
+    "contact_persons_associated": [
+        {
+            "contact_person_id": 982000000567003,
+            "contact_person_name": "David",
+            "first_name": "David",
+            "last_name": "John",
+            "contact_person_email": "willsmith@bowmanfurniture.com",
+            "phone": "+1-925-921-9201",
+            "mobile": "+1-4054439562",
+            "communication_preference": {
+                "is_email_enabled": true,
+                "is_whatsapp_enabled": true
+            }
+        }
+    ],
+    "currency_id": 4815000000000097,
+    "currency_code": "USD",
+    "currency_symbol": "$",
+    "exchange_rate": 1,
+    "discount_amount": 0,
+    "discount": "20.00%",
+    "is_discount_before_tax": true,
+    "discount_type": "entity_level",
+    "estimate_id": 4815000000045091,
+    "delivery_method": "FedEx",
+    "delivery_method_id": 4815000000044822,
+    "line_items": [
+        {
+            "item_id": 4815000000044100,
+            "line_item_id": 4815000000044897,
+            "name": "Laptop-white/15inch/dell",
+            "description": "Just a sample description.",
+            "item_order": 0,
+            "bcy_rate": 122,
+            "rate": 122,
+            "quantity": 2,
+            "quantity_invoiced": 2,
+            "quantity_packed": 2,
+            "quantity_shipped": 2,
+            "unit": "qty",
+            "tax_id": 4815000000044043,
+            "tds_tax_id": "460000000017098",
+            "tax_name": "Sales Tax",
+            "tax_type": "tax",
+            "tax_percentage": 12,
+            "item_total": 244,
+            "is_invoiced": true,
+            "image_id": 2077500000000002000,
+            "image_name": "dell.jpg",
+            "image_type": "jpg",
+            "location_id": "460000000038080",
+            "location_name": "string",
+            "hsn_or_sac": 80540,
+            "sat_item_key_code": 71121206,
+            "unitkey_code": "E48"
+        }
+    ],
+    "location_id": "460000000038080",
+    "location_name": "string",
+    "shipping_charge": 7,
+    "adjustment": 0,
+    "adjustment_description": "Just an example description.",
+    "sub_total": 244,
+    "tax_total": 29,
+    "total": 350,
+    "taxes": [
+        {
+            "tax_name": "Sales Tax",
+            "tax_amount": 29.28
+        }
+    ],
+    "price_precision": 2,
+    "pricebook_id": 4815000000044054,
+    "shipping_address": {
+        "address": "No:432,Bayside,Queens",
+        "city": "New York City",
+        "state": "New York",
+        "zip": 11364,
+        "country": "U.S.A",
+        "fax": "424-524242"
+    },
+    "billing_address": {
+        "address": "No:432,Bayside,Queens",
+        "city": "New York City",
+        "state": "New York",
+        "zip": 11364,
+        "country": "U.S.A",
+        "fax": "424-524242"
+    },
+    "notes": "Sample Note",
+    "terms": "Terms and Conditions",
+    "template_id": 4815000000017003,
+    "template_name": "Standard",
+    "template_type": "standard",
+    "created_time": "2015-05-28T00:00:00.000Z",
+    "last_modified_time": "2015-05-28T00:00:00.000Z",
+    "salesperson_id": 4815000000044762,
+    "salesperson_name": "Lara",
+    "documents": [
+        {
+            "can_send_in_mail": true,
+            "file_name": "sample.pdf",
+            "file_type": "pdf",
+            "file_size_formatted": "116.8 KB",
+            "attachment_order": 1,
+            "document_id": 16115000000096068,
+            "file_size": 11957
+        }
+    ],
+    "is_pre_gst": false,
+    "gst_no": "22AAAAA0000A1Z5",
+    "gst_treatment": "business_gst",
+    "place_of_supply": "TN"
+}
