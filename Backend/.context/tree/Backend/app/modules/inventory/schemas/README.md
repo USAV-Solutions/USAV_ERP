@@ -10,6 +10,7 @@ Inventory domain request/response schema contracts.
 ## Common Pitfalls
 - Editing this folder without checking sibling tests and schema/type contracts.
 - Making cross-layer changes here but forgetting migration/frontend alignment.
+- `PlatformListing` schema now exposes `merchant_sku` and `platform_metadata` for channel publish workflows (eBay/Ecwid/Amazon). Keep `platform_metadata` shape stable at the API boundary when frontend publishing forms depend on specific keys.
 
 ## Child Folders
 - (No child folders)
