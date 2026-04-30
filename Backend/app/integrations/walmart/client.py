@@ -217,6 +217,7 @@ class WalmartClient(BasePlatformClient):
             customer_source="WALMART_API",
             ship_address_line1=shipping_address.get("address1"),
             ship_address_line2=shipping_address.get("address2"),
+            ship_address_line3=shipping_address.get("address3") or shipping_address.get("addressLine3"),
             ship_city=shipping_address.get("city"),
             ship_state=shipping_address.get("state"),
             ship_postal_code=shipping_address.get("postalCode"),

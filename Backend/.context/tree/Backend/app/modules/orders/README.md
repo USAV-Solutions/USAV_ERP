@@ -16,6 +16,7 @@ Sales orders domain: ingestion/import, listing-centric matching, filtering, cust
 - `SHIPSTATION_CUSTOMER_CSV` is intentionally customer-only (no order rows created); keep frontend messaging aligned with `customers_created/customers_updated` counters.
 - `CSV_GENERIC` order import also accepts ShipStation order-export headers (for example `Order - CustomerID`, `Order - Number`, `Date - Order Date`); when product columns are missing, the importer creates a synthetic line item (`Imported order line`) using order-level totals.
 - ShipStation `Count - Number of Items` can be `0`; CSV import now clamps synthetic-item quantity to at least `1` to satisfy `order_item` positive-quantity DB constraints.
+- `orders` shipping address now includes `shipping_address_line3`; CSV ingestion maps `Ship To - Address 3` (or `shipping_address_line3`) and API adapters can populate third-line street data where available.
 - `order_item.variant_id` is denormalized once `platform_listing_id` is introduced; code paths that update listing assignments must keep `order_item.variant_id` in sync.
 
 ## Child Folders

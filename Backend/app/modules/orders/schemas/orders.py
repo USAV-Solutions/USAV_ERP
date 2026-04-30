@@ -131,6 +131,7 @@ class OrderDetail(BaseModel):
 
     shipping_address_line1: Optional[str] = None
     shipping_address_line2: Optional[str] = None
+    shipping_address_line3: Optional[str] = None
     shipping_city: Optional[str] = None
     shipping_state: Optional[str] = None
     shipping_postal_code: Optional[str] = None

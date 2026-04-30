@@ -230,6 +230,7 @@ class Order(Base, ZohoSyncMixin, TimestampMixin):
     # ---- Shipping Address ----
     shipping_address_line1: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     shipping_address_line2: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    shipping_address_line3: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     shipping_city: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     shipping_state: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     shipping_postal_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)

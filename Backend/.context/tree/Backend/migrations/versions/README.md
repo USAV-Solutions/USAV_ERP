@@ -14,6 +14,7 @@ Concrete Alembic revision files; source of truth for schema transitions.
 - Keep model/index names aligned with migration IDs; for `Customer.source`, both the ORM and migration define `ix_customer_source` and must stay in sync.
 - Migration `0024` introduces nullable `platform_listing.variant_id` plus partial unique index behavior on `(platform, external_ref_id)`; guard against duplicate non-null refs before applying in production.
 - Backfill migrations that bridge old/new matching columns (for example, `order_item.platform_listing_id`) should compare platform enums via `::text` when enum types differ across tables.
+- Migration `0026` adds `orders.shipping_address_line3`; keep adapter ingest fields and `OrderDetail` schema in lockstep with this column.
 
 ## Child Folders
 - (No child folders)

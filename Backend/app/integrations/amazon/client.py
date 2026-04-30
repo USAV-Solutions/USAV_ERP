@@ -178,6 +178,7 @@ class AmazonClient(BasePlatformClient):
             customer_email=amazon_order.get("BuyerEmail"),
             ship_address_line1=shipping.get("AddressLine1"),
             ship_address_line2=shipping.get("AddressLine2"),
+            ship_address_line3=shipping.get("AddressLine3"),
             ship_city=shipping.get("City"),
             ship_state=shipping.get("StateOrRegion"),
             ship_postal_code=shipping.get("PostalCode"),
@@ -193,4 +194,3 @@ class AmazonClient(BasePlatformClient):
             items=items,
             raw_data=amazon_order,
         )
-

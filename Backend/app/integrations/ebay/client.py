@@ -810,6 +810,7 @@ class EbayClient(BasePlatformClient):
             customer_source=f"{self.platform_name}_API",
             ship_address_line1=shipping.get("contactAddress", {}).get("addressLine1"),
             ship_address_line2=shipping.get("contactAddress", {}).get("addressLine2"),
+            ship_address_line3=None,
             ship_city=shipping.get("contactAddress", {}).get("city"),
             ship_state=shipping.get("contactAddress", {}).get("stateOrProvince"),
             ship_postal_code=shipping.get("contactAddress", {}).get("postalCode"),
@@ -825,4 +826,3 @@ class EbayClient(BasePlatformClient):
             items=items,
             raw_data=ebay_order,
         )
-

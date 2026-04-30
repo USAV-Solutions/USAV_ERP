@@ -377,6 +377,7 @@ class OrderSyncService:
             "customer_email": ext.customer_email,
             "shipping_address_line1": ext.ship_address_line1,
             "shipping_address_line2": ext.ship_address_line2,
+            "shipping_address_line3": ext.ship_address_line3,
             "shipping_city": ext.ship_city,
             "shipping_state": ext.ship_state,
             "shipping_postal_code": ext.ship_postal_code,
@@ -442,6 +443,9 @@ class OrderSyncService:
         if ext.ship_address_line2 and not self._coalesce(customer.address_line2):
             customer.address_line2 = ext.ship_address_line2
             changed = True
+        if ext.ship_address_line3 and not self._coalesce(customer.address_line2):
+            customer.address_line2 = ext.ship_address_line3
+            changed = True
         if ext.ship_city and not self._coalesce(customer.city):
             customer.city = ext.ship_city
             changed = True
@@ -497,7 +501,7 @@ class OrderSyncService:
             phone=ext.customer_phone,
             company_name=ext.customer_company,
             address_line1=ext.ship_address_line1,
-            address_line2=ext.ship_address_line2,
+            address_line2=ext.ship_address_line2 or ext.ship_address_line3,
             city=ext.ship_city,
             state=ext.ship_state,
             postal_code=ext.ship_postal_code,
