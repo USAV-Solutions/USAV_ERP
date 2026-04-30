@@ -308,7 +308,8 @@ class EcwidClient(BasePlatformClient):
             customer_company=shipping.get("companyName") or shipping.get("company"),
             customer_source="ECWID_API",
             ship_address_line1=shipping.get("street"),
-            ship_address_line2=None,  # Ecwid combines address into 'street'
+            ship_address_line2=shipping.get("street2") or shipping.get("addressLine2"),
+            ship_address_line3=shipping.get("street3") or shipping.get("addressLine3"),
             ship_city=shipping.get("city"),
             ship_state=shipping.get("stateOrProvinceCode"),
             ship_postal_code=shipping.get("postalCode"),

@@ -1917,9 +1917,12 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
         ]
 
     # Shipping address
+    street2 = " ".join(
+        [part.strip() for part in [order.shipping_address_line2, order.shipping_address_line3] if part and part.strip()]
+    )
     addr_fields = {
         "address": order.shipping_address_line1,
-        "street2": order.shipping_address_line2,
+        "street2": street2 or None,
         "city": order.shipping_city,
         "state": order.shipping_state,
         "zip": order.shipping_postal_code,
@@ -1935,10 +1938,10 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
 def _sanitize_shipping_address(addr: dict[str, str]) -> dict[str, str]:
     """Trim shipping address fields to satisfy Zoho < 100 chars rule."""
     max_total = 95  # keep some headroom below 100
-    max_field = 64
+    max_field = 60
 
     def _trim(value: str, limit: int) -> str:
-        return value if len(value) <= limit else value[: limit - 1].rstrip() + "…"
+        return value if len(value) <= limit else value[:limit].rstrip()
 
     sanitized = {k: _trim(v, max_field) for k, v in addr.items() if v}
 
@@ -2107,10 +2110,29 @@ async def sync_order_outbound(order_id: int) -> None:
                 if existing_so_id:
                     order.zoho_id = existing_so_id
 
-            if order.zoho_id:
-                so = await zoho.update_salesorder(order.zoho_id, payload)
-            else:
-                so = await zoho.create_sales_order(payload)
+            try:
+                if order.zoho_id:
+                    so = await zoho.update_salesorder(order.zoho_id, payload)
+                else:
+                    so = await zoho.create_sales_order(payload)
+            except Exception as so_exc:
+                msg = str(so_exc)
+                # Zoho may reject shipping_address even after sanitization.
+                # Retry once without shipping_address so the order can still sync.
+                if '"shipping_address" has less than 100 characters' in msg and payload.get("shipping_address"):
+                    logger.warning(
+                        "sync_order_outbound: retrying order %s without shipping_address after Zoho validation error",
+                        order_id,
+                    )
+                    payload_retry = dict(payload)
+                    payload_retry.pop("shipping_address", None)
+                    if order.zoho_id:
+                        so = await zoho.update_salesorder(order.zoho_id, payload_retry)
+                    else:
+                        so = await zoho.create_sales_order(payload_retry)
+                    payload = payload_retry
+                else:
+                    raise
 
             so_id = str(so.get("salesorder_id", ""))
             if so_id:

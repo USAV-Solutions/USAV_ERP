@@ -27,6 +27,7 @@ class ExternalOrder:
     # Shipping
     ship_address_line1: Optional[str]
     ship_address_line2: Optional[str]
+    ship_address_line3: Optional[str]
     ship_city: Optional[str]
     ship_state: Optional[str]
     ship_postal_code: Optional[str]
@@ -224,4 +225,3 @@ class PlatformClientFactory:
     def get_registered_platforms(cls) -> List[str]:
         """Get list of registered platforms."""
         return list(cls._clients.keys())
-

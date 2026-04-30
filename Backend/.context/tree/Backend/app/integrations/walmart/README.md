@@ -16,6 +16,7 @@ OrderSyncService ingestion path.
 - Walmart APIs require request headers like `WM_SEC.ACCESS_TOKEN`, `WM_SVC.NAME`, and a unique `WM_QOS.CORRELATION_ID` per call.
 - `list.meta.nextCursor` returns a query fragment that must be appended to `/v3/orders` for pagination.
 - Walmart order normalization should map `shippingInfo.phone` and set `customer_source="WALMART_API"` so customer sync captures contact/source metadata.
+- Walmart shipping normalization should map `postalAddress.address3` (or `addressLine3`) into normalized `ship_address_line3` when present.
 
 ## Child Folders
 - (No child folders)

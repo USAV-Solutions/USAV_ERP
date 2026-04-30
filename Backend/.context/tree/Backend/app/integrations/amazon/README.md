@@ -10,6 +10,7 @@ Amazon integration client implementation and Amazon-specific parsing logic.
 ## Common Pitfalls
 - Editing this folder without checking sibling tests and schema/type contracts.
 - Making cross-layer changes here but forgetting migration/frontend alignment.
+- Amazon order normalization should map `ShippingAddress.AddressLine3` into the normalized shipping contract (`ship_address_line3`) when present.
 
 ## Child Folders
 - (No child folders)

@@ -12,6 +12,7 @@ eBay integration client and API-specific transport/auth/order normalization beha
 - Making cross-layer changes here but forgetting migration/frontend alignment.
 - Reintroducing duplicated hardcoded eBay timestamp formats; use `EBAY_ISO_DATE_FORMAT` in `client.py` for all eBay ISO datetime string generation.
 - Keep `_convert_order` customer enrichment mapping aligned with the normalized contract (`customer_phone`, `customer_source`) so `OrderSyncService` can persist the latest channel context.
+- eBay Fulfillment shipping address exposes `addressLine1`/`addressLine2` plus city/state/postal/country; there is no native third street line, so keep normalized `ship_address_line3` unset for eBay orders.
 
 ## Child Folders
 - (No child folders)

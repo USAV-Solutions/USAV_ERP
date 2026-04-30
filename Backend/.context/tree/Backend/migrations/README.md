@@ -12,6 +12,7 @@ Alembic migration environment and revision history for database evolution.
 - Introducing irreversible enum changes without clear downgrade strategy.
 - Not seeding required operational rows (for example, sync state rows).
 - Revision `0025` creates a unique partial index on `platform_listing(platform, external_ref_id)`; legacy duplicates or blank-string refs must be normalized/deduped in-migration before index creation.
+- Revision `0026` adds nullable `orders.shipping_address_line3`; keep ORM/schema/import mappings synchronized when rolling this migration out.
 
 ## Child Folders
 - `versions/`
