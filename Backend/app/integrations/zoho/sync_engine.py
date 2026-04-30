@@ -50,12 +50,13 @@ VALID_ZOHO_PO_SOURCE_VALUES = {
 }
 
 VALID_ZOHO_CONTACT_SOURCE_VALUES = {
-    "Ebay",
-    "Walmart",
-    "Ecwid",
+    "Ebay_Dragon",
+    "Ebay_Mekong",
+    "Ebay_USAV",
+    "ECWID",
     "Amazon",
-    "ShipStation",
     "Other",
+    "Walmart",
 }
 
 VALID_ZOHO_SO_SOURCE_VALUES = {
@@ -69,13 +70,18 @@ VALID_ZOHO_SO_SOURCE_VALUES = {
 }
 
 EXACT_ZOHO_CONTACT_SOURCE_MAP = {
-    "EBAY_MEKONG_API": "Ebay",
-    "EBAY_USAV_API": "Ebay",
-    "EBAY_DRAGON_API": "Ebay",
+    "EBAY_DRAGON": "Ebay_Dragon",
+    "EBAY_DRAGON_API": "Ebay_Dragon",
+    "EBAY_MEKONG": "Ebay_Mekong",
+    "EBAY_MEKONG_API": "Ebay_Mekong",
+    "EBAY_USAV": "Ebay_USAV",
+    "EBAY_USAV_API": "Ebay_USAV",
+    "WALMART": "Walmart",
     "WALMART_API": "Walmart",
-    "ECWID_API": "Ecwid",
+    "ECWID": "ECWID",
+    "ECWID_API": "ECWID",
+    "AMAZON": "Amazon",
     "AMAZON_API": "Amazon",
-    "SHIPSTATION_CSV": "ShipStation",
     "MANUAL": "Other",
     "ZOHO_IMPORT": "Other",
 }
