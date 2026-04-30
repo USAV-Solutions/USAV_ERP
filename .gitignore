@@ -107,3 +107,6 @@ migrations/versions/__pycache__/
 .venv/
 venv/
 BackendVenv/
+
+
+.codex
