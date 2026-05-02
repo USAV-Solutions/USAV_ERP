@@ -179,6 +179,12 @@ def customer_to_zoho_payload(customer: Customer) -> dict[str, Any]:
         payload["phone"] = customer.phone
     if customer.company_name:
         payload["company_name"] = customer.company_name
+    # Keep contact tax preference aligned with USAV workflow: Tax Exempt.
+    payload["is_taxable"] = False
+    if settings.zoho_contact_tax_exemption_id:
+        payload["tax_exemption_id"] = str(settings.zoho_contact_tax_exemption_id)
+    if settings.zoho_contact_tax_authority_id:
+        payload["tax_authority_id"] = str(settings.zoho_contact_tax_authority_id)
 
     # Billing address
     address: dict[str, str] = {}
@@ -195,8 +201,24 @@ def customer_to_zoho_payload(customer: Customer) -> dict[str, Any]:
     if customer.country:
         address["country"] = customer.country
     if address:
+        if customer.phone:
+            address["phone"] = customer.phone
         payload["billing_address"] = address
         payload["shipping_address"] = dict(address)
+
+    # Zoho UI often surfaces phone/email under contact persons.
+    # Push a primary contact person so these values are visible/editable there.
+    primary_contact: dict[str, Any] = {}
+    if customer.name:
+        primary_contact["first_name"] = customer.name
+    if customer.email:
+        primary_contact["email"] = customer.email
+    if customer.phone:
+        primary_contact["phone"] = customer.phone
+        primary_contact["mobile"] = customer.phone
+    if primary_contact:
+        primary_contact["is_primary_contact"] = True
+        payload["contact_persons"] = [primary_contact]
 
     source_raw = str(getattr(customer, "source", "") or "").strip()
     if source_raw:
@@ -1883,9 +1905,12 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
 
     # Customer
     payload["customer_id"] = customer.zoho_id
+    if customer.email:
+        payload["email"] = customer.email
 
     # Line items
     line_items: list[dict[str, Any]] = []
+    is_ecwid_source = str(getattr(order, "source", "") or "").strip().upper() == "ECWID_API"
     for item in (order.items or []):
         li: dict[str, Any] = {
             "name": item.item_name,
@@ -1904,6 +1929,8 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
         variant = getattr(item, "variant", None)
         if variant and variant.zoho_item_id:
             li["item_id"] = variant.zoho_item_id
+        if is_ecwid_source:
+            li["tax_percentage"] = 0.0
         line_items.append(li)
     payload["line_items"] = line_items
 
@@ -1917,20 +1944,30 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
         ]
 
     # Shipping address
-    street2 = " ".join(
-        [part.strip() for part in [order.shipping_address_line2, order.shipping_address_line3] if part and part.strip()]
-    )
+    ship_line1 = customer.address_line1
+    ship_line2 = customer.address_line2
+    street2 = " ".join([part.strip() for part in [ship_line2] if part and part.strip()])
     addr_fields = {
-        "address": order.shipping_address_line1,
+        "attention": customer.name,
+        "address": ship_line1,
         "street2": street2 or None,
-        "city": order.shipping_city,
-        "state": order.shipping_state,
-        "zip": order.shipping_postal_code,
-        "country": order.shipping_country,
+        "city": customer.city,
+        "state": customer.state,
+        "zip": customer.postal_code,
+        "country": customer.country,
+        "phone": customer.phone,
     }
     shipping = {k: v for k, v in addr_fields.items() if v}
     if shipping:
         payload["shipping_address"] = _sanitize_shipping_address(shipping)
+
+    shipping_charge = float(order.shipping_amount or 0)
+    payload["shipping_charge"] = shipping_charge
+
+    if is_ecwid_source:
+        tax_adjustment = float(order.tax_amount or 0)
+        payload["adjustment"] = tax_adjustment
+        payload["adjustment_description"] = "Tax adjustment"
 
     return payload
 
