@@ -12,17 +12,26 @@ Follow these guidelines:
 - If something is unclear, ask instead of guessing.
 - Define how the change will be verified before implementation.
 
-- Load and apply rules from: ./skills/karpathy-guidelines/SKILL.md
-
 ## 2. Navigation & Required Read Order
-Use `Backend/.context/tree/TREE.md` as your primary navigation map. Do not scan or read the whole codebase by default.
-Navigate top-down:
-1. Read `Backend/.context/tree/TREE.md` to understand the layout.
-2. Read the relevant folder doc(s) under `Backend/.context/tree/.../README.md`.
-3. Only then inspect/edit specific code files.
+
+Use `Backend/.context/tree/TREE.md` only when file location is unknown or the task spans unfamiliar modules.
+
+Do not scan or read the whole codebase by default.
+
+Preferred order:
+1. Use targeted search (`rg`) for known symbols, routes, models, fields, or filenames.
+2. Read `Backend/.context/tree/TREE.md` only if navigation is unclear.
+3. Read the relevant folder README only if it helps understand the module.
+4. Inspect/edit only the specific source files needed.
+
+Avoid large outputs:
+- Do not `cat` large files.
+- Do not dump large JSON/log files.
+- Use `sed -n`, `rg`, `jq`, or small Python summaries.
+- Prefer reading small ranges of files unless more context is necessary.
 
 ## 3. Mandatory Update Rule
-If you modify ANY code inside a backend folder (`Backend/<path>`), you MUST update the matching context documentation:
+Update matching context docs (Backend only) only when the change affects module behavior, public contracts, env vars, folder responsibilities, or known pitfalls.
 - **Code folder:** `Backend/<path>`
 - **Doc folder:** `Backend/.context/tree/Backend/<path>/README.md`
 
@@ -32,4 +41,9 @@ If you modify ANY code inside a backend folder (`Backend/<path>`), you MUST upda
 - **Child Folders:** Update if you added or removed directories.
 
 ## 4. Completion Criteria
-A task is considered strictly incomplete if relevant code was changed but the corresponding context docs (`Backend/.context/tree/.../README.md`) were not updated alongside it.
+
+Before finishing, report:
+- files changed
+- whether backend context docs were updated
+- if not updated, why no context-doc update was needed
+- verification performed or recommended
