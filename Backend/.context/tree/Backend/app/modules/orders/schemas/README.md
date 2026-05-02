@@ -12,6 +12,8 @@ Sales orders request/response and sync/import schema contracts, including custom
 - Making cross-layer changes here but forgetting migration/frontend alignment.
 - Keep `SalesImportFileSource` and `SalesImportFileResponse` in sync with route behavior (for `SHIPSTATION_CUSTOMER_CSV`, customer counters are populated while order counters remain zero).
 - `OrderDetail` continues to expose customer/shipping fields for API compatibility, but values are now derived from linked `Customer` data rather than persisted order snapshot columns.
+- `OrderBrief` now includes `subtotal_amount`, `tax_amount`, and `shipping_amount`; keep frontend order-list total calculations aligned with these fields.
+- `OrderBrief` also includes `tracking_number` so list rows can show tracking without fetching full order detail.
 
 ## Child Folders
 - (No child folders)

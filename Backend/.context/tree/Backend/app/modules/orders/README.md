@@ -15,8 +15,11 @@ Sales orders domain: ingestion/import, listing-centric matching, filtering, cust
 - Platforms that failed with credential/auth bootstrap errors (for example token acquisition failures) are auto-reset from `ERROR` to `IDLE` on the next sync attempt; this avoids permanent lockout but still records the current attempt's real failure if credentials remain invalid.
 - `SHIPSTATION_CUSTOMER_CSV` is intentionally customer-only (no order rows created); keep frontend messaging aligned with `customers_created/customers_updated` counters.
 - `CSV_GENERIC` order import also accepts ShipStation order-export headers (for example `Order - CustomerID`, `Order - Number`, `Date - Order Date`); when product columns are missing, the importer creates a synthetic line item (`Imported order line`) using order-level totals.
+- `CSV_GENERIC` import now attempts per-row platform detection (`platform`/`source` columns) and ingests batches under detected `orders.platform` values instead of forcing everything to `MANUAL`.
 - ShipStation `Count - Number of Items` can be `0`; CSV import now clamps synthetic-item quantity to at least `1` to satisfy `order_item` positive-quantity DB constraints.
 - Order header no longer stores duplicated customer/shipping snapshot columns; order responses derive customer name/email/address from the linked `customer` relation. Keep customer linkage and backfill behavior healthy before relying on outbound sync fields.
+- Tracking numbers are now normalized into order headers from API/CSV payloads; keep adapter/raw key mappings (`trackingNumber`, `tracking_number`, `Tracking Number`) aligned.
+- Order list responses now include `subtotal_amount`, `tax_amount`, and `shipping_amount` so frontend totals can consistently compute `subtotal + tax + shipping`.
 - `order_item.variant_id` is denormalized once `platform_listing_id` is introduced; code paths that update listing assignments must keep `order_item.variant_id` in sync.
 
 ## Child Folders

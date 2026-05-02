@@ -80,6 +80,7 @@ const PLATFORM_LABELS: Record<OrderPlatform, string> = {
   EBAY_USAV: 'eBay USAV',
   EBAY_DRAGON: 'eBay Dragon',
   ECWID: 'Ecwid',
+  SHOPIFY: 'Shopify',
   WALMART: 'Walmart',
   ZOHO: 'Zoho',
   MANUAL: 'Manual',
@@ -644,7 +645,7 @@ export default function OrdersManagement() {
                 <TableCell sx={{ width: 40 }} />
                 <TableCell>Order #</TableCell>
                 <TableCell>Platform</TableCell>
-                <TableCell>Source</TableCell>
+                <TableCell>Tracking</TableCell>
                 <TableCell>Customer</TableCell>
                 <TableCell align="center">Unmatched</TableCell>
                 <TableCell align="right">Total</TableCell>
@@ -697,7 +698,9 @@ export default function OrdersManagement() {
                           />
                         </TableCell>
                         <TableCell>
-                          <Typography variant="body2">{order.source}</Typography>
+                          <Typography variant="body2">
+                            {order.tracking_number || '—'}
+                          </Typography>
                         </TableCell>
                         <TableCell>
                           <Typography variant="body2">
@@ -718,7 +721,7 @@ export default function OrdersManagement() {
                         </TableCell>
                         <TableCell align="right">
                           <Typography variant="body2">
-                            {order.currency} {parseFloat(order.total_amount).toFixed(2)}
+                            {order.currency} {(Number(order.subtotal_amount || 0) + Number(order.tax_amount || 0) + Number(order.shipping_amount || 0)).toFixed(2)}
                           </Typography>
                         </TableCell>
                         <TableCell>

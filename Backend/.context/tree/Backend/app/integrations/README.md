@@ -13,6 +13,7 @@ External system adapters and normalization clients (Amazon/eBay/Ecwid/Walmart/Zo
 - Inconsistent platform_name values causing sync mapping failures.
 - `ExternalOrder` now carries optional `customer_phone`, `customer_company`, and `customer_source`; adapters should fill these when payloads include them.
 - `ExternalOrder` shipping contract now includes `ship_address_line3`; adapters that expose a third street line should populate it, while adapters without support should leave it `None`.
+- `ExternalOrder` now carries optional `tracking_number`; adapters should map platform tracking fields when available so order headers can store shipment references.
 
 ## Child Folders
 - `amazon/`

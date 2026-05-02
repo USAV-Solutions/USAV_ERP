@@ -48,6 +48,7 @@ _PLATFORM_MAP: dict[str, OrderPlatform] = {
     "EBAY_USAV": OrderPlatform.EBAY_USAV,
     "EBAY_DRAGON": OrderPlatform.EBAY_DRAGON,
     "ECWID": OrderPlatform.ECWID,
+    "SHOPIFY": OrderPlatform.SHOPIFY,
     "WALMART": OrderPlatform.WALMART,
     "MANUAL": OrderPlatform.MANUAL,
 }
@@ -379,6 +380,7 @@ class OrderSyncService:
             "total_amount": Decimal(str(ext.total)),
             "currency": ext.currency or "USD",
             "ordered_at": ext.ordered_at,
+            "tracking_number": self._extract_tracking_number(ext),
             "platform_data": ext.raw_data,
         }
 
@@ -405,6 +407,20 @@ class OrderSyncService:
     def _coalesce(value: Optional[str]) -> Optional[str]:
         text = str(value or "").strip()
         return text or None
+
+    def _extract_tracking_number(self, ext: ExternalOrder) -> Optional[str]:
+        direct = self._coalesce(getattr(ext, "tracking_number", None))
+        if direct:
+            return direct
+        raw = getattr(ext, "raw_data", None) or {}
+        if not isinstance(raw, dict):
+            return None
+        return (
+            self._coalesce(raw.get("trackingNumber"))
+            or self._coalesce(raw.get("tracking_number"))
+            or self._coalesce(raw.get("Tracking Number"))
+            or self._coalesce(raw.get("tracking"))
+        )
 
     def _merge_customer_fields(self, customer: Customer, ext: ExternalOrder, source: Optional[str]) -> bool:
         changed = False

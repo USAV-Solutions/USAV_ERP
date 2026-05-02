@@ -13,6 +13,7 @@ export type OrderPlatform =
   | 'EBAY_USAV'
   | 'EBAY_DRAGON'
   | 'ECWID'
+  | 'SHOPIFY'
   | 'WALMART'
   | 'ZOHO'
   | 'MANUAL'
@@ -113,6 +114,10 @@ export interface OrderBrief {
   shipping_status: ShippingStatus
   zoho_sync_status: ZohoSyncStatus
   customer_name: string | null
+  tracking_number: string | null
+  subtotal_amount: string
+  tax_amount: string
+  shipping_amount: string
   total_amount: string
   currency: string
   ordered_at: string | null

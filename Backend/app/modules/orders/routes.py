@@ -88,6 +88,7 @@ _PLATFORM_TO_SOURCE: dict[str, str] = {
     "EBAY_USAV": "EBAY_USAV_API",
     "EBAY_DRAGON": "EBAY_DRAGON_API",
     "ECWID": "ECWID_API",
+    "SHOPIFY": "SHOPIFY_API",
     "WALMART": "WALMART_API",
 }
 
@@ -224,6 +225,38 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
         value = _pick(*keys)
         if not value:
             return default
+
+    def _detect_platform(row_data: dict[str, str]) -> str:
+        platform_raw = _coalesce(
+            row_data.get("platform")
+            or row_data.get("order_platform")
+            or row_data.get("Platform")
+            or row_data.get("Source Platform")
+        )
+        source_raw = _coalesce(
+            row_data.get("source")
+            or row_data.get("Source")
+            or row_data.get("order_source")
+            or row_data.get("Order Source")
+        )
+        text = f"{(platform_raw or '')} {(source_raw or '')}".upper()
+        if "SHOPIFY" in text:
+            return "SHOPIFY"
+        if "ECWID" in text:
+            return "ECWID"
+        if "WALMART" in text:
+            return "WALMART"
+        if "AMAZON" in text:
+            return "AMAZON"
+        if "EBAY_USAV" in text:
+            return "EBAY_USAV"
+        if "EBAY_MEKONG" in text:
+            return "EBAY_MEKONG"
+        if "EBAY_DRAGON" in text:
+            return "EBAY_DRAGON"
+        if "EBAY" in text:
+            return "EBAY_USAV"
+        return "MANUAL"
         try:
             parsed = int(value)
             return parsed if parsed > 0 else default
@@ -271,9 +304,12 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
                 except ValueError:
                     ordered_at = None
 
+        platform_name = _detect_platform(row)
+        group_key = f"{platform_name}::{ext_order_id}"
         order_entry = grouped.setdefault(
-            ext_order_id,
+            group_key,
             {
+                "platform_name": platform_name,
                 "platform_order_id": ext_order_id,
                 "platform_order_number": _pick("external_order_number", "order_number", "Order - Number") or None,
                 "customer_name": _pick("customer_name", "Bill To - Name", "Ship To - Name") or None,
@@ -292,7 +328,13 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
                 "currency": _pick("currency") or "USD",
                 "ordered_at": ordered_at,
                 "items": [],
-                "raw_data": {"import_source": "CSV_GENERIC"},
+                "tracking_number": _pick("tracking_number", "trackingNumber", "Tracking Number") or None,
+                "raw_data": {
+                    "import_source": "CSV_GENERIC",
+                    "platform_name": platform_name,
+                    "source": _pick("source", "Source", "order_source", "Order Source") or None,
+                    "tracking_number": _pick("tracking_number", "trackingNumber", "Tracking Number") or None,
+                },
             },
         )
 
@@ -692,7 +734,7 @@ async def import_orders_from_file(
         )
 
     rows, rows_seen, rows_skipped = _parse_order_csv(text)
-    external_orders: list[ExternalOrder] = []
+    orders_by_platform: dict[str, list[ExternalOrder]] = {}
     for row in rows:
         items = [
             ExternalOrderItem(
@@ -707,49 +749,66 @@ async def import_orders_from_file(
             )
             for item in row["items"]
         ]
-        external_orders.append(
-            ExternalOrder(
-                platform_order_id=row["platform_order_id"],
-                platform_order_number=row["platform_order_number"],
-                customer_name=row["customer_name"],
-                customer_email=row["customer_email"],
-                ship_address_line1=row["ship_address_line1"],
-                ship_address_line2=row["ship_address_line2"],
-                ship_address_line3=row["ship_address_line3"],
-                ship_city=row["ship_city"],
-                ship_state=row["ship_state"],
-                ship_postal_code=row["ship_postal_code"],
-                ship_country=row["ship_country"],
-                subtotal=row["subtotal"],
-                tax=row["tax"],
-                shipping=row["shipping"],
-                total=row["total"],
-                currency=row["currency"],
-                ordered_at=row["ordered_at"],
-                items=items,
-                raw_data=row["raw_data"],
-            )
+        platform_name = row.get("platform_name") or "MANUAL"
+        external_order = ExternalOrder(
+            platform_order_id=row["platform_order_id"],
+            platform_order_number=row["platform_order_number"],
+            customer_name=row["customer_name"],
+            customer_email=row["customer_email"],
+            ship_address_line1=row["ship_address_line1"],
+            ship_address_line2=row["ship_address_line2"],
+            ship_address_line3=row["ship_address_line3"],
+            ship_city=row["ship_city"],
+            ship_state=row["ship_state"],
+            ship_postal_code=row["ship_postal_code"],
+            ship_country=row["ship_country"],
+            subtotal=row["subtotal"],
+            tax=row["tax"],
+            shipping=row["shipping"],
+            total=row["total"],
+            currency=row["currency"],
+            ordered_at=row["ordered_at"],
+            items=items,
+            raw_data=row["raw_data"],
+            customer_source=(row.get("raw_data") or {}).get("source"),
+            tracking_number=row.get("tracking_number"),
         )
-
-    client = _StaticImportClient("MANUAL", external_orders)
-    result = await service.sync_platform_range(
-        "MANUAL",
-        client,
-        datetime(1970, 1, 1, tzinfo=timezone.utc),
-        datetime.now(timezone.utc),
-        source=source.value,
-    )
+        orders_by_platform.setdefault(platform_name, []).append(external_order)
+    aggregate = {
+        "new_orders": 0,
+        "new_items": 0,
+        "auto_matched": 0,
+        "skipped_duplicates": 0,
+        "errors": [],
+        "success": True,
+    }
+    for platform_name, platform_orders in orders_by_platform.items():
+        client = _StaticImportClient(platform_name, platform_orders)
+        result = await service.sync_platform_range(
+            platform_name,
+            client,
+            datetime(1970, 1, 1, tzinfo=timezone.utc),
+            datetime.now(timezone.utc),
+            source=_PLATFORM_TO_SOURCE.get(platform_name, source.value),
+        )
+        aggregate["new_orders"] += result.new_orders
+        aggregate["new_items"] += result.new_items
+        aggregate["auto_matched"] += result.auto_matched
+        aggregate["skipped_duplicates"] += result.skipped_duplicates
+        aggregate["errors"].extend(result.errors)
+        if not result.success:
+            aggregate["success"] = False
 
     return SalesImportFileResponse(
         source=source,
         source_rows_seen=rows_seen,
         source_rows_skipped=rows_skipped,
-        new_orders=result.new_orders,
-        new_items=result.new_items,
-        auto_matched=result.auto_matched,
-        skipped_duplicates=result.skipped_duplicates,
-        success=result.success,
-        errors=result.errors,
+        new_orders=aggregate["new_orders"],
+        new_items=aggregate["new_items"],
+        auto_matched=aggregate["auto_matched"],
+        skipped_duplicates=aggregate["skipped_duplicates"],
+        success=aggregate["success"],
+        errors=aggregate["errors"],
     )
 
 
@@ -835,6 +894,10 @@ async def list_orders(
                 shipping_status=o.shipping_status,
                 zoho_sync_status=o.zoho_sync_status,
                 customer_name=o.customer_name,
+                tracking_number=o.tracking_number,
+                subtotal_amount=o.subtotal_amount,
+                tax_amount=o.tax_amount,
+                shipping_amount=o.shipping_amount,
                 total_amount=o.total_amount,
                 currency=o.currency,
                 ordered_at=o.ordered_at,
