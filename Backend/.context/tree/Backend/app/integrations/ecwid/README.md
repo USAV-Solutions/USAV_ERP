@@ -12,6 +12,7 @@ Ecwid integration client and Ecwid payload mapping utilities.
 - Making cross-layer changes here but forgetting migration/frontend alignment.
 - Ecwid order normalization should populate optional customer enrichment fields (`customer_phone`, `customer_company`, `customer_source`) when present, otherwise downstream Zoho customer sync loses fidelity.
 - Ecwid shipping normalization now checks optional `street2/addressLine2` and `street3/addressLine3`; populate normalized `ship_address_line2/ship_address_line3` when available.
+- Ecwid order shipping amount should come from `shippingOption.shippingRate` (fallback `discountedShippingRate` / legacy `shipping`), because many order payloads do not populate top-level `shipping`.
 
 ## Child Folders
 - (No child folders)
