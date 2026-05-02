@@ -1,4 +1,4 @@
-import React, { useState, useMemo, Fragment } from 'react'
+import React, { useEffect, useState, useMemo, Fragment } from 'react'
 import {
   Box,
   Typography,
@@ -38,6 +38,7 @@ import {
   CheckCircle,
   Schedule,
   Delete,
+  Edit,
   ExpandMore,
   ExpandLess,
 } from '@mui/icons-material'
@@ -51,6 +52,7 @@ import {
   Platform,
   PlatformListing,
   PlatformListingCreate,
+  PlatformListingUpdate,
 } from '../types/inventory'
 import { useAuth } from '../hooks/useAuth'
 import SearchField from '../components/common/SearchField'
@@ -105,6 +107,10 @@ function CreateListingDialog({ open, onClose, variants }: CreateListingDialogPro
   const [listedName, setListedName] = useState('')
   const [listedDescription, setListedDescription] = useState('')
   const [listingPrice, setListingPrice] = useState('')
+  const [listingQuantity, setListingQuantity] = useState('')
+  const [listingType, setListingType] = useState('')
+  const [listingCondition, setListingCondition] = useState('')
+  const [upc, setUpc] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   const createMutation = useMutation({
@@ -128,6 +134,10 @@ function CreateListingDialog({ open, onClose, variants }: CreateListingDialogPro
     setListedName('')
     setListedDescription('')
     setListingPrice('')
+    setListingQuantity('')
+    setListingType('')
+    setListingCondition('')
+    setUpc('')
     setError(null)
     onClose()
   }
@@ -143,6 +153,10 @@ function CreateListingDialog({ open, onClose, variants }: CreateListingDialogPro
       listed_name: listedName || undefined,
       listed_description: listedDescription || undefined,
       listing_price: listingPrice ? parseFloat(listingPrice) : undefined,
+      listing_quantity: listingQuantity ? parseInt(listingQuantity, 10) : undefined,
+      listing_type: listingType || undefined,
+      listing_condition: listingCondition || undefined,
+      upc: upc || undefined,
     })
   }
 
@@ -245,6 +259,43 @@ function CreateListingDialog({ open, onClose, variants }: CreateListingDialogPro
               startAdornment: <InputAdornment position="start">$</InputAdornment>,
             }}
             helperText="Platform-specific price (optional)"
+            sx={{ mb: 2 }}
+          />
+
+          <TextField
+            fullWidth
+            label="Listing Quantity"
+            type="number"
+            value={listingQuantity}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setListingQuantity(e.target.value)}
+            helperText="Platform-specific quantity/stock (optional)"
+            sx={{ mb: 2 }}
+          />
+
+          <TextField
+            fullWidth
+            label="Listing Type"
+            value={listingType}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setListingType(e.target.value)}
+            helperText="Platform-specific listing type/classification (optional)"
+            sx={{ mb: 2 }}
+          />
+
+          <TextField
+            fullWidth
+            label="Listing Condition"
+            value={listingCondition}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setListingCondition(e.target.value)}
+            helperText="Condition string as shown on this platform (optional)"
+            sx={{ mb: 2 }}
+          />
+
+          <TextField
+            fullWidth
+            label="UPC"
+            value={upc}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUpc(e.target.value)}
+            helperText="UPC/GTIN for this platform listing (optional)"
           />
         </Box>
       </DialogContent>
@@ -262,6 +313,96 @@ function CreateListingDialog({ open, onClose, variants }: CreateListingDialogPro
   )
 }
 
+interface EditListingDialogProps {
+  open: boolean
+  onClose: () => void
+  listing: EnhancedListing | null
+}
+
+function EditListingDialog({ open, onClose, listing }: EditListingDialogProps) {
+  const queryClient = useQueryClient()
+  const [externalRefId, setExternalRefId] = useState('')
+  const [listedName, setListedName] = useState('')
+  const [listedDescription, setListedDescription] = useState('')
+  const [listingPrice, setListingPrice] = useState('')
+  const [listingQuantity, setListingQuantity] = useState('')
+  const [listingType, setListingType] = useState('')
+  const [listingCondition, setListingCondition] = useState('')
+  const [upc, setUpc] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!listing || !open) return
+    setExternalRefId(listing.external_ref_id || '')
+    setListedName(listing.listed_name || '')
+    setListedDescription(listing.listed_description || '')
+    setListingPrice(listing.listing_price != null ? String(listing.listing_price) : '')
+    setListingQuantity(listing.listing_quantity != null ? String(listing.listing_quantity) : '')
+    setListingType(listing.listing_type || '')
+    setListingCondition(listing.listing_condition || '')
+    setUpc(listing.upc || '')
+    setError(null)
+  }, [listing, open])
+
+  const updateMutation = useMutation({
+    mutationFn: async (payload: PlatformListingUpdate) => {
+      if (!listing) throw new Error('Listing not found')
+      const response = await axiosClient.patch(LISTINGS.LISTING(listing.id), payload)
+      return response.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['listings'] })
+      onClose()
+    },
+    onError: (err: any) => {
+      setError(err.response?.data?.detail || 'Failed to update listing')
+    },
+  })
+
+  const handleSubmit = () => {
+    setError(null)
+    updateMutation.mutate({
+      external_ref_id: externalRefId || undefined,
+      listed_name: listedName || undefined,
+      listed_description: listedDescription || undefined,
+      listing_price: listingPrice ? parseFloat(listingPrice) : undefined,
+      listing_quantity: listingQuantity ? parseInt(listingQuantity, 10) : undefined,
+      listing_type: listingType || undefined,
+      listing_condition: listingCondition || undefined,
+      upc: upc || undefined,
+    })
+  }
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>Edit Platform Listing</DialogTitle>
+      <DialogContent>
+        <Box sx={{ mt: 2 }}>
+          {error && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {error}
+            </Alert>
+          )}
+          <TextField fullWidth label="External Reference ID" value={externalRefId} onChange={(e) => setExternalRefId(e.target.value)} sx={{ mb: 2 }} />
+          <TextField fullWidth label="Listed Name" value={listedName} onChange={(e) => setListedName(e.target.value)} sx={{ mb: 2 }} />
+          <TextField fullWidth label="Listed Description" value={listedDescription} onChange={(e) => setListedDescription(e.target.value)} multiline rows={3} sx={{ mb: 2 }} />
+          <TextField fullWidth label="Listing Price" type="number" value={listingPrice} onChange={(e) => setListingPrice(e.target.value)} InputProps={{ startAdornment: <InputAdornment position="start">$</InputAdornment> }} sx={{ mb: 2 }} />
+          <TextField fullWidth label="Listing Quantity" type="number" value={listingQuantity} onChange={(e) => setListingQuantity(e.target.value)} sx={{ mb: 2 }} />
+          <TextField fullWidth label="Listing Type" value={listingType} onChange={(e) => setListingType(e.target.value)} sx={{ mb: 2 }} />
+          <TextField fullWidth label="Listing Condition" value={listingCondition} onChange={(e) => setListingCondition(e.target.value)} sx={{ mb: 2 }} />
+          <TextField fullWidth label="UPC" value={upc} onChange={(e) => setUpc(e.target.value)} />
+        </Box>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="contained" onClick={handleSubmit} disabled={updateMutation.isPending}>
+          {updateMutation.isPending ? <CircularProgress size={24} /> : 'Save'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  )
+}
+
 export default function ProductListings() {
   const [searchInput, setSearchInput] = useState('')
   const debouncedSearch = useDebouncedValue(searchInput, 200)
@@ -271,6 +412,8 @@ export default function ProductListings() {
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(25)
   const [expandedFamilies, setExpandedFamilies] = useState<Set<number>>(new Set())
+  const [editingListing, setEditingListing] = useState<EnhancedListing | null>(null)
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
   const { hasRole } = useAuth()
   const queryClient = useQueryClient()
 
@@ -419,6 +562,11 @@ export default function ProductListings() {
     }
   }
 
+  const handleEdit = (listing: EnhancedListing) => {
+    setEditingListing(listing)
+    setEditDialogOpen(true)
+  }
+
   const getPlatformLabel = (platform: Platform) => {
     return PLATFORMS.find(p => p.value === platform)?.label || platform
   }
@@ -551,6 +699,11 @@ export default function ProductListings() {
                                     <TableCell>Listed Name</TableCell>
                                     <TableCell>External Ref ID</TableCell>
                                     <TableCell>Price</TableCell>
+                                    <TableCell>Qty</TableCell>
+                                    <TableCell>Type</TableCell>
+                                    <TableCell>Condition</TableCell>
+                                    <TableCell>UPC</TableCell>
+                                    <TableCell>Derived Details</TableCell>
                                     <TableCell>Sync Status</TableCell>
                                     <TableCell>Last Synced</TableCell>
                                     <TableCell>Actions</TableCell>
@@ -586,6 +739,24 @@ export default function ProductListings() {
                                       <TableCell>
                                         {listing.listing_price != null ? `$${listing.listing_price.toFixed(2)}` : '-'}
                                       </TableCell>
+                                      <TableCell>{listing.listing_quantity ?? '-'}</TableCell>
+                                      <TableCell>{listing.listing_type || '-'}</TableCell>
+                                      <TableCell>{listing.listing_condition || listing.variant?.condition_code || '-'}</TableCell>
+                                      <TableCell>{listing.upc || '-'}</TableCell>
+                                      <TableCell>
+                                        <Typography variant="caption" sx={{ display: 'block' }}>
+                                          Brand: {listing.variant?.identity?.family?.brand?.name || '-'}
+                                        </Typography>
+                                        <Typography variant="caption" sx={{ display: 'block' }}>
+                                          Color: {listing.variant?.color_code || '-'}
+                                        </Typography>
+                                        <Typography variant="caption" sx={{ display: 'block' }}>
+                                          L/W/H: {listing.variant?.identity?.dimension_length ?? '-'} / {listing.variant?.identity?.dimension_width ?? '-'} / {listing.variant?.identity?.dimension_height ?? '-'}
+                                        </Typography>
+                                        <Typography variant="caption" sx={{ display: 'block' }}>
+                                          Weight: {listing.variant?.identity?.weight ?? '-'}
+                                        </Typography>
+                                      </TableCell>
                                       <TableCell>
                                         {getSyncStatusChip(listing.sync_status, listing.sync_error_message)}
                                       </TableCell>
@@ -595,20 +766,35 @@ export default function ProductListings() {
                                           : '-'}
                                       </TableCell>
                                       <TableCell>
-                                        {hasRole(['ADMIN']) && (
-                                          <Tooltip title="Delete Listing">
-                                            <IconButton
-                                              size="small"
-                                              color="error"
-                                              onClick={(e) => {
-                                                e.stopPropagation()
-                                                handleDelete(listing.id)
-                                              }}
-                                              disabled={deleteMutation.isPending}
-                                            >
-                                              <Delete fontSize="small" />
-                                            </IconButton>
-                                          </Tooltip>
+                                        {hasRole(['ADMIN', 'SALES_REP']) && (
+                                          <>
+                                            <Tooltip title="Edit Listing">
+                                              <IconButton
+                                                size="small"
+                                                onClick={(e) => {
+                                                  e.stopPropagation()
+                                                  handleEdit(listing)
+                                                }}
+                                              >
+                                                <Edit fontSize="small" />
+                                              </IconButton>
+                                            </Tooltip>
+                                            {hasRole(['ADMIN']) && (
+                                              <Tooltip title="Delete Listing">
+                                                <IconButton
+                                                  size="small"
+                                                  color="error"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation()
+                                                    handleDelete(listing.id)
+                                                  }}
+                                                  disabled={deleteMutation.isPending}
+                                                >
+                                                  <Delete fontSize="small" />
+                                                </IconButton>
+                                              </Tooltip>
+                                            )}
+                                          </>
                                         )}
                                       </TableCell>
                                     </TableRow>
@@ -645,6 +831,11 @@ export default function ProductListings() {
         open={createDialogOpen}
         onClose={() => setCreateDialogOpen(false)}
         variants={enhancedVariants}
+      />
+      <EditListingDialog
+        open={editDialogOpen}
+        onClose={() => setEditDialogOpen(false)}
+        listing={editingListing}
       />
     </Box>
   )

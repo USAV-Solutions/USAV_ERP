@@ -104,6 +104,10 @@ class OrderBrief(BaseModel):
     zoho_sync_status: ZohoSyncStatus
     customer_name: Optional[str] = None
     customer: Optional[CustomerBrief] = None
+    tracking_number: Optional[str] = None
+    subtotal_amount: Decimal
+    tax_amount: Decimal
+    shipping_amount: Decimal
     total_amount: Decimal
     currency: str
     ordered_at: Optional[datetime] = None

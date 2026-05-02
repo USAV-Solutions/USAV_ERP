@@ -48,6 +48,7 @@ _PLATFORM_MAP: dict[str, OrderPlatform] = {
     "EBAY_USAV": OrderPlatform.EBAY_USAV,
     "EBAY_DRAGON": OrderPlatform.EBAY_DRAGON,
     "ECWID": OrderPlatform.ECWID,
+    "SHOPIFY": OrderPlatform.SHOPIFY,
     "WALMART": OrderPlatform.WALMART,
     "MANUAL": OrderPlatform.MANUAL,
 }
@@ -373,21 +374,13 @@ class OrderSyncService:
             "external_order_number": ext.platform_order_number,
             "status": OrderStatus.PENDING,
             "customer_id": customer_id,
-            "customer_name": ext.customer_name,
-            "customer_email": ext.customer_email,
-            "shipping_address_line1": ext.ship_address_line1,
-            "shipping_address_line2": ext.ship_address_line2,
-            "shipping_address_line3": ext.ship_address_line3,
-            "shipping_city": ext.ship_city,
-            "shipping_state": ext.ship_state,
-            "shipping_postal_code": ext.ship_postal_code,
-            "shipping_country": ext.ship_country or "US",
             "subtotal_amount": Decimal(str(ext.subtotal)),
             "tax_amount": Decimal(str(ext.tax)),
             "shipping_amount": Decimal(str(ext.shipping)),
             "total_amount": Decimal(str(ext.total)),
             "currency": ext.currency or "USD",
             "ordered_at": ext.ordered_at,
+            "tracking_number": self._extract_tracking_number(ext),
             "platform_data": ext.raw_data,
         }
 
@@ -414,6 +407,20 @@ class OrderSyncService:
     def _coalesce(value: Optional[str]) -> Optional[str]:
         text = str(value or "").strip()
         return text or None
+
+    def _extract_tracking_number(self, ext: ExternalOrder) -> Optional[str]:
+        direct = self._coalesce(getattr(ext, "tracking_number", None))
+        if direct:
+            return direct
+        raw = getattr(ext, "raw_data", None) or {}
+        if not isinstance(raw, dict):
+            return None
+        return (
+            self._coalesce(raw.get("trackingNumber"))
+            or self._coalesce(raw.get("tracking_number"))
+            or self._coalesce(raw.get("Tracking Number"))
+            or self._coalesce(raw.get("tracking"))
+        )
 
     def _merge_customer_fields(self, customer: Customer, ext: ExternalOrder, source: Optional[str]) -> bool:
         changed = False

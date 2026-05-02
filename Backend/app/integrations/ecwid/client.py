@@ -299,6 +299,20 @@ class EcwidClient(BasePlatformClient):
         order_id = str(order_data.get("id", order_data.get("orderNumber", "")))
         order_number = str(order_data.get("orderNumber", order_data.get("vendorOrderNumber", order_id)))
         
+        shipping_option = order_data.get("shippingOption") or {}
+        shipping_amount = 0.0
+        if shipping_option.get("shippingRate") is not None:
+            shipping_amount = float(shipping_option.get("shippingRate") or 0)
+        elif shipping_option.get("discountedShippingRate") is not None:
+            shipping_amount = float(shipping_option.get("discountedShippingRate") or 0)
+        elif order_data.get("shipping") is not None:
+            shipping_amount = float(order_data.get("shipping") or 0)
+        else:
+            # Fallback for payloads that only expose per-line shipping values.
+            shipping_amount = float(
+                sum(float(item.get("shipping", 0) or 0) for item in order_data.get("items", []))
+            )
+
         return ExternalOrder(
             platform_order_id=order_id,
             platform_order_number=order_number,
@@ -316,12 +330,13 @@ class EcwidClient(BasePlatformClient):
             ship_country=shipping.get("countryCode", "US"),
             subtotal=float(order_data.get("subtotal", 0)),
             tax=float(order_data.get("tax", 0)),
-            shipping=float(order_data.get("shipping", 0)),
+            shipping=shipping_amount,
             total=float(order_data.get("total", 0)),
             currency=order_data.get("currency", "USD"),
             ordered_at=ordered_at,
             items=items,
             raw_data=order_data,
+            tracking_number=order_data.get("trackingNumber"),
         )
     
     async def fetch_orders_since_last_sync(

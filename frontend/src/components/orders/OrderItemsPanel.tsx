@@ -129,29 +129,55 @@ export default function OrderItemsPanel({ orderId, headerAction }: OrderItemsPan
             {order.items.length}
           </Typography>
         </Box>
+        <Box sx={{ minWidth: 140, maxWidth: 220, flexShrink: 1, overflow: 'hidden' }}>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            Source
+          </Typography>
+          <Typography variant="body2" sx={{ fontSize: '0.82rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {order.source || '—'}
+          </Typography>
+        </Box>
+        {(order.platform === 'ECWID' || order.platform === 'SHOPIFY') && (
+          <Box sx={{ minWidth: 80, flexShrink: 0 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+              Tax
+            </Typography>
+            <Typography variant="body2" sx={{ fontSize: '0.82rem' }}>
+              {Number(order.tax_amount || 0).toFixed(2)}
+            </Typography>
+          </Box>
+        )}
+        <Box sx={{ minWidth: 110, flexShrink: 0 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            Shipping Charge
+          </Typography>
+          <Typography variant="body2" sx={{ fontSize: '0.82rem' }}>
+            {Number(order.shipping_amount || 0).toFixed(2)}
+          </Typography>
+        </Box>
+        <Box sx={{ minWidth: 220, maxWidth: 360, flexShrink: 1, overflow: 'hidden' }}>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            Shipping Address
+          </Typography>
+          <Typography variant="body2" sx={{ fontSize: '0.82rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {[
+              order.shipping_address_line1,
+              order.shipping_address_line2,
+              order.shipping_city,
+              order.shipping_state,
+              order.shipping_postal_code,
+              order.shipping_country,
+            ]
+              .filter(Boolean)
+              .join(', ') || '—'}
+          </Typography>
+        </Box>
         {headerAction && (
           <Box sx={{ marginLeft: 'auto', flexShrink: 0 }}>
             {headerAction}
           </Box>
         )}
       </Stack>
-      <Box sx={{ mb: 1.25 }}>
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-          Shipping Address
-        </Typography>
-        <Typography variant="body2" sx={{ fontSize: '0.82rem' }}>
-          {[
-            order.shipping_address_line1,
-            order.shipping_address_line2,
-            order.shipping_city,
-            order.shipping_state,
-            order.shipping_postal_code,
-            order.shipping_country,
-          ]
-            .filter(Boolean)
-            .join(', ') || '—'}
-        </Typography>
-      </Box>
       <Typography variant="subtitle2" sx={{ mb: 1 }}>
         Line Items
       </Typography>

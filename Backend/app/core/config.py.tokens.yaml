@@ -1,0 +1,2607 @@
+schema: token-scope-export/v1
+note: Semantic tokens come from VS Code built-in semantic-token commands. TextMate scopes are re-tokenized from the contributed grammar.
+positionEncoding: { lines: 1-based, columns: 0-based, endColumn: exclusive }
+exportedAt: 2026-05-02T18:15:09.922Z
+source:
+  languageId: python
+  version: 10
+  path: /home/las/USAV/USAV_Inventory/Backend/app/core/config.py
+grammar: source.python
+semanticLegend:
+  tokenTypes:
+    - comment
+    - keyword
+    - operator
+    - string
+    - number
+    - regexp
+    - type
+    - class
+    - interface
+    - enum
+    - enumMember
+    - typeParameter
+    - function
+    - method
+    - property
+    - variable
+    - parameter
+    - module
+    - intrinsic
+    - selfParameter
+    - clsParameter
+    - magicFunction
+    - builtinConstant
+    - parenthesis
+    - curlybrace
+    - bracket
+    - colon
+    - semicolon
+    - arrow
+  tokenModifiers:
+    - declaration
+    - static
+    - abstract
+    - async
+    - documentation
+    - typeHint
+    - typeHintComment
+    - readonly
+    - decorator
+    - builtin
+    - overridden
+    - callable
+    - classMember
+    - keywordArgument
+    - dynamicAttribute
+stats: { lineCount: 139, semanticTokenCount: 185, textmateTokenCount: 1037, exportedSegmentCount: 673 }
+lines:
+  - lineNumber: 1
+    sourceText: '"""'
+    segments:
+      - text: '"""'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.docstring.multi.python ] }
+        span: [ 0, 3 ]
+  - lineNumber: 2
+    sourceText: Application configuration using pydantic-settings.
+    segments:
+      - text: Application configuration using pydantic-settings.
+        textmate: { scope: string.quoted.docstring.multi.python, rest: [ source.python ] }
+        span: [ 0, 50 ]
+  - lineNumber: 3
+    sourceText: Loads from environment variables with .env file support.
+    segments:
+      - text: Loads from environment variables with .env file support.
+        textmate: { scope: string.quoted.docstring.multi.python, rest: [ source.python ] }
+        span: [ 0, 56 ]
+  - lineNumber: 4
+    sourceText: '"""'
+    segments:
+      - text: '"""'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.docstring.multi.python ] }
+        span: [ 0, 3 ]
+  - lineNumber: 5
+    sourceText: from functools import lru_cache
+    segments:
+      - text: from
+        textmate: { scope: keyword.control.import.python, rest: [ source.python ] }
+        span: [ 0, 4 ]
+      - text: functools
+        textmate: { scope: source.python }
+        span: [ 5, 14 ]
+        semantic: { type: module }
+      - text: import
+        textmate: { scope: keyword.control.import.python, rest: [ source.python ] }
+        span: [ 15, 21 ]
+      - text: lru_cache
+        textmate: { scope: source.python }
+        span: [ 22, 31 ]
+        semantic: { type: function }
+  - lineNumber: 6
+    sourceText: from typing import Literal
+    segments:
+      - text: from
+        textmate: { scope: keyword.control.import.python, rest: [ source.python ] }
+        span: [ 0, 4 ]
+      - text: typing
+        textmate: { scope: source.python }
+        span: [ 5, 11 ]
+        semantic: { type: module }
+      - text: import
+        textmate: { scope: keyword.control.import.python, rest: [ source.python ] }
+        span: [ 12, 18 ]
+      - text: Literal
+        textmate: { scope: source.python }
+        span: [ 19, 26 ]
+        semantic: { type: class }
+  - lineNumber: 8
+    sourceText: from pydantic import PostgresDsn, computed_field, model_validator
+    segments:
+      - text: from
+        textmate: { scope: keyword.control.import.python, rest: [ source.python ] }
+        span: [ 0, 4 ]
+      - text: pydantic
+        textmate: { scope: source.python }
+        span: [ 5, 13 ]
+      - text: import
+        textmate: { scope: keyword.control.import.python, rest: [ source.python ] }
+        span: [ 14, 20 ]
+      - text: PostgresDsn
+        textmate: { scope: source.python }
+        span: [ 21, 32 ]
+      - text: ','
+        textmate: { scope: punctuation.separator.element.python, rest: [ source.python ] }
+        span: [ 32, 33 ]
+      - text: computed_field
+        textmate: { scope: source.python }
+        span: [ 34, 48 ]
+      - text: ','
+        textmate: { scope: punctuation.separator.element.python, rest: [ source.python ] }
+        span: [ 48, 49 ]
+      - text: model_validator
+        textmate: { scope: source.python }
+        span: [ 50, 65 ]
+  - lineNumber: 9
+    sourceText: from pydantic_settings import BaseSettings, SettingsConfigDict
+    segments:
+      - text: from
+        textmate: { scope: keyword.control.import.python, rest: [ source.python ] }
+        span: [ 0, 4 ]
+      - text: pydantic_settings
+        textmate: { scope: source.python }
+        span: [ 5, 22 ]
+      - text: import
+        textmate: { scope: keyword.control.import.python, rest: [ source.python ] }
+        span: [ 23, 29 ]
+      - text: BaseSettings
+        textmate: { scope: source.python }
+        span: [ 30, 42 ]
+      - text: ','
+        textmate: { scope: punctuation.separator.element.python, rest: [ source.python ] }
+        span: [ 42, 43 ]
+      - text: SettingsConfigDict
+        textmate: { scope: source.python }
+        span: [ 44, 62 ]
+  - lineNumber: 12
+    sourceText: 'class Settings(BaseSettings):'
+    segments:
+      - text: class
+        textmate: { scope: storage.type.class.python, rest: [ source.python, meta.class.python ] }
+        span: [ 0, 5 ]
+      - text: Settings
+        textmate: { scope: entity.name.type.class.python, rest: [ source.python, meta.class.python ] }
+        span: [ 6, 14 ]
+        semantic: { type: class, modifiers: [ declaration ] }
+      - text: (
+        textmate: { scope: punctuation.definition.inheritance.begin.python, rest: [ source.python, meta.class.python, meta.class.inheritance.python ] }
+        span: [ 14, 15 ]
+      - text: BaseSettings
+        textmate: { scope: entity.other.inherited-class.python, rest: [ source.python, meta.class.python, meta.class.inheritance.python ] }
+        span: [ 15, 27 ]
+      - text: )
+        textmate: { scope: punctuation.definition.inheritance.end.python, rest: [ source.python, meta.class.python, meta.class.inheritance.python ] }
+        span: [ 27, 28 ]
+      - text: ':'
+        textmate: { scope: punctuation.section.class.begin.python, rest: [ source.python, meta.class.python ] }
+        span: [ 28, 29 ]
+  - lineNumber: 13
+    sourceText: '    """Application settings loaded from environment variables."""'
+    segments:
+      - text: '"""'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.docstring.multi.python ] }
+        span: [ 4, 7 ]
+      - text: Application settings loaded from environment variables.
+        textmate: { scope: string.quoted.docstring.multi.python, rest: [ source.python ] }
+        span: [ 7, 62 ]
+      - text: '"""'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.docstring.multi.python ] }
+        span: [ 62, 65 ]
+  - lineNumber: 15
+    sourceText: '    model_config = SettingsConfigDict('
+    segments:
+      - text: model_config
+        textmate: { scope: source.python }
+        span: [ 4, 16 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 17, 18 ]
+      - text: SettingsConfigDict
+        textmate: { scope: meta.function-call.generic.python, rest: [ source.python, meta.function-call.python ] }
+        span: [ 19, 37 ]
+      - text: (
+        textmate: { scope: punctuation.definition.arguments.begin.python, rest: [ source.python, meta.function-call.python ] }
+        span: [ 37, 38 ]
+  - lineNumber: 16
+    sourceText: '        env_file=".env",'
+    segments:
+      - text: env_file
+        textmate: { scope: variable.parameter.function-call.python, rest: [ source.python, meta.function-call.python, meta.function-call.arguments.python ] }
+        span: [ 8, 16 ]
+        semantic: { type: parameter, modifiers: [ keywordArgument ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python, meta.function-call.python, meta.function-call.arguments.python ] }
+        span: [ 16, 17 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, meta.function-call.python, meta.function-call.arguments.python, string.quoted.single.python ] }
+        span: [ 17, 18 ]
+      - text: .env
+        textmate: { scope: string.quoted.single.python, rest: [ source.python, meta.function-call.python, meta.function-call.arguments.python ] }
+        span: [ 18, 22 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, meta.function-call.python, meta.function-call.arguments.python, string.quoted.single.python ] }
+        span: [ 22, 23 ]
+      - text: ','
+        textmate: { scope: punctuation.separator.arguments.python, rest: [ source.python, meta.function-call.python, meta.function-call.arguments.python ] }
+        span: [ 23, 24 ]
+  - lineNumber: 17
+    sourceText: '        env_file_encoding="utf-8",'
+    segments:
+      - text: env_file_encoding
+        textmate: { scope: variable.parameter.function-call.python, rest: [ source.python, meta.function-call.python, meta.function-call.arguments.python ] }
+        span: [ 8, 25 ]
+        semantic: { type: parameter, modifiers: [ keywordArgument ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python, meta.function-call.python, meta.function-call.arguments.python ] }
+        span: [ 25, 26 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, meta.function-call.python, meta.function-call.arguments.python, string.quoted.single.python ] }
+        span: [ 26, 27 ]
+      - text: utf-8
+        textmate: { scope: string.quoted.single.python, rest: [ source.python, meta.function-call.python, meta.function-call.arguments.python ] }
+        span: [ 27, 32 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, meta.function-call.python, meta.function-call.arguments.python, string.quoted.single.python ] }
+        span: [ 32, 33 ]
+      - text: ','
+        textmate: { scope: punctuation.separator.arguments.python, rest: [ source.python, meta.function-call.python, meta.function-call.arguments.python ] }
+        span: [ 33, 34 ]
+  - lineNumber: 18
+    sourceText: '        case_sensitive=False,'
+    segments:
+      - text: case_sensitive
+        textmate: { scope: variable.parameter.function-call.python, rest: [ source.python, meta.function-call.python, meta.function-call.arguments.python ] }
+        span: [ 8, 22 ]
+        semantic: { type: parameter, modifiers: [ keywordArgument ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python, meta.function-call.python, meta.function-call.arguments.python ] }
+        span: [ 22, 23 ]
+      - text: 'False'
+        textmate: { scope: constant.language.python, rest: [ source.python, meta.function-call.python, meta.function-call.arguments.python ] }
+        span: [ 23, 28 ]
+        semantic: { type: builtinConstant, modifiers: [ readonly, builtin ] }
+      - text: ','
+        textmate: { scope: punctuation.separator.arguments.python, rest: [ source.python, meta.function-call.python, meta.function-call.arguments.python ] }
+        span: [ 28, 29 ]
+  - lineNumber: 19
+    sourceText: '        extra="ignore",'
+    segments:
+      - text: extra
+        textmate: { scope: variable.parameter.function-call.python, rest: [ source.python, meta.function-call.python, meta.function-call.arguments.python ] }
+        span: [ 8, 13 ]
+        semantic: { type: parameter, modifiers: [ keywordArgument ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python, meta.function-call.python, meta.function-call.arguments.python ] }
+        span: [ 13, 14 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, meta.function-call.python, meta.function-call.arguments.python, string.quoted.single.python ] }
+        span: [ 14, 15 ]
+      - text: ignore
+        textmate: { scope: string.quoted.single.python, rest: [ source.python, meta.function-call.python, meta.function-call.arguments.python ] }
+        span: [ 15, 21 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, meta.function-call.python, meta.function-call.arguments.python, string.quoted.single.python ] }
+        span: [ 21, 22 ]
+      - text: ','
+        textmate: { scope: punctuation.separator.arguments.python, rest: [ source.python, meta.function-call.python, meta.function-call.arguments.python ] }
+        span: [ 22, 23 ]
+  - lineNumber: 20
+    sourceText: '    )'
+    segments:
+      - text: )
+        textmate: { scope: punctuation.definition.arguments.end.python, rest: [ source.python, meta.function-call.python ] }
+        span: [ 4, 5 ]
+  - lineNumber: 22
+    sourceText: '    # Application'
+    segments:
+      - text: '#'
+        textmate: { scope: punctuation.definition.comment.python, rest: [ source.python, comment.line.number-sign.python ] }
+        span: [ 4, 5 ]
+      - text: ' Application'
+        textmate: { scope: comment.line.number-sign.python, rest: [ source.python ] }
+        span: [ 5, 17 ]
+  - lineNumber: 23
+    sourceText: '    app_name: str = "USAV Inventory API"'
+    segments:
+      - text: app_name
+        textmate: { scope: source.python }
+        span: [ 4, 12 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 12, 13 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 14, 17 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 18, 19 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 20, 21 ]
+      - text: USAV Inventory API
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 21, 39 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 39, 40 ]
+  - lineNumber: 24
+    sourceText: '    app_version: str = "1.0.0"'
+    segments:
+      - text: app_version
+        textmate: { scope: source.python }
+        span: [ 4, 15 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 15, 16 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 17, 20 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 21, 22 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 23, 24 ]
+      - text: 1.0.0
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 24, 29 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 29, 30 ]
+  - lineNumber: 25
+    sourceText: '    debug: bool = False'
+    segments:
+      - text: debug
+        textmate: { scope: source.python }
+        span: [ 4, 9 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 9, 10 ]
+      - text: bool
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 11, 15 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 16, 17 ]
+      - text: 'False'
+        textmate: { scope: constant.language.python, rest: [ source.python ] }
+        span: [ 18, 23 ]
+        semantic: { type: builtinConstant, modifiers: [ readonly, builtin ] }
+  - lineNumber: 26
+    sourceText: '    environment: Literal["development", "staging", "production"] = "development"'
+    segments:
+      - text: environment
+        textmate: { scope: source.python }
+        span: [ 4, 15 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 15, 16 ]
+      - text: Literal
+        textmate: { scope: meta.indexed-name.python, rest: [ source.python, meta.item-access.python ] }
+        span: [ 17, 24 ]
+        semantic: { type: class, modifiers: [ typeHint ] }
+      - text: '['
+        textmate: { scope: punctuation.definition.arguments.begin.python, rest: [ source.python, meta.item-access.python ] }
+        span: [ 24, 25 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, meta.item-access.python, meta.item-access.arguments.python, string.quoted.single.python ] }
+        span: [ 25, 26 ]
+      - text: development
+        textmate: { scope: string.quoted.single.python, rest: [ source.python, meta.item-access.python, meta.item-access.arguments.python ] }
+        span: [ 26, 37 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, meta.item-access.python, meta.item-access.arguments.python, string.quoted.single.python ] }
+        span: [ 37, 38 ]
+      - text: ','
+        textmate: { scope: punctuation.separator.element.python, rest: [ source.python, meta.item-access.python, meta.item-access.arguments.python ] }
+        span: [ 38, 39 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, meta.item-access.python, meta.item-access.arguments.python, string.quoted.single.python ] }
+        span: [ 40, 41 ]
+      - text: staging
+        textmate: { scope: string.quoted.single.python, rest: [ source.python, meta.item-access.python, meta.item-access.arguments.python ] }
+        span: [ 41, 48 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, meta.item-access.python, meta.item-access.arguments.python, string.quoted.single.python ] }
+        span: [ 48, 49 ]
+      - text: ','
+        textmate: { scope: punctuation.separator.element.python, rest: [ source.python, meta.item-access.python, meta.item-access.arguments.python ] }
+        span: [ 49, 50 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, meta.item-access.python, meta.item-access.arguments.python, string.quoted.single.python ] }
+        span: [ 51, 52 ]
+      - text: production
+        textmate: { scope: string.quoted.single.python, rest: [ source.python, meta.item-access.python, meta.item-access.arguments.python ] }
+        span: [ 52, 62 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, meta.item-access.python, meta.item-access.arguments.python, string.quoted.single.python ] }
+        span: [ 62, 63 ]
+      - text: ']'
+        textmate: { scope: punctuation.definition.arguments.end.python, rest: [ source.python, meta.item-access.python ] }
+        span: [ 63, 64 ]
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 65, 66 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 67, 68 ]
+      - text: development
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 68, 79 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 79, 80 ]
+  - lineNumber: 28
+    sourceText: '    # Database'
+    segments:
+      - text: '#'
+        textmate: { scope: punctuation.definition.comment.python, rest: [ source.python, comment.line.number-sign.python ] }
+        span: [ 4, 5 ]
+      - text: ' Database'
+        textmate: { scope: comment.line.number-sign.python, rest: [ source.python ] }
+        span: [ 5, 14 ]
+  - lineNumber: 29
+    sourceText: '    db_host: str = "db"'
+    segments:
+      - text: db_host
+        textmate: { scope: source.python }
+        span: [ 4, 11 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 11, 12 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 13, 16 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 17, 18 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 19, 20 ]
+      - text: db
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 20, 22 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 22, 23 ]
+  - lineNumber: 30
+    sourceText: '    db_port: int = 5432'
+    segments:
+      - text: db_port
+        textmate: { scope: source.python }
+        span: [ 4, 11 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 11, 12 ]
+      - text: int
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 13, 16 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 17, 18 ]
+      - text: '5432'
+        textmate: { scope: constant.numeric.dec.python, rest: [ source.python ] }
+        span: [ 19, 23 ]
+  - lineNumber: 31
+    sourceText: '    db_user: str = "postgres"'
+    segments:
+      - text: db_user
+        textmate: { scope: source.python }
+        span: [ 4, 11 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 11, 12 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 13, 16 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 17, 18 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 19, 20 ]
+      - text: postgres
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 20, 28 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 28, 29 ]
+  - lineNumber: 32
+    sourceText: '    db_pass: str = "postgres"'
+    segments:
+      - text: db_pass
+        textmate: { scope: source.python }
+        span: [ 4, 11 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 11, 12 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 13, 16 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 17, 18 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 19, 20 ]
+      - text: postgres
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 20, 28 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 28, 29 ]
+  - lineNumber: 33
+    sourceText: '    db_name: str = "inventory_system"'
+    segments:
+      - text: db_name
+        textmate: { scope: source.python }
+        span: [ 4, 11 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 11, 12 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 13, 16 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 17, 18 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 19, 20 ]
+      - text: inventory_system
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 20, 36 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 36, 37 ]
+  - lineNumber: 34
+    sourceText: '    db_pool_size: int = 5'
+    segments:
+      - text: db_pool_size
+        textmate: { scope: source.python }
+        span: [ 4, 16 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 16, 17 ]
+      - text: int
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 18, 21 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 22, 23 ]
+      - text: '5'
+        textmate: { scope: constant.numeric.dec.python, rest: [ source.python ] }
+        span: [ 24, 25 ]
+  - lineNumber: 35
+    sourceText: '    db_max_overflow: int = 10'
+    segments:
+      - text: db_max_overflow
+        textmate: { scope: source.python }
+        span: [ 4, 19 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 19, 20 ]
+      - text: int
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 21, 24 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 25, 26 ]
+      - text: '10'
+        textmate: { scope: constant.numeric.dec.python, rest: [ source.python ] }
+        span: [ 27, 29 ]
+  - lineNumber: 37
+    sourceText: '    # API'
+    segments:
+      - text: '#'
+        textmate: { scope: punctuation.definition.comment.python, rest: [ source.python, comment.line.number-sign.python ] }
+        span: [ 4, 5 ]
+      - text: ' API'
+        textmate: { scope: comment.line.number-sign.python, rest: [ source.python ] }
+        span: [ 5, 9 ]
+  - lineNumber: 38
+    sourceText: '    api_prefix: str = "/api/v1"'
+    segments:
+      - text: api_prefix
+        textmate: { scope: source.python }
+        span: [ 4, 14 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 14, 15 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 16, 19 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 20, 21 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 22, 23 ]
+      - text: /api/v1
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 23, 30 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 30, 31 ]
+  - lineNumber: 39
+    sourceText: '    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:8080"]'
+    segments:
+      - text: cors_origins
+        textmate: { scope: source.python }
+        span: [ 4, 16 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 16, 17 ]
+      - text: list
+        textmate: { scope: meta.indexed-name.python, rest: [ source.python, meta.item-access.python ] }
+        span: [ 18, 22 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: '['
+        textmate: { scope: punctuation.definition.arguments.begin.python, rest: [ source.python, meta.item-access.python ] }
+        span: [ 22, 23 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python, meta.item-access.python, meta.item-access.arguments.python ] }
+        span: [ 23, 26 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: ']'
+        textmate: { scope: punctuation.definition.arguments.end.python, rest: [ source.python, meta.item-access.python ] }
+        span: [ 26, 27 ]
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 28, 29 ]
+      - text: '['
+        textmate: { scope: punctuation.definition.list.begin.python, rest: [ source.python ] }
+        span: [ 30, 31 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 31, 32 ]
+      - text: http://localhost:3000
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 32, 53 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 53, 54 ]
+      - text: ','
+        textmate: { scope: punctuation.separator.element.python, rest: [ source.python ] }
+        span: [ 54, 55 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 56, 57 ]
+      - text: http://localhost:8080
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 57, 78 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 78, 79 ]
+      - text: ']'
+        textmate: { scope: punctuation.definition.list.end.python, rest: [ source.python ] }
+        span: [ 79, 80 ]
+  - lineNumber: 41
+    sourceText: '    # Authentication & Security'
+    segments:
+      - text: '#'
+        textmate: { scope: punctuation.definition.comment.python, rest: [ source.python, comment.line.number-sign.python ] }
+        span: [ 4, 5 ]
+      - text: ' Authentication & Security'
+        textmate: { scope: comment.line.number-sign.python, rest: [ source.python ] }
+        span: [ 5, 31 ]
+  - lineNumber: 42
+    sourceText: '    secret_key: str = "CHANGE-THIS-TO-A-SECURE-SECRET-KEY-IN-PRODUCTION"'
+    segments:
+      - text: secret_key
+        textmate: { scope: source.python }
+        span: [ 4, 14 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 14, 15 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 16, 19 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 20, 21 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 22, 23 ]
+      - text: CHANGE-THIS-TO-A-SECURE-SECRET-KEY-IN-PRODUCTION
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 23, 71 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 71, 72 ]
+  - lineNumber: 43
+    sourceText: '    algorithm: str = "HS256"'
+    segments:
+      - text: algorithm
+        textmate: { scope: source.python }
+        span: [ 4, 13 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 13, 14 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 15, 18 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 19, 20 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 21, 22 ]
+      - text: HS256
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 22, 27 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 27, 28 ]
+  - lineNumber: 44
+    sourceText: '    access_token_expire_minutes: int = 60 * 24  # 24 hours'
+    segments:
+      - text: access_token_expire_minutes
+        textmate: { scope: source.python }
+        span: [ 4, 31 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 31, 32 ]
+      - text: int
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 33, 36 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 37, 38 ]
+      - text: '60'
+        textmate: { scope: constant.numeric.dec.python, rest: [ source.python ] }
+        span: [ 39, 41 ]
+      - text: '*'
+        textmate: { scope: keyword.operator.arithmetic.python, rest: [ source.python ] }
+        span: [ 42, 43 ]
+      - text: '24'
+        textmate: { scope: constant.numeric.dec.python, rest: [ source.python ] }
+        span: [ 44, 46 ]
+      - text: '#'
+        textmate: { scope: punctuation.definition.comment.python, rest: [ source.python, comment.line.number-sign.python ] }
+        span: [ 48, 49 ]
+      - text: ' 24 hours'
+        textmate: { scope: comment.line.number-sign.python, rest: [ source.python ] }
+        span: [ 49, 58 ]
+  - lineNumber: 46
+    sourceText: '    # SeaTalk OAuth Integration'
+    segments:
+      - text: '#'
+        textmate: { scope: punctuation.definition.comment.python, rest: [ source.python, comment.line.number-sign.python ] }
+        span: [ 4, 5 ]
+      - text: ' SeaTalk OAuth Integration'
+        textmate: { scope: comment.line.number-sign.python, rest: [ source.python ] }
+        span: [ 5, 31 ]
+  - lineNumber: 47
+    sourceText: '    seatalk_app_id: str = ""'
+    segments:
+      - text: seatalk_app_id
+        textmate: { scope: source.python }
+        span: [ 4, 18 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 18, 19 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 20, 23 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 24, 25 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 26, 27 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 27, 28 ]
+  - lineNumber: 48
+    sourceText: '    seatalk_app_secret: str = ""'
+    segments:
+      - text: seatalk_app_secret
+        textmate: { scope: source.python }
+        span: [ 4, 22 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 22, 23 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 24, 27 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 28, 29 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 30, 31 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 31, 32 ]
+  - lineNumber: 49
+    sourceText: '    seatalk_redirect_uri: str = "http://localhost:3636/auth/seatalk/callback"'
+    segments:
+      - text: seatalk_redirect_uri
+        textmate: { scope: source.python }
+        span: [ 4, 24 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 24, 25 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 26, 29 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 30, 31 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 32, 33 ]
+      - text: http://localhost:3636/auth/seatalk/callback
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 33, 76 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 76, 77 ]
+  - lineNumber: 50
+    sourceText: '    seatalk_api_base_url: str = "https://openapi.seatalk.io"'
+    segments:
+      - text: seatalk_api_base_url
+        textmate: { scope: source.python }
+        span: [ 4, 24 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 24, 25 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 26, 29 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 30, 31 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 32, 33 ]
+      - text: https://openapi.seatalk.io
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 33, 59 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 59, 60 ]
+  - lineNumber: 52
+    sourceText: '    # Zoho Integration'
+    segments:
+      - text: '#'
+        textmate: { scope: punctuation.definition.comment.python, rest: [ source.python, comment.line.number-sign.python ] }
+        span: [ 4, 5 ]
+      - text: ' Zoho Integration'
+        textmate: { scope: comment.line.number-sign.python, rest: [ source.python ] }
+        span: [ 5, 22 ]
+  - lineNumber: 53
+    sourceText: '    zoho_client_id: str = ""'
+    segments:
+      - text: zoho_client_id
+        textmate: { scope: source.python }
+        span: [ 4, 18 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 18, 19 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 20, 23 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 24, 25 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 26, 27 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 27, 28 ]
+  - lineNumber: 54
+    sourceText: '    zoho_client_secret: str = ""'
+    segments:
+      - text: zoho_client_secret
+        textmate: { scope: source.python }
+        span: [ 4, 22 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 22, 23 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 24, 27 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 28, 29 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 30, 31 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 31, 32 ]
+  - lineNumber: 55
+    sourceText: '    zoho_refresh_token: str = ""'
+    segments:
+      - text: zoho_refresh_token
+        textmate: { scope: source.python }
+        span: [ 4, 22 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 22, 23 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 24, 27 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 28, 29 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 30, 31 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 31, 32 ]
+  - lineNumber: 56
+    sourceText: '    zoho_organization_id: str = ""'
+    segments:
+      - text: zoho_organization_id
+        textmate: { scope: source.python }
+        span: [ 4, 24 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 24, 25 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 26, 29 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 30, 31 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 32, 33 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 33, 34 ]
+  - lineNumber: 57
+    sourceText: '    zoho_accounts_url: str = "https://accounts.zoho.com"'
+    segments:
+      - text: zoho_accounts_url
+        textmate: { scope: source.python }
+        span: [ 4, 21 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 21, 22 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 23, 26 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 27, 28 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 29, 30 ]
+      - text: https://accounts.zoho.com
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 30, 55 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 55, 56 ]
+  - lineNumber: 58
+    sourceText: '    zoho_inventory_api_base: str = "https://www.zohoapis.com/inventory/v1"'
+    segments:
+      - text: zoho_inventory_api_base
+        textmate: { scope: source.python }
+        span: [ 4, 27 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 27, 28 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 29, 32 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 33, 34 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 35, 36 ]
+      - text: https://www.zohoapis.com/inventory/v1
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 36, 73 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 73, 74 ]
+  - lineNumber: 59
+    sourceText: '    zoho_books_api_base: str = "https://www.zohoapis.com/books/v3"'
+    segments:
+      - text: zoho_books_api_base
+        textmate: { scope: source.python }
+        span: [ 4, 23 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 23, 24 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 25, 28 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 29, 30 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 31, 32 ]
+      - text: https://www.zohoapis.com/books/v3
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 32, 65 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 65, 66 ]
+  - lineNumber: 60
+    sourceText: '    zoho_auto_outbound_sync_enabled: bool = False'
+    segments:
+      - text: zoho_auto_outbound_sync_enabled
+        textmate: { scope: source.python }
+        span: [ 4, 35 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 35, 36 ]
+      - text: bool
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 37, 41 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 42, 43 ]
+      - text: 'False'
+        textmate: { scope: constant.language.python, rest: [ source.python ] }
+        span: [ 44, 49 ]
+        semantic: { type: builtinConstant, modifiers: [ readonly, builtin ] }
+  - lineNumber: 61
+    sourceText: '    zoho_auto_inbound_sync_enabled: bool = False'
+    segments:
+      - text: zoho_auto_inbound_sync_enabled
+        textmate: { scope: source.python }
+        span: [ 4, 34 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 34, 35 ]
+      - text: bool
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 36, 40 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 41, 42 ]
+      - text: 'False'
+        textmate: { scope: constant.language.python, rest: [ source.python ] }
+        span: [ 43, 48 ]
+        semantic: { type: builtinConstant, modifiers: [ readonly, builtin ] }
+  - lineNumber: 62
+    sourceText: '    zoho_po_cf_tax_id: str = ""'
+    segments:
+      - text: zoho_po_cf_tax_id
+        textmate: { scope: source.python }
+        span: [ 4, 21 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 21, 22 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 23, 26 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 27, 28 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 29, 30 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 30, 31 ]
+  - lineNumber: 63
+    sourceText: '    zoho_po_cf_shipping_fee_id: str = ""'
+    segments:
+      - text: zoho_po_cf_shipping_fee_id
+        textmate: { scope: source.python }
+        span: [ 4, 30 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 30, 31 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 32, 35 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 36, 37 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 38, 39 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 39, 40 ]
+  - lineNumber: 64
+    sourceText: '    zoho_po_cf_handling_fee_id: str = ""'
+    segments:
+      - text: zoho_po_cf_handling_fee_id
+        textmate: { scope: source.python }
+        span: [ 4, 30 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 30, 31 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 32, 35 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 36, 37 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 38, 39 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 39, 40 ]
+  - lineNumber: 65
+    sourceText: '    zoho_po_cf_source_id: str = ""'
+    segments:
+      - text: zoho_po_cf_source_id
+        textmate: { scope: source.python }
+        span: [ 4, 24 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 24, 25 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 26, 29 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 30, 31 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 32, 33 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 33, 34 ]
+  - lineNumber: 66
+    sourceText: '    zoho_po_cf_is_stationery_id: str = ""'
+    segments:
+      - text: zoho_po_cf_is_stationery_id
+        textmate: { scope: source.python }
+        span: [ 4, 31 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 31, 32 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 33, 36 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 37, 38 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 39, 40 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 40, 41 ]
+  - lineNumber: 67
+    sourceText: '    zoho_contact_cf_source_id: str = ""'
+    segments:
+      - text: zoho_contact_cf_source_id
+        textmate: { scope: source.python }
+        span: [ 4, 29 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 29, 30 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 31, 34 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 35, 36 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 37, 38 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 38, 39 ]
+  - lineNumber: 68
+    sourceText: '    zoho_contact_cf_source_api_name: str = "cf_source"'
+    segments:
+      - text: zoho_contact_cf_source_api_name
+        textmate: { scope: source.python }
+        span: [ 4, 35 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 35, 36 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 37, 40 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 41, 42 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 43, 44 ]
+      - text: cf_source
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 44, 53 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 53, 54 ]
+  - lineNumber: 69
+    sourceText: '    zoho_contact_tax_exemption_id: str = "5623409000000217703" #TBU'
+    segments:
+      - text: zoho_contact_tax_exemption_id
+        textmate: { scope: source.python }
+        span: [ 4, 33 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 33, 34 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 35, 38 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 39, 40 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 41, 42 ]
+      - text: '5623409000000217703'
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 42, 61 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 61, 62 ]
+      - text: '#'
+        textmate: { scope: punctuation.definition.comment.python, rest: [ source.python, comment.line.number-sign.python ] }
+        span: [ 63, 64 ]
+      - text: TBU
+        textmate: { scope: comment.line.number-sign.python, rest: [ source.python ] }
+        span: [ 64, 67 ]
+  - lineNumber: 70
+    sourceText: '    zoho_contact_tax_authority_id: str = "5623409000000217709" #TBU'
+    segments:
+      - text: zoho_contact_tax_authority_id
+        textmate: { scope: source.python }
+        span: [ 4, 33 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 33, 34 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 35, 38 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 39, 40 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 41, 42 ]
+      - text: '5623409000000217709'
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 42, 61 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 61, 62 ]
+      - text: '#'
+        textmate: { scope: punctuation.definition.comment.python, rest: [ source.python, comment.line.number-sign.python ] }
+        span: [ 63, 64 ]
+      - text: TBU
+        textmate: { scope: comment.line.number-sign.python, rest: [ source.python ] }
+        span: [ 64, 67 ]
+  - lineNumber: 71
+    sourceText: '    zoho_po_stationery_purchase_account_id: str = ""'
+    segments:
+      - text: zoho_po_stationery_purchase_account_id
+        textmate: { scope: source.python }
+        span: [ 4, 42 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 42, 43 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 44, 47 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 48, 49 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 50, 51 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 51, 52 ]
+  - lineNumber: 72
+    sourceText: '    zoho_po_stationery_location_id: str = ""'
+    segments:
+      - text: zoho_po_stationery_location_id
+        textmate: { scope: source.python }
+        span: [ 4, 34 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 34, 35 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 36, 39 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 40, 41 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 42, 43 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 43, 44 ]
+  - lineNumber: 73
+    sourceText: '    zoho_po_stationery_delivery_address: str = ""'
+    segments:
+      - text: zoho_po_stationery_delivery_address
+        textmate: { scope: source.python }
+        span: [ 4, 39 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 39, 40 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 41, 44 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 45, 46 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 47, 48 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 48, 49 ]
+  - lineNumber: 74
+    sourceText: '    zoho_item_stationery_purchase_account_id: str = ""'
+    segments:
+      - text: zoho_item_stationery_purchase_account_id
+        textmate: { scope: source.python }
+        span: [ 4, 44 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 44, 45 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 46, 49 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 50, 51 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 52, 53 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 53, 54 ]
+  - lineNumber: 75
+    sourceText: '    zoho_item_stationery_purchase_account_name: str = "Office Supplies"'
+    segments:
+      - text: zoho_item_stationery_purchase_account_name
+        textmate: { scope: source.python }
+        span: [ 4, 46 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 46, 47 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 48, 51 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 52, 53 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 54, 55 ]
+      - text: Office Supplies
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 55, 70 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 70, 71 ]
+  - lineNumber: 76
+    sourceText: '    zoho_po_ebay_paid_through_account_id: str = "5623409000001937358"'
+    segments:
+      - text: zoho_po_ebay_paid_through_account_id
+        textmate: { scope: source.python }
+        span: [ 4, 40 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 40, 41 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 42, 45 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 46, 47 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 48, 49 ]
+      - text: '5623409000001937358'
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 49, 68 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 68, 69 ]
+  - lineNumber: 78
+    sourceText: '    # Amazon SP-API Integration'
+    segments:
+      - text: '#'
+        textmate: { scope: punctuation.definition.comment.python, rest: [ source.python, comment.line.number-sign.python ] }
+        span: [ 4, 5 ]
+      - text: ' Amazon SP-API Integration'
+        textmate: { scope: comment.line.number-sign.python, rest: [ source.python ] }
+        span: [ 5, 31 ]
+  - lineNumber: 79
+    sourceText: '    amazon_refresh_token: str = ""'
+    segments:
+      - text: amazon_refresh_token
+        textmate: { scope: source.python }
+        span: [ 4, 24 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 24, 25 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 26, 29 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 30, 31 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 32, 33 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 33, 34 ]
+  - lineNumber: 80
+    sourceText: '    amazon_client_id: str = ""'
+    segments:
+      - text: amazon_client_id
+        textmate: { scope: source.python }
+        span: [ 4, 20 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 20, 21 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 22, 25 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 26, 27 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 28, 29 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 29, 30 ]
+  - lineNumber: 81
+    sourceText: '    amazon_client_secret: str = ""'
+    segments:
+      - text: amazon_client_secret
+        textmate: { scope: source.python }
+        span: [ 4, 24 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 24, 25 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 26, 29 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 30, 31 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 32, 33 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 33, 34 ]
+  - lineNumber: 82
+    sourceText: '    amazon_marketplace_id: str = "ATVPDKIKX0DER"  # US marketplace'
+    segments:
+      - text: amazon_marketplace_id
+        textmate: { scope: source.python }
+        span: [ 4, 25 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 25, 26 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 27, 30 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 31, 32 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 33, 34 ]
+      - text: ATVPDKIKX0DER
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 34, 47 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 47, 48 ]
+      - text: '#'
+        textmate: { scope: punctuation.definition.comment.python, rest: [ source.python, comment.line.number-sign.python ] }
+        span: [ 50, 51 ]
+      - text: ' US marketplace'
+        textmate: { scope: comment.line.number-sign.python, rest: [ source.python ] }
+        span: [ 51, 66 ]
+  - lineNumber: 84
+    sourceText: '    # eBay Integration (shared credentials for all stores)'
+    segments:
+      - text: '#'
+        textmate: { scope: punctuation.definition.comment.python, rest: [ source.python, comment.line.number-sign.python ] }
+        span: [ 4, 5 ]
+      - text: ' eBay Integration (shared credentials for all stores)'
+        textmate: { scope: comment.line.number-sign.python, rest: [ source.python ] }
+        span: [ 5, 58 ]
+  - lineNumber: 85
+    sourceText: '    ebay_app_id: str = ""'
+    segments:
+      - text: ebay_app_id
+        textmate: { scope: source.python }
+        span: [ 4, 15 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 15, 16 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 17, 20 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 21, 22 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 23, 24 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 24, 25 ]
+  - lineNumber: 86
+    sourceText: '    ebay_cert_id: str = ""'
+    segments:
+      - text: ebay_cert_id
+        textmate: { scope: source.python }
+        span: [ 4, 16 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 16, 17 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 18, 21 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 22, 23 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 24, 25 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 25, 26 ]
+  - lineNumber: 87
+    sourceText: '    ebay_ru_name: str = ""'
+    segments:
+      - text: ebay_ru_name
+        textmate: { scope: source.python }
+        span: [ 4, 16 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 16, 17 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 18, 21 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 22, 23 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 24, 25 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 25, 26 ]
+  - lineNumber: 88
+    sourceText: '    ebay_sandbox: bool = False'
+    segments:
+      - text: ebay_sandbox
+        textmate: { scope: source.python }
+        span: [ 4, 16 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 16, 17 ]
+      - text: bool
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 18, 22 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 23, 24 ]
+      - text: 'False'
+        textmate: { scope: constant.language.python, rest: [ source.python ] }
+        span: [ 25, 30 ]
+        semantic: { type: builtinConstant, modifiers: [ readonly, builtin ] }
+  - lineNumber: 90
+    sourceText: '    # eBay OAuth Refresh Tokens (per store)'
+    segments:
+      - text: '#'
+        textmate: { scope: punctuation.definition.comment.python, rest: [ source.python, comment.line.number-sign.python ] }
+        span: [ 4, 5 ]
+      - text: ' eBay OAuth Refresh Tokens (per store)'
+        textmate: { scope: comment.line.number-sign.python, rest: [ source.python ] }
+        span: [ 5, 43 ]
+  - lineNumber: 91
+    sourceText: '    ebay_refresh_token_mekong: str = ""'
+    segments:
+      - text: ebay_refresh_token_mekong
+        textmate: { scope: source.python }
+        span: [ 4, 29 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 29, 30 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 31, 34 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 35, 36 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 37, 38 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 38, 39 ]
+  - lineNumber: 92
+    sourceText: '    ebay_refresh_token_purchasing: str = ""'
+    segments:
+      - text: ebay_refresh_token_purchasing
+        textmate: { scope: source.python }
+        span: [ 4, 33 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 33, 34 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 35, 38 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 39, 40 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 41, 42 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 42, 43 ]
+  - lineNumber: 93
+    sourceText: '    ebay_refresh_token_usav: str = ""'
+    segments:
+      - text: ebay_refresh_token_usav
+        textmate: { scope: source.python }
+        span: [ 4, 27 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 27, 28 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 29, 32 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 33, 34 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 35, 36 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 36, 37 ]
+  - lineNumber: 94
+    sourceText: '    ebay_refresh_token_dragon: str = ""'
+    segments:
+      - text: ebay_refresh_token_dragon
+        textmate: { scope: source.python }
+        span: [ 4, 29 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 29, 30 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 31, 34 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 35, 36 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 37, 38 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 38, 39 ]
+  - lineNumber: 96
+    sourceText: '    # Ecwid Integration'
+    segments:
+      - text: '#'
+        textmate: { scope: punctuation.definition.comment.python, rest: [ source.python, comment.line.number-sign.python ] }
+        span: [ 4, 5 ]
+      - text: ' Ecwid Integration'
+        textmate: { scope: comment.line.number-sign.python, rest: [ source.python ] }
+        span: [ 5, 23 ]
+  - lineNumber: 97
+    sourceText: '    ecwid_store_id: str = ""'
+    segments:
+      - text: ecwid_store_id
+        textmate: { scope: source.python }
+        span: [ 4, 18 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 18, 19 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 20, 23 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 24, 25 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 26, 27 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 27, 28 ]
+  - lineNumber: 98
+    sourceText: '    ecwid_secret: str = ""'
+    segments:
+      - text: ecwid_secret
+        textmate: { scope: source.python }
+        span: [ 4, 16 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 16, 17 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 18, 21 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 22, 23 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 24, 25 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 25, 26 ]
+  - lineNumber: 99
+    sourceText: '    ecwid_api_base_url: str = "https://app.ecwid.com/api/v3"'
+    segments:
+      - text: ecwid_api_base_url
+        textmate: { scope: source.python }
+        span: [ 4, 22 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 22, 23 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 24, 27 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 28, 29 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 30, 31 ]
+      - text: https://app.ecwid.com/api/v3
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 31, 59 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 59, 60 ]
+  - lineNumber: 101
+    sourceText: '    # Walmart Integration'
+    segments:
+      - text: '#'
+        textmate: { scope: punctuation.definition.comment.python, rest: [ source.python, comment.line.number-sign.python ] }
+        span: [ 4, 5 ]
+      - text: ' Walmart Integration'
+        textmate: { scope: comment.line.number-sign.python, rest: [ source.python ] }
+        span: [ 5, 25 ]
+  - lineNumber: 102
+    sourceText: '    walmart_client_id: str = ""'
+    segments:
+      - text: walmart_client_id
+        textmate: { scope: source.python }
+        span: [ 4, 21 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 21, 22 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 23, 26 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 27, 28 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 29, 30 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 30, 31 ]
+  - lineNumber: 103
+    sourceText: '    walmart_client_secret: str = ""'
+    segments:
+      - text: walmart_client_secret
+        textmate: { scope: source.python }
+        span: [ 4, 25 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 25, 26 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 27, 30 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 31, 32 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 33, 34 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 34, 35 ]
+  - lineNumber: 104
+    sourceText: '    walmart_api_base_url: str = "https://marketplace.walmartapis.com"'
+    segments:
+      - text: walmart_api_base_url
+        textmate: { scope: source.python }
+        span: [ 4, 24 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 24, 25 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 26, 29 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 30, 31 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 32, 33 ]
+      - text: https://marketplace.walmartapis.com
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 33, 68 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 68, 69 ]
+  - lineNumber: 106
+    sourceText: '    # Product Images'
+    segments:
+      - text: '#'
+        textmate: { scope: punctuation.definition.comment.python, rest: [ source.python, comment.line.number-sign.python ] }
+        span: [ 4, 5 ]
+      - text: ' Product Images'
+        textmate: { scope: comment.line.number-sign.python, rest: [ source.python ] }
+        span: [ 5, 20 ]
+  - lineNumber: 107
+    sourceText: '    product_images_path: str = "/mnt/product_images"'
+    segments:
+      - text: product_images_path
+        textmate: { scope: source.python }
+        span: [ 4, 23 ]
+        semantic: { type: variable, modifiers: [ declaration, classMember ] }
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 23, 24 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python ] }
+        span: [ 25, 28 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 29, 30 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 31, 32 ]
+      - text: /mnt/product_images
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 32, 51 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 51, 52 ]
+  - lineNumber: 109
+    sourceText: '    @model_validator(mode="after")'
+    segments:
+      - text: '@'
+        textmate: { scope: punctuation.definition.decorator.python, rest: [ source.python, meta.function.decorator.python, entity.name.function.decorator.python ] }
+        span: [ 4, 5 ]
+      - text: model_validator
+        textmate: { scope: entity.name.function.decorator.python, rest: [ source.python, meta.function.decorator.python ] }
+        span: [ 5, 20 ]
+      - text: (
+        textmate: { scope: punctuation.definition.arguments.begin.python, rest: [ source.python, meta.function.decorator.python ] }
+        span: [ 20, 21 ]
+      - text: mode
+        textmate: { scope: variable.parameter.function-call.python, rest: [ source.python, meta.function.decorator.python, meta.function-call.arguments.python ] }
+        span: [ 21, 25 ]
+        semantic: { type: parameter, modifiers: [ keywordArgument ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python, meta.function.decorator.python, meta.function-call.arguments.python ] }
+        span: [ 25, 26 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, meta.function.decorator.python, meta.function-call.arguments.python, string.quoted.single.python ] }
+        span: [ 26, 27 ]
+      - text: after
+        textmate: { scope: string.quoted.single.python, rest: [ source.python, meta.function.decorator.python, meta.function-call.arguments.python ] }
+        span: [ 27, 32 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, meta.function.decorator.python, meta.function-call.arguments.python, string.quoted.single.python ] }
+        span: [ 32, 33 ]
+      - text: )
+        textmate: { scope: punctuation.definition.arguments.end.python, rest: [ source.python, meta.function.decorator.python ] }
+        span: [ 33, 34 ]
+  - lineNumber: 110
+    sourceText: '    def _apply_dev_overrides(self) -> "Settings":'
+    segments:
+      - text: def
+        textmate: { scope: storage.type.function.python, rest: [ source.python, meta.function.python ] }
+        span: [ 4, 7 ]
+      - text: _apply_dev_overrides
+        textmate: { scope: entity.name.function.python, rest: [ source.python, meta.function.python ] }
+        span: [ 8, 28 ]
+        semantic: { type: method, modifiers: [ declaration ] }
+      - text: (
+        textmate: { scope: punctuation.definition.parameters.begin.python, rest: [ source.python, meta.function.python, meta.function.parameters.python ] }
+        span: [ 28, 29 ]
+      - text: self
+        textmate: { scope: variable.parameter.function.language.special.self.python, rest: [ source.python, meta.function.python, meta.function.parameters.python, variable.parameter.function.language.python ] }
+        span: [ 29, 33 ]
+        semantic: { type: selfParameter, modifiers: [ declaration ] }
+      - text: )
+        textmate: { scope: punctuation.definition.parameters.end.python, rest: [ source.python, meta.function.python, meta.function.parameters.python ] }
+        span: [ 33, 34 ]
+      - text: ->
+        textmate: { scope: punctuation.separator.annotation.result.python, rest: [ source.python, meta.function.python ] }
+        span: [ 35, 37 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, meta.function.python, string.quoted.single.python ] }
+        span: [ 38, 39 ]
+      - text: Settings
+        textmate: { scope: string.quoted.single.python, rest: [ source.python, meta.function.python ] }
+        span: [ 39, 47 ]
+        semantic: { type: class, modifiers: [ typeHint ] }
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, meta.function.python, string.quoted.single.python ] }
+        span: [ 47, 48 ]
+      - text: ':'
+        textmate: { scope: punctuation.section.function.begin.python, rest: [ source.python, meta.function.python ] }
+        span: [ 48, 49 ]
+  - lineNumber: 111
+    sourceText: '        """'
+    segments:
+      - text: '"""'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.docstring.multi.python ] }
+        span: [ 8, 11 ]
+  - lineNumber: 112
+    sourceText: '        Apply deterministic development defaults that should not depend on'
+    segments:
+      - text: '        Apply deterministic development defaults that should not depend on'
+        textmate: { scope: string.quoted.docstring.multi.python, rest: [ source.python ] }
+        span: [ 0, 74 ]
+  - lineNumber: 113
+    sourceText: '        external environment file values.'
+    segments:
+      - text: '        external environment file values.'
+        textmate: { scope: string.quoted.docstring.multi.python, rest: [ source.python ] }
+        span: [ 0, 41 ]
+  - lineNumber: 114
+    sourceText: '        """'
+    segments:
+      - text: '"""'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.docstring.multi.python ] }
+        span: [ 8, 11 ]
+  - lineNumber: 115
+    sourceText: '        if self.environment == "development":'
+    segments:
+      - text: if
+        textmate: { scope: keyword.control.flow.python, rest: [ source.python ] }
+        span: [ 8, 10 ]
+      - text: self
+        textmate: { scope: variable.language.special.self.python, rest: [ source.python ] }
+        span: [ 11, 15 ]
+        semantic: { type: selfParameter }
+      - text: .
+        textmate: { scope: punctuation.separator.period.python, rest: [ source.python, meta.member.access.python ] }
+        span: [ 15, 16 ]
+      - text: environment
+        textmate: { scope: meta.attribute.python, rest: [ source.python, meta.member.access.python ] }
+        span: [ 16, 27 ]
+        semantic: { type: variable, modifiers: [ classMember ] }
+      - text: ==
+        textmate: { scope: keyword.operator.comparison.python, rest: [ source.python ] }
+        span: [ 28, 30 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 31, 32 ]
+      - text: development
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 32, 43 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 43, 44 ]
+      - text: ':'
+        textmate: { scope: punctuation.separator.colon.python, rest: [ source.python ] }
+        span: [ 44, 45 ]
+  - lineNumber: 116
+    sourceText: '            self.seatalk_redirect_uri = "http://localhost:3636/auth/seatalk/callback"'
+    segments:
+      - text: self
+        textmate: { scope: variable.language.special.self.python, rest: [ source.python ] }
+        span: [ 12, 16 ]
+        semantic: { type: selfParameter }
+      - text: .
+        textmate: { scope: punctuation.separator.period.python, rest: [ source.python, meta.member.access.python ] }
+        span: [ 16, 17 ]
+      - text: seatalk_redirect_uri
+        textmate: { scope: meta.attribute.python, rest: [ source.python, meta.member.access.python ] }
+        span: [ 17, 37 ]
+        semantic: { type: variable, modifiers: [ classMember ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 38, 39 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 40, 41 ]
+      - text: http://localhost:3636/auth/seatalk/callback
+        textmate: { scope: string.quoted.single.python, rest: [ source.python ] }
+        span: [ 41, 84 ]
+      - text: '"'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.single.python ] }
+        span: [ 84, 85 ]
+  - lineNumber: 117
+    sourceText: '        return self'
+    segments:
+      - text: return
+        textmate: { scope: keyword.control.flow.python, rest: [ source.python ] }
+        span: [ 8, 14 ]
+      - text: self
+        textmate: { scope: variable.language.special.self.python, rest: [ source.python ] }
+        span: [ 15, 19 ]
+        semantic: { type: selfParameter }
+  - lineNumber: 119
+    sourceText: '    @computed_field'
+    segments:
+      - text: '@'
+        textmate: { scope: punctuation.definition.decorator.python, rest: [ source.python, meta.function.decorator.python, entity.name.function.decorator.python ] }
+        span: [ 4, 5 ]
+      - text: computed_field
+        textmate: { scope: entity.name.function.decorator.python, rest: [ source.python, meta.function.decorator.python ] }
+        span: [ 5, 19 ]
+  - lineNumber: 120
+    sourceText: '    @property'
+    segments:
+      - text: '@'
+        textmate: { scope: punctuation.definition.decorator.python, rest: [ source.python, meta.function.decorator.python, entity.name.function.decorator.python ] }
+        span: [ 4, 5 ]
+      - text: property
+        textmate: { scope: support.type.python, rest: [ source.python, meta.function.decorator.python ] }
+        span: [ 5, 13 ]
+        semantic: { type: class, modifiers: [ decorator, builtin ] }
+  - lineNumber: 121
+    sourceText: '    def database_url(self) -> str:'
+    segments:
+      - text: def
+        textmate: { scope: storage.type.function.python, rest: [ source.python, meta.function.python ] }
+        span: [ 4, 7 ]
+      - text: database_url
+        textmate: { scope: entity.name.function.python, rest: [ source.python, meta.function.python ] }
+        span: [ 8, 20 ]
+        semantic: { type: property, modifiers: [ declaration ] }
+      - text: (
+        textmate: { scope: punctuation.definition.parameters.begin.python, rest: [ source.python, meta.function.python, meta.function.parameters.python ] }
+        span: [ 20, 21 ]
+      - text: self
+        textmate: { scope: variable.parameter.function.language.special.self.python, rest: [ source.python, meta.function.python, meta.function.parameters.python, variable.parameter.function.language.python ] }
+        span: [ 21, 25 ]
+        semantic: { type: selfParameter, modifiers: [ declaration ] }
+      - text: )
+        textmate: { scope: punctuation.definition.parameters.end.python, rest: [ source.python, meta.function.python, meta.function.parameters.python ] }
+        span: [ 25, 26 ]
+      - text: ->
+        textmate: { scope: punctuation.separator.annotation.result.python, rest: [ source.python, meta.function.python ] }
+        span: [ 27, 29 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python, meta.function.python ] }
+        span: [ 30, 33 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: ':'
+        textmate: { scope: punctuation.section.function.begin.python, rest: [ source.python, meta.function.python ] }
+        span: [ 33, 34 ]
+  - lineNumber: 122
+    sourceText: '        """Construct the database URL from components."""'
+    segments:
+      - text: '"""'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.docstring.multi.python ] }
+        span: [ 8, 11 ]
+      - text: Construct the database URL from components.
+        textmate: { scope: string.quoted.docstring.multi.python, rest: [ source.python ] }
+        span: [ 11, 54 ]
+      - text: '"""'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.docstring.multi.python ] }
+        span: [ 54, 57 ]
+  - lineNumber: 123
+    sourceText: '        return f"postgresql+asyncpg://{self.db_user}:{self.db_pass}@{self.db_host}:{self.db_port}/{self.db_name}"'
+    segments:
+      - text: return
+        textmate: { scope: keyword.control.flow.python, rest: [ source.python ] }
+        span: [ 8, 14 ]
+      - text: f
+        textmate: { scope: storage.type.string.python, rest: [ source.python, meta.fstring.python, string.interpolated.python, string.quoted.single.python ] }
+        span: [ 15, 16 ]
+      - text: '"'
+        textmate: { scope: string.quoted.single.python, rest: [ source.python, meta.fstring.python, punctuation.definition.string.begin.python, string.interpolated.python ] }
+        span: [ 16, 17 ]
+      - text: postgresql+asyncpg://
+        textmate: { scope: string.quoted.single.python, rest: [ source.python, meta.fstring.python, string.interpolated.python ] }
+        span: [ 17, 38 ]
+      - text: '{'
+        textmate: { scope: constant.character.format.placeholder.other.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 38, 39 ]
+      - text: self
+        textmate: { scope: variable.language.special.self.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 39, 43 ]
+        semantic: { type: selfParameter }
+      - text: .
+        textmate: { scope: punctuation.separator.period.python, rest: [ source.python, meta.fstring.python, meta.member.access.python ] }
+        span: [ 43, 44 ]
+      - text: db_user
+        textmate: { scope: meta.attribute.python, rest: [ source.python, meta.fstring.python, meta.member.access.python ] }
+        span: [ 44, 51 ]
+        semantic: { type: variable, modifiers: [ classMember ] }
+      - text: '}'
+        textmate: { scope: constant.character.format.placeholder.other.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 51, 52 ]
+      - text: ':'
+        textmate: { scope: string.quoted.single.python, rest: [ source.python, meta.fstring.python, string.interpolated.python ] }
+        span: [ 52, 53 ]
+      - text: '{'
+        textmate: { scope: constant.character.format.placeholder.other.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 53, 54 ]
+      - text: self
+        textmate: { scope: variable.language.special.self.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 54, 58 ]
+        semantic: { type: selfParameter }
+      - text: .
+        textmate: { scope: punctuation.separator.period.python, rest: [ source.python, meta.fstring.python, meta.member.access.python ] }
+        span: [ 58, 59 ]
+      - text: db_pass
+        textmate: { scope: meta.attribute.python, rest: [ source.python, meta.fstring.python, meta.member.access.python ] }
+        span: [ 59, 66 ]
+        semantic: { type: variable, modifiers: [ classMember ] }
+      - text: '}'
+        textmate: { scope: constant.character.format.placeholder.other.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 66, 67 ]
+      - text: '@'
+        textmate: { scope: string.quoted.single.python, rest: [ source.python, meta.fstring.python, string.interpolated.python ] }
+        span: [ 67, 68 ]
+      - text: '{'
+        textmate: { scope: constant.character.format.placeholder.other.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 68, 69 ]
+      - text: self
+        textmate: { scope: variable.language.special.self.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 69, 73 ]
+        semantic: { type: selfParameter }
+      - text: .
+        textmate: { scope: punctuation.separator.period.python, rest: [ source.python, meta.fstring.python, meta.member.access.python ] }
+        span: [ 73, 74 ]
+      - text: db_host
+        textmate: { scope: meta.attribute.python, rest: [ source.python, meta.fstring.python, meta.member.access.python ] }
+        span: [ 74, 81 ]
+        semantic: { type: variable, modifiers: [ classMember ] }
+      - text: '}'
+        textmate: { scope: constant.character.format.placeholder.other.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 81, 82 ]
+      - text: ':'
+        textmate: { scope: string.quoted.single.python, rest: [ source.python, meta.fstring.python, string.interpolated.python ] }
+        span: [ 82, 83 ]
+      - text: '{'
+        textmate: { scope: constant.character.format.placeholder.other.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 83, 84 ]
+      - text: self
+        textmate: { scope: variable.language.special.self.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 84, 88 ]
+        semantic: { type: selfParameter }
+      - text: .
+        textmate: { scope: punctuation.separator.period.python, rest: [ source.python, meta.fstring.python, meta.member.access.python ] }
+        span: [ 88, 89 ]
+      - text: db_port
+        textmate: { scope: meta.attribute.python, rest: [ source.python, meta.fstring.python, meta.member.access.python ] }
+        span: [ 89, 96 ]
+        semantic: { type: variable, modifiers: [ classMember ] }
+      - text: '}'
+        textmate: { scope: constant.character.format.placeholder.other.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 96, 97 ]
+      - text: /
+        textmate: { scope: string.quoted.single.python, rest: [ source.python, meta.fstring.python, string.interpolated.python ] }
+        span: [ 97, 98 ]
+      - text: '{'
+        textmate: { scope: constant.character.format.placeholder.other.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 98, 99 ]
+      - text: self
+        textmate: { scope: variable.language.special.self.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 99, 103 ]
+        semantic: { type: selfParameter }
+      - text: .
+        textmate: { scope: punctuation.separator.period.python, rest: [ source.python, meta.fstring.python, meta.member.access.python ] }
+        span: [ 103, 104 ]
+      - text: db_name
+        textmate: { scope: meta.attribute.python, rest: [ source.python, meta.fstring.python, meta.member.access.python ] }
+        span: [ 104, 111 ]
+        semantic: { type: variable, modifiers: [ classMember ] }
+      - text: '}'
+        textmate: { scope: constant.character.format.placeholder.other.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 111, 112 ]
+      - text: '"'
+        textmate: { scope: string.quoted.single.python, rest: [ source.python, meta.fstring.python, punctuation.definition.string.end.python, string.interpolated.python ] }
+        span: [ 112, 113 ]
+  - lineNumber: 125
+    sourceText: '    @computed_field'
+    segments:
+      - text: '@'
+        textmate: { scope: punctuation.definition.decorator.python, rest: [ source.python, meta.function.decorator.python, entity.name.function.decorator.python ] }
+        span: [ 4, 5 ]
+      - text: computed_field
+        textmate: { scope: entity.name.function.decorator.python, rest: [ source.python, meta.function.decorator.python ] }
+        span: [ 5, 19 ]
+  - lineNumber: 126
+    sourceText: '    @property'
+    segments:
+      - text: '@'
+        textmate: { scope: punctuation.definition.decorator.python, rest: [ source.python, meta.function.decorator.python, entity.name.function.decorator.python ] }
+        span: [ 4, 5 ]
+      - text: property
+        textmate: { scope: support.type.python, rest: [ source.python, meta.function.decorator.python ] }
+        span: [ 5, 13 ]
+        semantic: { type: class, modifiers: [ decorator, builtin ] }
+  - lineNumber: 127
+    sourceText: '    def database_url_sync(self) -> str:'
+    segments:
+      - text: def
+        textmate: { scope: storage.type.function.python, rest: [ source.python, meta.function.python ] }
+        span: [ 4, 7 ]
+      - text: database_url_sync
+        textmate: { scope: entity.name.function.python, rest: [ source.python, meta.function.python ] }
+        span: [ 8, 25 ]
+        semantic: { type: property, modifiers: [ declaration ] }
+      - text: (
+        textmate: { scope: punctuation.definition.parameters.begin.python, rest: [ source.python, meta.function.python, meta.function.parameters.python ] }
+        span: [ 25, 26 ]
+      - text: self
+        textmate: { scope: variable.parameter.function.language.special.self.python, rest: [ source.python, meta.function.python, meta.function.parameters.python, variable.parameter.function.language.python ] }
+        span: [ 26, 30 ]
+        semantic: { type: selfParameter, modifiers: [ declaration ] }
+      - text: )
+        textmate: { scope: punctuation.definition.parameters.end.python, rest: [ source.python, meta.function.python, meta.function.parameters.python ] }
+        span: [ 30, 31 ]
+      - text: ->
+        textmate: { scope: punctuation.separator.annotation.result.python, rest: [ source.python, meta.function.python ] }
+        span: [ 32, 34 ]
+      - text: str
+        textmate: { scope: support.type.python, rest: [ source.python, meta.function.python ] }
+        span: [ 35, 38 ]
+        semantic: { type: class, modifiers: [ typeHint, builtin ] }
+      - text: ':'
+        textmate: { scope: punctuation.section.function.begin.python, rest: [ source.python, meta.function.python ] }
+        span: [ 38, 39 ]
+  - lineNumber: 128
+    sourceText: '        """Sync database URL for Alembic migrations."""'
+    segments:
+      - text: '"""'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.docstring.multi.python ] }
+        span: [ 8, 11 ]
+      - text: Sync database URL for Alembic migrations.
+        textmate: { scope: string.quoted.docstring.multi.python, rest: [ source.python ] }
+        span: [ 11, 52 ]
+      - text: '"""'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.docstring.multi.python ] }
+        span: [ 52, 55 ]
+  - lineNumber: 129
+    sourceText: '        return f"postgresql+psycopg2://{self.db_user}:{self.db_pass}@{self.db_host}:{self.db_port}/{self.db_name}"'
+    segments:
+      - text: return
+        textmate: { scope: keyword.control.flow.python, rest: [ source.python ] }
+        span: [ 8, 14 ]
+      - text: f
+        textmate: { scope: storage.type.string.python, rest: [ source.python, meta.fstring.python, string.interpolated.python, string.quoted.single.python ] }
+        span: [ 15, 16 ]
+      - text: '"'
+        textmate: { scope: string.quoted.single.python, rest: [ source.python, meta.fstring.python, punctuation.definition.string.begin.python, string.interpolated.python ] }
+        span: [ 16, 17 ]
+      - text: postgresql+psycopg2://
+        textmate: { scope: string.quoted.single.python, rest: [ source.python, meta.fstring.python, string.interpolated.python ] }
+        span: [ 17, 39 ]
+      - text: '{'
+        textmate: { scope: constant.character.format.placeholder.other.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 39, 40 ]
+      - text: self
+        textmate: { scope: variable.language.special.self.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 40, 44 ]
+        semantic: { type: selfParameter }
+      - text: .
+        textmate: { scope: punctuation.separator.period.python, rest: [ source.python, meta.fstring.python, meta.member.access.python ] }
+        span: [ 44, 45 ]
+      - text: db_user
+        textmate: { scope: meta.attribute.python, rest: [ source.python, meta.fstring.python, meta.member.access.python ] }
+        span: [ 45, 52 ]
+        semantic: { type: variable, modifiers: [ classMember ] }
+      - text: '}'
+        textmate: { scope: constant.character.format.placeholder.other.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 52, 53 ]
+      - text: ':'
+        textmate: { scope: string.quoted.single.python, rest: [ source.python, meta.fstring.python, string.interpolated.python ] }
+        span: [ 53, 54 ]
+      - text: '{'
+        textmate: { scope: constant.character.format.placeholder.other.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 54, 55 ]
+      - text: self
+        textmate: { scope: variable.language.special.self.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 55, 59 ]
+        semantic: { type: selfParameter }
+      - text: .
+        textmate: { scope: punctuation.separator.period.python, rest: [ source.python, meta.fstring.python, meta.member.access.python ] }
+        span: [ 59, 60 ]
+      - text: db_pass
+        textmate: { scope: meta.attribute.python, rest: [ source.python, meta.fstring.python, meta.member.access.python ] }
+        span: [ 60, 67 ]
+        semantic: { type: variable, modifiers: [ classMember ] }
+      - text: '}'
+        textmate: { scope: constant.character.format.placeholder.other.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 67, 68 ]
+      - text: '@'
+        textmate: { scope: string.quoted.single.python, rest: [ source.python, meta.fstring.python, string.interpolated.python ] }
+        span: [ 68, 69 ]
+      - text: '{'
+        textmate: { scope: constant.character.format.placeholder.other.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 69, 70 ]
+      - text: self
+        textmate: { scope: variable.language.special.self.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 70, 74 ]
+        semantic: { type: selfParameter }
+      - text: .
+        textmate: { scope: punctuation.separator.period.python, rest: [ source.python, meta.fstring.python, meta.member.access.python ] }
+        span: [ 74, 75 ]
+      - text: db_host
+        textmate: { scope: meta.attribute.python, rest: [ source.python, meta.fstring.python, meta.member.access.python ] }
+        span: [ 75, 82 ]
+        semantic: { type: variable, modifiers: [ classMember ] }
+      - text: '}'
+        textmate: { scope: constant.character.format.placeholder.other.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 82, 83 ]
+      - text: ':'
+        textmate: { scope: string.quoted.single.python, rest: [ source.python, meta.fstring.python, string.interpolated.python ] }
+        span: [ 83, 84 ]
+      - text: '{'
+        textmate: { scope: constant.character.format.placeholder.other.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 84, 85 ]
+      - text: self
+        textmate: { scope: variable.language.special.self.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 85, 89 ]
+        semantic: { type: selfParameter }
+      - text: .
+        textmate: { scope: punctuation.separator.period.python, rest: [ source.python, meta.fstring.python, meta.member.access.python ] }
+        span: [ 89, 90 ]
+      - text: db_port
+        textmate: { scope: meta.attribute.python, rest: [ source.python, meta.fstring.python, meta.member.access.python ] }
+        span: [ 90, 97 ]
+        semantic: { type: variable, modifiers: [ classMember ] }
+      - text: '}'
+        textmate: { scope: constant.character.format.placeholder.other.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 97, 98 ]
+      - text: /
+        textmate: { scope: string.quoted.single.python, rest: [ source.python, meta.fstring.python, string.interpolated.python ] }
+        span: [ 98, 99 ]
+      - text: '{'
+        textmate: { scope: constant.character.format.placeholder.other.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 99, 100 ]
+      - text: self
+        textmate: { scope: variable.language.special.self.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 100, 104 ]
+        semantic: { type: selfParameter }
+      - text: .
+        textmate: { scope: punctuation.separator.period.python, rest: [ source.python, meta.fstring.python, meta.member.access.python ] }
+        span: [ 104, 105 ]
+      - text: db_name
+        textmate: { scope: meta.attribute.python, rest: [ source.python, meta.fstring.python, meta.member.access.python ] }
+        span: [ 105, 112 ]
+        semantic: { type: variable, modifiers: [ classMember ] }
+      - text: '}'
+        textmate: { scope: constant.character.format.placeholder.other.python, rest: [ source.python, meta.fstring.python ] }
+        span: [ 112, 113 ]
+      - text: '"'
+        textmate: { scope: string.quoted.single.python, rest: [ source.python, meta.fstring.python, punctuation.definition.string.end.python, string.interpolated.python ] }
+        span: [ 113, 114 ]
+  - lineNumber: 132
+    sourceText: '@lru_cache'
+    segments:
+      - text: '@'
+        textmate: { scope: punctuation.definition.decorator.python, rest: [ source.python, meta.function.decorator.python, entity.name.function.decorator.python ] }
+        span: [ 0, 1 ]
+      - text: lru_cache
+        textmate: { scope: entity.name.function.decorator.python, rest: [ source.python, meta.function.decorator.python ] }
+        span: [ 1, 10 ]
+        semantic: { type: function, modifiers: [ decorator ] }
+  - lineNumber: 133
+    sourceText: 'def get_settings() -> Settings:'
+    segments:
+      - text: def
+        textmate: { scope: storage.type.function.python, rest: [ source.python, meta.function.python ] }
+        span: [ 0, 3 ]
+      - text: get_settings
+        textmate: { scope: entity.name.function.python, rest: [ source.python, meta.function.python ] }
+        span: [ 4, 16 ]
+        semantic: { type: function, modifiers: [ declaration ] }
+      - text: (
+        textmate: { scope: punctuation.definition.parameters.begin.python, rest: [ source.python, meta.function.python, meta.function.parameters.python ] }
+        span: [ 16, 17 ]
+      - text: )
+        textmate: { scope: punctuation.definition.parameters.end.python, rest: [ source.python, meta.function.python, meta.function.parameters.python ] }
+        span: [ 17, 18 ]
+      - text: ->
+        textmate: { scope: punctuation.separator.annotation.result.python, rest: [ source.python, meta.function.python ] }
+        span: [ 19, 21 ]
+      - text: Settings
+        textmate: { scope: meta.function.python, rest: [ source.python ] }
+        span: [ 22, 30 ]
+        semantic: { type: class, modifiers: [ typeHint ] }
+      - text: ':'
+        textmate: { scope: punctuation.section.function.begin.python, rest: [ source.python, meta.function.python ] }
+        span: [ 30, 31 ]
+  - lineNumber: 134
+    sourceText: '    """Get cached settings instance."""'
+    segments:
+      - text: '"""'
+        textmate: { scope: punctuation.definition.string.begin.python, rest: [ source.python, string.quoted.docstring.multi.python ] }
+        span: [ 4, 7 ]
+      - text: Get cached settings instance.
+        textmate: { scope: string.quoted.docstring.multi.python, rest: [ source.python ] }
+        span: [ 7, 36 ]
+      - text: '"""'
+        textmate: { scope: punctuation.definition.string.end.python, rest: [ source.python, string.quoted.docstring.multi.python ] }
+        span: [ 36, 39 ]
+  - lineNumber: 135
+    sourceText: '    return Settings()'
+    segments:
+      - text: return
+        textmate: { scope: keyword.control.flow.python, rest: [ source.python ] }
+        span: [ 4, 10 ]
+      - text: Settings
+        textmate: { scope: meta.function-call.generic.python, rest: [ source.python, meta.function-call.python ] }
+        span: [ 11, 19 ]
+        semantic: { type: class }
+      - text: (
+        textmate: { scope: punctuation.definition.arguments.begin.python, rest: [ source.python, meta.function-call.python ] }
+        span: [ 19, 20 ]
+      - text: )
+        textmate: { scope: punctuation.definition.arguments.end.python, rest: [ source.python, meta.function-call.python ] }
+        span: [ 20, 21 ]
+  - lineNumber: 138
+    sourceText: settings = get_settings()
+    segments:
+      - text: settings
+        textmate: { scope: source.python }
+        span: [ 0, 8 ]
+        semantic: { type: variable, modifiers: [ declaration, callable ] }
+      - text: =
+        textmate: { scope: keyword.operator.assignment.python, rest: [ source.python ] }
+        span: [ 9, 10 ]
+      - text: get_settings
+        textmate: { scope: meta.function-call.generic.python, rest: [ source.python, meta.function-call.python ] }
+        span: [ 11, 23 ]
+        semantic: { type: function }
+      - text: (
+        textmate: { scope: punctuation.definition.arguments.begin.python, rest: [ source.python, meta.function-call.python ] }
+        span: [ 23, 24 ]
+      - text: )
+        textmate: { scope: punctuation.definition.arguments.end.python, rest: [ source.python, meta.function-call.python ] }
+        span: [ 24, 25 ]

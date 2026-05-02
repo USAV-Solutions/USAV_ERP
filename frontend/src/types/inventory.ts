@@ -175,12 +175,17 @@ export type PlatformSyncStatus = 'PENDING' | 'SYNCED' | 'ERROR'
 
 export interface PlatformListing {
   id: number
-  variant_id: number
+  variant_id: number | null
   platform: Platform
   external_ref_id?: string
+  merchant_sku?: string
   listed_name?: string
   listed_description?: string
   listing_price?: number
+  listing_quantity?: number
+  listing_type?: string
+  listing_condition?: string
+  upc?: string
   sync_status: PlatformSyncStatus
   last_synced_at?: string
   sync_error_message?: string
@@ -193,14 +198,24 @@ export interface PlatformListingCreate {
   variant_id: number
   platform: Platform
   external_ref_id?: string
+  merchant_sku?: string
   listed_name?: string
   listed_description?: string
   listing_price?: number
+  listing_quantity?: number
+  listing_type?: string
+  listing_condition?: string
+  upc?: string
 }
 
 export interface PlatformListingUpdate {
   external_ref_id?: string
+  merchant_sku?: string
   listed_name?: string
   listed_description?: string
   listing_price?: number
+  listing_quantity?: number
+  listing_type?: string
+  listing_condition?: string
+  upc?: string
 }

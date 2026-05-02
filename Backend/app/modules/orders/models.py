@@ -50,6 +50,7 @@ class OrderPlatform(str, enum.Enum):
     EBAY_USAV = "EBAY_USAV"
     EBAY_DRAGON = "EBAY_DRAGON"
     ECWID = "ECWID"
+    SHOPIFY = "SHOPIFY"
     WALMART = "WALMART"
     ZOHO = "ZOHO"
     MANUAL = "MANUAL"
@@ -219,25 +220,6 @@ class Order(Base, ZohoSyncMixin, TimestampMixin):
         comment="FK to the normalised Customer record.",
     )
 
-    # ---- Customer ----
-    customer_name: Mapped[Optional[str]] = mapped_column(
-        String(200), nullable=True, comment="Customer full name.",
-    )
-    customer_email: Mapped[Optional[str]] = mapped_column(
-        String(200), nullable=True, comment="Customer email address.",
-    )
-
-    # ---- Shipping Address ----
-    shipping_address_line1: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    shipping_address_line2: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    shipping_address_line3: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    shipping_city: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    shipping_state: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    shipping_postal_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
-    shipping_country: Mapped[Optional[str]] = mapped_column(
-        String(100), nullable=True, server_default="US",
-    )
-
     # ---- Financial ----
     subtotal_amount: Mapped[Decimal] = mapped_column(
         Numeric(12, 2), nullable=False, server_default="0",
@@ -324,6 +306,43 @@ class Order(Base, ZohoSyncMixin, TimestampMixin):
             f"<Order(id={self.id}, platform={self.platform.value}, "
             f"ext_id='{self.external_order_id}')>"
         )
+
+    @property
+    def customer_name(self) -> Optional[str]:
+        return self.customer.name if self.customer else None
+
+    @property
+    def customer_email(self) -> Optional[str]:
+        return self.customer.email if self.customer else None
+
+    @property
+    def shipping_address_line1(self) -> Optional[str]:
+        return self.customer.address_line1 if self.customer else None
+
+    @property
+    def shipping_address_line2(self) -> Optional[str]:
+        return self.customer.address_line2 if self.customer else None
+
+    @property
+    def shipping_address_line3(self) -> Optional[str]:
+        # Customer model stores two address lines only.
+        return None
+
+    @property
+    def shipping_city(self) -> Optional[str]:
+        return self.customer.city if self.customer else None
+
+    @property
+    def shipping_state(self) -> Optional[str]:
+        return self.customer.state if self.customer else None
+
+    @property
+    def shipping_postal_code(self) -> Optional[str]:
+        return self.customer.postal_code if self.customer else None
+
+    @property
+    def shipping_country(self) -> Optional[str]:
+        return self.customer.country if self.customer else None
 
 
 # ============================================================================

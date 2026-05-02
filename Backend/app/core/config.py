@@ -66,6 +66,8 @@ class Settings(BaseSettings):
     zoho_po_cf_is_stationery_id: str = ""
     zoho_contact_cf_source_id: str = ""
     zoho_contact_cf_source_api_name: str = "cf_source"
+    zoho_contact_tax_exemption_id: str = "5623409000000217703" #TBU
+    zoho_contact_tax_authority_id: str = "5623409000000217709" #TBU
     zoho_po_stationery_purchase_account_id: str = ""
     zoho_po_stationery_location_id: str = ""
     zoho_po_stationery_delivery_address: str = ""

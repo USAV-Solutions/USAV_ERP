@@ -17,6 +17,10 @@ class PlatformListingBase(BaseModel):
     listed_name: Optional[str] = Field(None, max_length=500, description="Product name on this platform")
     listed_description: Optional[str] = Field(None, description="Product description on this platform")
     listing_price: Optional[float] = Field(None, ge=0, description="Price on this platform")
+    listing_quantity: Optional[int] = Field(None, ge=0, description="Quantity/stock shown on this platform")
+    listing_type: Optional[str] = Field(None, max_length=100, description="Platform listing type/classification")
+    listing_condition: Optional[str] = Field(None, max_length=100, description="Condition label for this platform")
+    upc: Optional[str] = Field(None, max_length=64, description="UPC/GTIN used on this platform listing")
     platform_metadata: Optional[dict[str, Any]] = Field(
         None,
         description=(
@@ -39,6 +43,10 @@ class PlatformListingUpdate(BaseModel):
     listed_name: Optional[str] = Field(None, max_length=500)
     listed_description: Optional[str] = Field(None)
     listing_price: Optional[float] = Field(None, ge=0)
+    listing_quantity: Optional[int] = Field(None, ge=0)
+    listing_type: Optional[str] = Field(None, max_length=100)
+    listing_condition: Optional[str] = Field(None, max_length=100)
+    upc: Optional[str] = Field(None, max_length=64)
     platform_metadata: Optional[dict[str, Any]] = None
 
 

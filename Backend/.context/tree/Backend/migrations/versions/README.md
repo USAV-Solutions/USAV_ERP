@@ -15,6 +15,9 @@ Concrete Alembic revision files; source of truth for schema transitions.
 - Migration `0024` introduces nullable `platform_listing.variant_id` plus partial unique index behavior on `(platform, external_ref_id)`; guard against duplicate non-null refs before applying in production.
 - Backfill migrations that bridge old/new matching columns (for example, `order_item.platform_listing_id`) should compare platform enums via `::text` when enum types differ across tables.
 - Migration `0026` adds `orders.shipping_address_line3`; keep adapter ingest fields and `OrderDetail` schema in lockstep with this column.
+- Migration `0027` adds `platform_listing.listing_quantity`, `listing_type`, `listing_condition`, and `upc`; API schemas and listing UI must ship together or fields will appear missing/inert.
+- Migration `0028` drops duplicated customer/shipping snapshot columns from `orders`; it first backfills missing `customer` fields from latest order snapshots per customer.
+- Migration `0029` extends `order_platform_enum` with `SHOPIFY`; update backend/frontend enum lists in lockstep to avoid serialization/filter errors.
 
 ## Child Folders
 - (No child folders)

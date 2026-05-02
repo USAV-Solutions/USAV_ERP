@@ -760,6 +760,26 @@ class PlatformListing(Base, TimestampMixin):
         nullable=True,
         comment="The specific price for this platform.",
     )
+    listing_quantity: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Channel-specific listing quantity/stock shown on platform.",
+    )
+    listing_type: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Platform-specific listing type/classification label.",
+    )
+    listing_condition: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Platform-specific condition label/value as raw string.",
+    )
+    upc: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        nullable=True,
+        comment="UPC/GTIN used by marketplace listing.",
+    )
     sync_status: Mapped[PlatformSyncStatus] = mapped_column(
         Enum(PlatformSyncStatus, name="platform_sync_status_enum"),
         nullable=False,

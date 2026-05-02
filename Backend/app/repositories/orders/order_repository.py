@@ -11,7 +11,7 @@ from sqlalchemy import select, func, and_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.entities import ZohoSyncStatus
+from app.models.entities import Customer, ZohoSyncStatus
 from app.modules.orders.models import (
     Order,
     OrderItem,
@@ -104,7 +104,7 @@ class OrderRepository(BaseRepository[Order]):
             pattern = f"%{search}%"
             stmt = stmt.where(
                 Order.external_order_id.ilike(pattern)
-                | Order.customer_name.ilike(pattern)
+                | Order.customer.has(Customer.name.ilike(pattern))
             )
 
         # Total count (before pagination)
