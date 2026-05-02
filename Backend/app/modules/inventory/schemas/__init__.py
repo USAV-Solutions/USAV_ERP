@@ -35,6 +35,15 @@ from app.modules.inventory.schemas.inventory import (
     InventorySummary,
 )
 from app.modules.inventory.schemas.listings import (
+    EbayCategorySuggestion,
+    EbayCategorySuggestionsRequest,
+    EbayCategorySuggestionsResponse,
+    EbayListingDraftRequest,
+    EbayListingDraftResponse,
+    EbayPolicyProfiles,
+    EbayPublishRequest,
+    EbayPublishResponse,
+    EbaySpecificInput,
     PlatformListingCreate,
     PlatformListingResponse,
     PlatformListingUpdate,
@@ -106,6 +115,15 @@ __all__ = [
     "PlatformListingCreate",
     "PlatformListingResponse",
     "PlatformListingUpdate",
+    "EbayCategorySuggestion",
+    "EbayCategorySuggestionsRequest",
+    "EbayCategorySuggestionsResponse",
+    "EbayListingDraftRequest",
+    "EbayListingDraftResponse",
+    "EbayPolicyProfiles",
+    "EbayPublishRequest",
+    "EbayPublishResponse",
+    "EbaySpecificInput",
     # Lookups
     "BrandCreate",
     "BrandResponse",
@@ -139,4 +157,3 @@ __all__ = [
     "ZohoSingleSyncRequest",
     "ZohoSyncProgressResponse",
 ]
-

@@ -61,3 +61,95 @@ class PlatformListingResponse(PlatformListingBase):
     updated_at: datetime
     
     model_config = ConfigDict(from_attributes=True)
+
+
+class EbayPolicyProfiles(BaseModel):
+    payment_profile_id: str
+    return_profile_id: str
+    shipping_profile_id: str
+
+
+class EbayCategorySuggestion(BaseModel):
+    category_id: str
+    category_name: str
+    category_tree_node_level: int | None = None
+    category_tree_tokens: list[str] = Field(default_factory=list)
+
+
+class EbaySpecificInput(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    value: str = Field(..., min_length=1, max_length=255)
+
+
+class EbayListingDraftRequest(BaseModel):
+    platform: Platform
+    variant_id: int
+
+
+class EbayListingDraftResponse(BaseModel):
+    platform: Platform
+    variant_id: int
+    title: str
+    description: str
+    sku: str
+    quantity: int
+    price: float
+    condition_text: str | None = None
+    condition_id: int | None = None
+    upc: str | None = None
+    brand: str | None = None
+    color: str | None = None
+    marketplace_id: str
+    country: str
+    currency: str
+    location: str
+    postal_code: str
+    dispatch_time_max: int
+    category_id: str | None = None
+    picture_urls: list[str] = Field(default_factory=list)
+    dimensions: dict[str, float | None]
+    shipping_package_details: dict[str, str] | None = None
+    seller_profiles: EbayPolicyProfiles
+
+
+class EbayCategorySuggestionsRequest(BaseModel):
+    platform: Platform
+    variant_id: int
+    query_override: str | None = None
+    title: str | None = None
+    brand: str | None = None
+    color: str | None = None
+    condition_text: str | None = None
+
+
+class EbayCategorySuggestionsResponse(BaseModel):
+    marketplace_id: str
+    category_tree_id: str
+    query: str
+    suggestions: list[EbayCategorySuggestion] = Field(default_factory=list)
+
+
+class EbayPublishRequest(BaseModel):
+    platform: Platform
+    variant_id: int
+    title: str = Field(..., min_length=1, max_length=255)
+    description: str = Field(..., min_length=1)
+    category_id: str = Field(..., min_length=1, max_length=64)
+    price: float = Field(..., gt=0)
+    quantity: int = Field(..., ge=1)
+    picture_urls: list[str] = Field(..., min_length=1)
+    condition_text: str = Field(..., min_length=1, max_length=100)
+    upc: str | None = Field(None, max_length=64)
+    brand: str | None = Field(None, max_length=255)
+    mpn: str | None = Field(None, max_length=255)
+    color: str | None = Field(None, max_length=100)
+    dimensions: dict[str, float | None] = Field(default_factory=dict)
+    extra_specifics: list[EbaySpecificInput] = Field(default_factory=list)
+
+
+class EbayPublishResponse(BaseModel):
+    listing_id: int
+    platform: Platform
+    variant_id: int
+    item_id: str
+    sync_status: PlatformSyncStatus
