@@ -1944,22 +1944,8 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
         ]
 
     # Shipping address
-    ship_line1 = customer.address_line1
-    ship_line2 = customer.address_line2
-    street2 = " ".join([part.strip() for part in [ship_line2] if part and part.strip()])
-    addr_fields = {
-        "attention": customer.name,
-        "address": ship_line1,
-        "street2": street2 or None,
-        "city": customer.city,
-        "state": customer.state,
-        "zip": customer.postal_code,
-        "country": customer.country,
-        "phone": customer.phone,
-    }
-    shipping = {k: v for k, v in addr_fields.items() if v}
-    if shipping:
-        payload["shipping_address"] = _sanitize_shipping_address(shipping)
+    # Shipping address is already on the linked Zoho contact (customer_id).
+    # Avoid sending per-order shipping_address to prevent Zoho code 15 failures.
 
     shipping_charge = float(order.shipping_amount or 0)
     payload["shipping_charge"] = shipping_charge

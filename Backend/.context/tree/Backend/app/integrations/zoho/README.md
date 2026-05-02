@@ -19,8 +19,7 @@ Zoho client/sync engine used for outbound and inbound synchronization flows.
 - Customer outbound payload now forces tax preference to tax-exempt (`is_taxable=false`) and, when configured, includes `tax_exemption_id`/`tax_authority_id`. It also sends a primary `contact_persons` entry to keep Zoho UI email/phone fields populated for business contacts.
 - Sales-order outbound payload uses `salesorder_number` (from `external_order_number` fallback `external_order_id`) and reserves `reference_number` for tracking (`Order.tracking_number`). Legacy duplicate detection still falls back to matching `reference_number == external_order_id` for older rows.
 - Sales-order source is sent through SO custom fields (`api_name=cf_source`) using SO-specific dropdown mapping: `Ebay_Dragon`, `Ebay_Mekong`, `Ebay_USAV`, `ECWID`, `Amazon`, `Walmart`, fallback `Other`.
-- Zoho can return code `15` for sales-order `shipping_address` length even after normal trimming; outbound sync now retries once without `shipping_address` when this exact validation fires so order sync can proceed.
-- Sales-order outbound customer/address values are sourced from linked `Customer` records (not duplicated order snapshot columns). If customer address data is incomplete, Zoho shipping payload will also be incomplete.
+- Zoho can return code `15` for sales-order `shipping_address` length; outbound sales-order payload now omits `shipping_address` and relies on `customer_id` contact addresses instead.
 - Sales-order outbound payload now sends `shipping_charge` from `Order.shipping_amount` for all sources. For `ECWID_API` orders, each line is forced to `tax_percentage=0` and order tax is sent as `adjustment` with `adjustment_description="Tax adjustment"`.
 
 ## Child Folders
