@@ -1,7 +1,7 @@
 ﻿# Backend\app\models
 
 ## What This Folder Does
-SQLAlchemy ORM entities and enums for inventory, orders, purchasing, users, and customer sync metadata, including listing-centric order matching links.
+SQLAlchemy ORM entities and enums for inventory, orders, purchasing, users, and customer sync metadata, including listing-centric order matching links and editable platform listing detail fields (quantity/type/condition/upc).
 
 ## Typical Contents
 - Python modules, schemas, or support assets scoped to this domain.
@@ -15,6 +15,7 @@ SQLAlchemy ORM entities and enums for inventory, orders, purchasing, users, and 
 - Changing constraints/index names without migration compatibility checks.
 - `PlatformListing.variant_id` is nullable after migration `0024`; unresolved listings are valid and must not be treated as data corruption.
 - `PlatformListing.external_ref_id` is now unique per platform only when non-null; do not repurpose `merchant_sku` as canonical listing identity.
+- `PlatformListing.listing_condition` is a free-form string by design (platform-native values differ); do not coerce it into internal condition enums.
 
 ## Child Folders
 - (No child folders)
