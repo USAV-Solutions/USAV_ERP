@@ -1589,6 +1589,33 @@ async def sync_po_outbound(
                 po,
                 existing_notes=remote_notes,
             )
+            local_line_total = sum(
+                _to_float_money(getattr(item, "quantity", 0)) * _to_float_money(getattr(item, "unit_price", 0))
+                for item in (po.items or [])
+            )
+            local_adjustment_total = (
+                _to_float_money(getattr(po, "tax_amount", 0))
+                + _to_float_money(getattr(po, "shipping_amount", 0))
+                + _to_float_money(getattr(po, "handling_amount", 0))
+            )
+            payload_line_total = sum(
+                _to_float_money(line.get("quantity", 0)) * _to_float_money(line.get("rate", 0))
+                for line in (payload.get("line_items") or [])
+                if isinstance(line, dict)
+            )
+            payload_adjustment = _to_float_money(payload.get("adjustment", 0))
+            logger.info(
+                "sync_po_outbound: payload debug | po_id=%s po_number=%s local_line_total=%.2f local_adjustment=%.2f local_total_amount=%.2f payload_line_total=%.2f payload_adjustment=%.2f payload_total_estimate=%.2f payload=%s",
+                po_id,
+                po.po_number,
+                local_line_total,
+                local_adjustment_total,
+                _to_float_money(getattr(po, "total_amount", 0)),
+                payload_line_total,
+                payload_adjustment,
+                payload_line_total + payload_adjustment,
+                json.dumps(payload, default=str, sort_keys=True),
+            )
             new_hash = generate_payload_hash(payload)
 
             if new_hash == po.zoho_last_sync_hash:
