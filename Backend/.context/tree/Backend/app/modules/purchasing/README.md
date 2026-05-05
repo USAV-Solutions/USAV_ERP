@@ -16,6 +16,7 @@ Purchase order domain: import pipelines, vendor workflows, receiving, matching, 
 - Mixing dependency styles in route signatures; prefer `Annotated[..., Depends(...)]` and `Annotated[..., Query(...)]` for maintainable, consistent FastAPI typing.
 - In Python signatures, non-default dependency params must come before optional/default query params to avoid `SyntaxError: parameter without a default follows parameter with a default`.
 - Purchase-order deletes are blocked when any line item is already `RECEIVED`; frontend should surface API detail text for this guardrail.
+- Purchase item `unit_price` now supports precision beyond 2 decimals; keep UI/editor inputs and import paths from coercing prices to cent precision when quantity-split totals require fractional cents.
 
 ## Child Folders
 - `schemas/`

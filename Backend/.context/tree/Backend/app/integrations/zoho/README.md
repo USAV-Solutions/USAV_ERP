@@ -21,6 +21,7 @@ Zoho client/sync engine used for outbound and inbound synchronization flows.
 - Sales-order source is sent through SO custom fields (`api_name=cf_source`) using SO-specific dropdown mapping: `Ebay_Dragon`, `Ebay_Mekong`, `Ebay_USAV`, `ECWID`, `Amazon`, `Walmart`, fallback `Other`.
 - Zoho can return code `15` for sales-order `shipping_address` length; outbound sales-order payload now omits `shipping_address` and relies on `customer_id` contact addresses instead.
 - Sales-order outbound payload now sends `shipping_charge` from `Order.shipping_amount` for all sources. For `ECWID_API` orders, each line is forced to `tax_percentage=0` and order tax is sent as `adjustment` with `adjustment_description="Tax adjustment"`.
+- Purchase-order outbound line `rate` should be derived from `PurchaseOrderItem.total_price / quantity` when available (not only `unit_price`) to avoid cent drift on multi-qty lines (example: `26.99 / 5 = 5.398`).
 
 ## Child Folders
 - (No child folders)
