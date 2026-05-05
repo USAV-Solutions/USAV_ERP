@@ -11,6 +11,7 @@ Sales orders domain: ingestion/import, listing-centric matching, filtering, cust
 - Forgetting to align platform/source enums across model, schema, migration, and frontend types.
 - Adding filters in route layer but not implementing repository query logic.
 - Bypassing OrderSyncService ingestion path and breaking dedupe/matching consistency.
+- Order ingestion is now true upsert by `(platform, external_order_id)`: existing headers/line items are refreshed from inbound payloads (new items inserted), so duplicates are no longer pure no-op skips.
 - Customer upsert during ingestion is merge-based (fills missing phone/company/address fields) and source is overwrite-based (latest channel replaces prior `Customer.source`).
 - Platforms that failed with credential/auth bootstrap errors (for example token acquisition failures) are auto-reset from `ERROR` to `IDLE` on the next sync attempt; this avoids permanent lockout but still records the current attempt's real failure if credentials remain invalid.
 - `SHIPSTATION_CUSTOMER_CSV` is intentionally customer-only (no order rows created); keep frontend messaging aligned with `customers_created/customers_updated` counters.

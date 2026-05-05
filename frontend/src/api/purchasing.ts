@@ -62,6 +62,8 @@ export async function listPurchaseOrdersPaged(params: {
   itemMatchStatus?: 'matched' | 'unmatched'
   zohoSyncStatus?: 'PENDING' | 'SYNCED' | 'ERROR' | 'DIRTY'
   source?: string
+  totalAmount?: number
+  totalAmountRange?: number
   sortBy?: 'order_date' | 'po_number' | 'total_amount' | 'created_at'
   sortDir?: 'asc' | 'desc'
   orderDateFrom?: string
@@ -75,6 +77,12 @@ export async function listPurchaseOrdersPaged(params: {
   if (params.itemMatchStatus) query.set('item_match_status', params.itemMatchStatus)
   if (params.zohoSyncStatus) query.set('zoho_sync_status', params.zohoSyncStatus)
   if (params.source) query.set('source', params.source)
+  if (params.totalAmount !== undefined && Number.isFinite(params.totalAmount)) {
+    query.set('total_amount', String(params.totalAmount))
+  }
+  if (params.totalAmountRange !== undefined && Number.isFinite(params.totalAmountRange)) {
+    query.set('total_amount_range', String(params.totalAmountRange))
+  }
   if (params.sortBy) query.set('sort_by', params.sortBy)
   if (params.sortDir) query.set('sort_dir', params.sortDir)
   if (params.orderDateFrom) query.set('order_date_from', params.orderDateFrom)

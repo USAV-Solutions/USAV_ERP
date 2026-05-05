@@ -403,6 +403,8 @@ async def list_purchase_orders(
     item_match_status: Annotated[str | None, Query(pattern="^(matched|unmatched)$")] = None,
     zoho_sync_status: Annotated[ZohoSyncStatus | None, Query()] = None,
     source: Annotated[str | None, Query()] = None,
+    total_amount: Annotated[Decimal | None, Query(ge=0)] = None,
+    total_amount_range: Annotated[Decimal, Query(ge=0)] = Decimal("0"),
     sort_by: Annotated[str, Query(pattern="^(order_date|po_number|total_amount|created_at)$")] = "order_date",
     sort_dir: Annotated[str, Query(pattern="^(asc|desc)$")] = "desc",
     repo: PurchaseOrderRepository = Depends(get_purchase_order_repo),
@@ -417,6 +419,8 @@ async def list_purchase_orders(
         item_match_status=item_match_status,
         zoho_sync_status=zoho_sync_status,
         source=source,
+        total_amount=total_amount,
+        total_amount_range=total_amount_range,
         sort_by=sort_by,
         sort_dir=sort_dir,
     )
