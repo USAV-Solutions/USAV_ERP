@@ -8,10 +8,12 @@ from datetime import datetime, date, timedelta, timezone
 from typing import Any, List, Optional
 import logging
 import socket
+from html import escape
 from urllib.parse import urlparse
 import xml.etree.ElementTree as ET
 import httpx
 
+from app.core.config import settings
 from app.integrations.base import (
     BasePlatformClient,
     ExternalOrder,
@@ -773,7 +775,261 @@ class EbayClient(BasePlatformClient):
         
         # TODO: Implement actual API call
         return False
-    
+
+    def _store_key(self) -> str:
+        return self.store_name.lower()
+
+    def get_store_listing_defaults(self) -> dict[str, Any]:
+        store = self._store_key()
+        return {
+            "marketplace_id": getattr(settings, f"ebay_marketplace_id_{store}", "EBAY_US"),
+            "country": getattr(settings, f"ebay_country_{store}", "US"),
+            "currency": getattr(settings, f"ebay_currency_{store}", "USD"),
+            "location": getattr(settings, f"ebay_location_{store}", ""),
+            "postal_code": getattr(settings, f"ebay_postal_code_{store}", ""),
+            "dispatch_time_max": getattr(settings, f"ebay_dispatch_time_max_{store}", 1),
+            "payment_profile_id": getattr(settings, f"ebay_payment_profile_id_{store}", ""),
+            "return_profile_id": getattr(settings, f"ebay_return_profile_id_{store}", ""),
+            "shipping_profile_id": getattr(settings, f"ebay_shipping_profile_id_{store}", ""),
+        }
+
+    @staticmethod
+    def to_condition_id(raw_condition: str | None) -> int | None:
+        text = (raw_condition or "").strip().upper()
+        if not text:
+            return None
+        mapping = {
+            "N": 1000,
+            "NEW": 1000,
+            "U": 3000,
+            "USED": 3000,
+            "R": 2000,
+            "REFURBISHED": 2000,
+            "FOR_PARTS": 7000,
+            "FOR PARTS": 7000,
+            "PARTS": 7000,
+            "NOT_WORKING": 7000,
+            "NOT WORKING": 7000,
+        }
+        return mapping.get(text)
+
+    @staticmethod
+    def to_item_specifics(
+        *,
+        brand: str | None,
+        mpn: str | None,
+        color: str | None,
+        upc: str | None,
+        extra_specifics: list[dict[str, str]] | None = None,
+    ) -> list[dict[str, list[str]]]:
+        specifics: list[dict[str, list[str]]] = []
+        if brand:
+            specifics.append({"Name": "Brand", "Value": [brand]})
+        if mpn:
+            specifics.append({"Name": "MPN", "Value": [mpn]})
+        if color:
+            specifics.append({"Name": "Color", "Value": [color]})
+        if upc:
+            specifics.append({"Name": "UPC", "Value": [upc]})
+        if extra_specifics:
+            for item in extra_specifics:
+                name = (item.get("name") or "").strip()
+                value = (item.get("value") or "").strip()
+                if not name or not value:
+                    continue
+                specifics.append({"Name": name, "Value": [value]})
+        return specifics
+
+    @staticmethod
+    def to_shipping_package_details(
+        *,
+        weight_lbs: float | None,
+        length_in: float | None,
+        width_in: float | None,
+        height_in: float | None,
+    ) -> dict[str, str] | None:
+        if (
+            weight_lbs is None
+            or length_in is None
+            or width_in is None
+            or height_in is None
+        ):
+            return None
+        total_oz = max(weight_lbs * 16.0, 0.0)
+        weight_major = int(total_oz // 16)
+        weight_minor = int(round(total_oz - (weight_major * 16)))
+        return {
+            "WeightMajor": str(weight_major),
+            "WeightMinor": str(max(weight_minor, 0)),
+            "PackageLength": f"{length_in:.2f}",
+            "PackageWidth": f"{width_in:.2f}",
+            "PackageDepth": f"{height_in:.2f}",
+        }
+
+    @staticmethod
+    def _to_cdata(text: str) -> str:
+        return "<![CDATA[" + text.replace("]]>", "]]]]><![CDATA[>") + "]]>"
+
+    def build_add_fixed_price_item_xml(self, payload: dict[str, Any]) -> str:
+        def text(value: Any) -> str:
+            return escape(str(value if value is not None else ""))
+
+        item_specifics_xml = ""
+        for spec in payload.get("item_specifics", []):
+            values_xml = "".join(f"<Value>{text(v)}</Value>" for v in spec.get("Value", []))
+            item_specifics_xml += (
+                "<NameValueList>"
+                f"<Name>{text(spec.get('Name', ''))}</Name>"
+                f"{values_xml}"
+                "</NameValueList>"
+            )
+
+        picture_urls_xml = "".join(
+            f"<PictureURL>{text(url)}</PictureURL>"
+            for url in payload.get("picture_urls", [])
+        )
+
+        package_xml = ""
+        package = payload.get("shipping_package_details") or {}
+        if package:
+            package_xml = (
+                "<ShippingPackageDetails>"
+                f"<WeightMajor>{text(package.get('WeightMajor'))}</WeightMajor>"
+                f"<WeightMinor>{text(package.get('WeightMinor'))}</WeightMinor>"
+                f"<PackageLength>{text(package.get('PackageLength'))}</PackageLength>"
+                f"<PackageWidth>{text(package.get('PackageWidth'))}</PackageWidth>"
+                f"<PackageDepth>{text(package.get('PackageDepth'))}</PackageDepth>"
+                "</ShippingPackageDetails>"
+            )
+
+        return f"""<?xml version="1.0" encoding="utf-8"?>
+<AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ErrorLanguage>en_US</ErrorLanguage>
+  <WarningLevel>High</WarningLevel>
+  <Item>
+    <Title>{text(payload["title"])}</Title>
+    <Description>{self._to_cdata(payload["description"])}</Description>
+    <PrimaryCategory>
+      <CategoryID>{text(payload["category_id"])}</CategoryID>
+    </PrimaryCategory>
+    <StartPrice>{text(payload["price"])}</StartPrice>
+    <ConditionID>{text(payload["condition_id"])}</ConditionID>
+    <Country>{text(payload["country"])}</Country>
+    <Currency>{text(payload["currency"])}</Currency>
+    <DispatchTimeMax>{text(payload["dispatch_time_max"])}</DispatchTimeMax>
+    <ListingDuration>GTC</ListingDuration>
+    <ListingType>FixedPriceItem</ListingType>
+    <Location>{text(payload["location"])}</Location>
+    <PostalCode>{text(payload["postal_code"])}</PostalCode>
+    <Quantity>{text(payload["quantity"])}</Quantity>
+    <SKU>{text(payload["sku"])}</SKU>
+    <PictureDetails>{picture_urls_xml}</PictureDetails>
+    <ItemSpecifics>{item_specifics_xml}</ItemSpecifics>
+    {package_xml}
+    <SellerProfiles>
+      <SellerPaymentProfile>
+        <PaymentProfileID>{text(payload["payment_profile_id"])}</PaymentProfileID>
+      </SellerPaymentProfile>
+      <SellerReturnProfile>
+        <ReturnProfileID>{text(payload["return_profile_id"])}</ReturnProfileID>
+      </SellerReturnProfile>
+      <SellerShippingProfile>
+        <ShippingProfileID>{text(payload["shipping_profile_id"])}</ShippingProfileID>
+      </SellerShippingProfile>
+    </SellerProfiles>
+  </Item>
+</AddFixedPriceItemRequest>"""
+
+    async def _rest_get(self, path: str, *, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        access_token = await self._get_access_token()
+        if not access_token:
+            raise RuntimeError(f"eBay {self.store_name} unable to obtain access token")
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        transport = httpx.AsyncHTTPTransport(retries=_TRANSPORT_RETRIES)
+        async with httpx.AsyncClient(transport=transport, timeout=30.0) as client:
+            response = await client.get(f"{self.base_url}{path}", headers=headers, params=params or {})
+            response.raise_for_status()
+        return response.json()
+
+    async def get_default_category_tree_id(self, marketplace_id: str) -> str:
+        payload = await self._rest_get(
+            "/commerce/taxonomy/v1/get_default_category_tree_id",
+            params={"marketplace_id": marketplace_id},
+        )
+        category_tree_id = payload.get("categoryTreeId")
+        if not category_tree_id:
+            raise RuntimeError("eBay taxonomy did not return categoryTreeId")
+        return str(category_tree_id)
+
+    async def get_category_suggestions(self, category_tree_id: str, query_text: str) -> list[dict[str, Any]]:
+        payload = await self._rest_get(
+            f"/commerce/taxonomy/v1/category_tree/{category_tree_id}/get_category_suggestions",
+            params={"q": query_text},
+        )
+        return payload.get("categorySuggestions", [])
+
+    async def get_fulfillment_policies(self, marketplace_id: str) -> list[dict[str, Any]]:
+        payload = await self._rest_get(
+            "/sell/account/v1/fulfillment_policy",
+            params={"marketplace_id": marketplace_id},
+        )
+        return payload.get("fulfillmentPolicies", [])
+
+    async def _post_trading_xml(self, call_name: str, request_xml: str) -> ET.Element:
+        access_token = await self._get_access_token()
+        if not access_token:
+            raise RuntimeError(f"eBay {self.store_name} unable to obtain access token")
+        headers = {
+            "Content-Type": "text/xml",
+            "X-EBAY-API-CALL-NAME": call_name,
+            "X-EBAY-API-COMPATIBILITY-LEVEL": "1231",
+            "X-EBAY-API-SITEID": "0",
+            "X-EBAY-API-IAF-TOKEN": access_token,
+        }
+        transport = httpx.AsyncHTTPTransport(retries=_TRANSPORT_RETRIES)
+        async with httpx.AsyncClient(transport=transport, timeout=30.0) as client:
+            response = await client.post(
+                f"{self.base_url}/ws/api.dll",
+                headers=headers,
+                content=request_xml,
+            )
+            response.raise_for_status()
+        root = ET.fromstring(response.text)
+        ack = self._xml_text(root, "./eb:Ack")
+        if ack and ack.lower() in {"failure", "partialfailure"}:
+            short_message = self._xml_text(root, "./eb:Errors/eb:LongMessage") or self._xml_text(
+                root, "./eb:Errors/eb:ShortMessage"
+            )
+            raise RuntimeError(short_message or f"eBay {call_name} failed")
+        return root
+
+    async def verify_add_fixed_price_item(self, payload: dict[str, Any]) -> dict[str, Any]:
+        xml_payload = self.build_add_fixed_price_item_xml(payload).replace(
+            "<AddFixedPriceItemRequest", "<VerifyAddFixedPriceItemRequest", 1
+        ).replace("</AddFixedPriceItemRequest>", "</VerifyAddFixedPriceItemRequest>", 1)
+        root = await self._post_trading_xml("VerifyAddFixedPriceItem", xml_payload)
+        fees = []
+        for fee_node in root.findall(".//eb:Fees/eb:Fee", _TRADING_NS):
+            fees.append(
+                {
+                    "name": self._xml_text(fee_node, "./eb:Name"),
+                    "fee": self._xml_text(fee_node, "./eb:Fee"),
+                }
+            )
+        return {"fees": fees}
+
+    async def add_fixed_price_item(self, payload: dict[str, Any]) -> dict[str, Any]:
+        xml_payload = self.build_add_fixed_price_item_xml(payload)
+        root = await self._post_trading_xml("AddFixedPriceItem", xml_payload)
+        item_id = self._xml_text(root, "./eb:ItemID")
+        if not item_id:
+            raise RuntimeError("eBay AddFixedPriceItem succeeded without ItemID")
+        return {"item_id": item_id}
+
     def _convert_order(self, ebay_order: dict) -> ExternalOrder:
         """Convert eBay order JSON to ExternalOrder."""
         # Extract shipping address

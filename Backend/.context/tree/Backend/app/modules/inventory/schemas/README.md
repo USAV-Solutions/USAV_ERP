@@ -12,6 +12,8 @@ Inventory domain request/response schema contracts.
 - Making cross-layer changes here but forgetting migration/frontend alignment.
 - `PlatformListing` schema now exposes `merchant_sku` and `platform_metadata` for channel publish workflows (eBay/Ecwid/Amazon). Keep `platform_metadata` shape stable at the API boundary when frontend publishing forms depend on specific keys.
 - `PlatformListing` now also carries explicit editable fields `listing_quantity`, `listing_type`, `listing_condition`, and `upc`; keep validation bounds consistent with ORM/migration types.
+- eBay listing workflow now has dedicated draft/suggestion/publish schemas; keep publish payload strict for required fields (`category_id`, `picture_urls`, `condition_text`, and dimensions package input).
+- Category suggestions return normalized `category_id` + breadcrumb tokens; preserve this shape so frontend selection can be injected directly into `PrimaryCategory.CategoryID`.
 
 ## Child Folders
 - (No child folders)

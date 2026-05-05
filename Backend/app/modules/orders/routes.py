@@ -21,6 +21,7 @@ SKU Resolution
 import csv
 import io
 import logging
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Annotated, Optional
 
@@ -91,6 +92,8 @@ _PLATFORM_TO_SOURCE: dict[str, str] = {
     "SHOPIFY": "SHOPIFY_API",
     "WALMART": "WALMART_API",
 }
+
+_UNMATCHED_EXCEPTIONS_CSV_PATH = Path(__file__).resolve().parents[3] / "misc" / "unmatched_exceptions.csv"
 
 
 # ============================================================================
@@ -204,16 +207,18 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
     grouped: dict[str, dict] = {}
     seen = 0
     skipped = 0
+    fieldnames = list(reader.fieldnames or [])
+    raw_rows: list[dict[str, str]] = []
 
-    def _pick(*keys: str) -> str:
+    def _pick(row_data: dict[str, str], *keys: str) -> str:
         for key in keys:
-            value = (row.get(key) or "").strip()
+            value = (row_data.get(key) or "").strip()
             if value:
                 return value
         return ""
 
-    def _as_float(*keys: str, default: float = 0.0) -> float:
-        value = _pick(*keys)
+    def _as_float(row_data: dict[str, str], *keys: str, default: float = 0.0) -> float:
+        value = _pick(row_data, *keys)
         if not value:
             return default
         try:
@@ -221,10 +226,24 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
         except ValueError:
             return default
 
-    def _as_int(*keys: str, default: int = 1) -> int:
-        value = _pick(*keys)
+    def _as_int(row_data: dict[str, str], *keys: str, default: int = 1) -> int:
+        value = _pick(row_data, *keys)
         if not value:
             return default
+        try:
+            parsed = int(float(value))
+            return parsed if parsed > 0 else default
+        except ValueError:
+            return default
+
+    def _normalized(value: str) -> str:
+        return (value or "").strip().lower()
+
+    def _address_postal_key(row_data: dict[str, str]) -> tuple[str, str]:
+        return (
+            _normalized(_pick(row_data, "Ship To - Address 1", "shipping_address_line1")),
+            _normalized(_pick(row_data, "Ship To - Postal Code", "shipping_postal_code")),
+        )
 
     def _detect_platform(row_data: dict[str, str]) -> str:
         platform_raw = _coalesce(
@@ -257,44 +276,75 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
         if "EBAY" in text:
             return "EBAY_USAV"
         return "MANUAL"
-        try:
-            parsed = int(value)
-            return parsed if parsed > 0 else default
-        except ValueError:
-            return default
+
+    def _extract_tracking_number(row_data: dict[str, str]) -> str:
+        return _pick(row_data, "tracking_number", "trackingNumber", "Tracking Number", "tracking")
 
     for row in reader:
         seen += 1
-        ext_order_id = _pick("external_order_id", "order_id", "Order - CustomerID", "Order - Number")
-        item_name = _pick("item_name", "title", "Item Name", "Product Name")
+        raw_rows.append({key: (value or "").strip() for key, value in row.items() if key})
 
-        # ShipStation order export rows usually don't include per-item columns.
-        # Keep those rows importable by creating a synthetic line item.
-        quantity = _as_int("quantity", "Count - Number of Items", default=1)
-        subtotal_amount = _as_float("subtotal_amount", "subtotal", "Amount - Order Subtotal", default=0.0)
-        total_amount = _as_float("total_amount", "total", "Amount - Order Total", default=0.0)
-        item_total = subtotal_amount if subtotal_amount > 0 else total_amount
-        if not item_name:
-            item_name = "Imported order line"
+    is_shipstation_order_csv = "Order - Number" in fieldnames and "Item - Name" in fieldnames
+    valid_rows: list[dict[str, str]] = []
 
+    if is_shipstation_order_csv:
+        manual_blank_item_rows: list[dict[str, str]] = []
+        for row in raw_rows:
+            item_name = _pick(row, "Item - Name")
+            if item_name:
+                valid_rows.append(row)
+            else:
+                manual_blank_item_rows.append(row)
+
+        valid_address_postal = {
+            _address_postal_key(row)
+            for row in valid_rows
+            if any(_address_postal_key(row))
+        }
+        valid_bill_to_names = {
+            _normalized(_pick(row, "Bill To - Name", "customer_name"))
+            for row in valid_rows
+            if _pick(row, "Bill To - Name", "customer_name")
+        }
+
+        unmatched_exceptions: list[dict[str, str]] = []
+        for row in manual_blank_item_rows:
+            matches_parent = False
+            addr_postal = _address_postal_key(row)
+            if any(addr_postal) and addr_postal in valid_address_postal:
+                matches_parent = True
+            elif _normalized(_pick(row, "Bill To - Name", "customer_name")) in valid_bill_to_names:
+                matches_parent = True
+
+            skipped += 1
+            if not matches_parent:
+                unmatched_exceptions.append(row)
+
+        _write_unmatched_shipstation_exceptions(fieldnames, unmatched_exceptions)
+    else:
+        valid_rows = raw_rows
+
+    for row in valid_rows:
+        order_number = _pick(row, "Order - Number", "external_order_number", "order_number")
+        ext_order_id = order_number or _pick(row, "external_order_id", "order_id", "Order - CustomerID")
         if not ext_order_id:
             skipped += 1
             continue
 
-        external_item_id = _pick("external_item_id", "Order - Number") or None
-        external_sku = _pick("external_sku", "sku", "SKU") or None
-        unit_price_text = _pick("unit_price")
-        total_price_text = _pick("total_price")
-
-        try:
-            unit_price = float(unit_price_text) if unit_price_text else (item_total / quantity if quantity > 0 else 0.0)
-            total_price = float(total_price_text) if total_price_text else item_total
-        except ValueError:
-            skipped += 1
-            continue
+        quantity = _as_int(row, "Item - Qty", "quantity", "Count - Number of Items", default=1)
+        unit_price = _as_float(row, "Item - Price", "unit_price", default=0.0)
+        total_price = _as_float(row, "total_price", default=0.0)
+        if unit_price == 0.0 or total_price == 0.0:
+            subtotal_amount = _as_float(row, "subtotal_amount", "subtotal", "Amount - Order Subtotal", default=0.0)
+            total_amount = _as_float(row, "total_amount", "total", "Amount - Order Total", default=0.0)
+            item_total_fallback = subtotal_amount if subtotal_amount > 0 else total_amount
+            if unit_price == 0.0:
+                unit_price = item_total_fallback / quantity if quantity > 0 else 0.0
+            if total_price == 0.0:
+                total_price = item_total_fallback if item_total_fallback > 0 else (unit_price * quantity)
 
         ordered_at = None
-        ordered_at_raw = _pick("ordered_at", "Date - Order Date")
+        ordered_at_raw = _pick(row, "ordered_at", "Date - Order Date")
         if ordered_at_raw:
             try:
                 ordered_at = datetime.fromisoformat(ordered_at_raw.replace("Z", "+00:00"))
@@ -305,45 +355,60 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
                     ordered_at = None
 
         platform_name = _detect_platform(row)
-        group_key = f"{platform_name}::{ext_order_id}"
+        group_key = order_number or ext_order_id
         order_entry = grouped.setdefault(
             group_key,
             {
                 "platform_name": platform_name,
                 "platform_order_id": ext_order_id,
-                "platform_order_number": _pick("external_order_number", "order_number", "Order - Number") or None,
-                "customer_name": _pick("customer_name", "Bill To - Name", "Ship To - Name") or None,
-                "customer_email": _pick("customer_email", "Customer Email") or None,
-                "ship_address_line1": _pick("shipping_address_line1", "Ship To - Address 1") or None,
-                "ship_address_line2": _pick("shipping_address_line2", "Ship To - Address 2") or None,
-                "ship_address_line3": _pick("shipping_address_line3", "Ship To - Address 3") or None,
-                "ship_city": _pick("shipping_city", "Ship To - City") or None,
-                "ship_state": _pick("shipping_state", "Ship To - State") or None,
-                "ship_postal_code": _pick("shipping_postal_code", "Ship To - Postal Code") or None,
-                "ship_country": _pick("shipping_country", "Ship To - Country") or "US",
-                "subtotal": subtotal_amount,
-                "tax": _as_float("tax_amount", "tax", "Amount - Order Tax", default=0.0),
-                "shipping": _as_float("shipping_amount", "shipping", "Amount - Order Shipping", default=0.0),
-                "total": total_amount,
-                "currency": _pick("currency") or "USD",
+                "platform_order_number": order_number or None,
+                "customer_name": _pick(row, "customer_name", "Bill To - Name", "Ship To - Name") or None,
+                "customer_email": _pick(row, "customer_email", "Customer Email") or None,
+                "ship_address_line1": _pick(row, "shipping_address_line1", "Ship To - Address 1") or None,
+                "ship_address_line2": _pick(row, "shipping_address_line2", "Ship To - Address 2") or None,
+                "ship_address_line3": _pick(row, "shipping_address_line3", "Ship To - Address 3") or None,
+                "ship_city": _pick(row, "shipping_city", "Ship To - City") or None,
+                "ship_state": _pick(row, "shipping_state", "Ship To - State") or None,
+                "ship_postal_code": _pick(row, "shipping_postal_code", "Ship To - Postal Code") or None,
+                "ship_country": _pick(row, "shipping_country", "Ship To - Country") or "US",
+                "subtotal": _as_float(row, "subtotal_amount", "subtotal", "Amount - Order Subtotal", default=0.0),
+                "tax": _as_float(row, "tax_amount", "tax", "Amount - Order Tax", default=0.0),
+                "shipping": _as_float(row, "shipping_amount", "Amount - Shipping Cost", "shipping", "Amount - Order Shipping", default=0.0),
+                "total": _as_float(row, "total_amount", "total", "Amount - Order Total", default=0.0),
+                "currency": _pick(row, "currency") or "USD",
                 "ordered_at": ordered_at,
                 "items": [],
-                "tracking_number": _pick("tracking_number", "trackingNumber", "Tracking Number") or None,
+                "tracking_number": None,
                 "raw_data": {
                     "import_source": "CSV_GENERIC",
                     "platform_name": platform_name,
-                    "source": _pick("source", "Source", "order_source", "Order Source") or None,
-                    "tracking_number": _pick("tracking_number", "trackingNumber", "Tracking Number") or None,
+                    "source": _pick(row, "source", "Source", "order_source", "Order Source") or None,
+                    "tracking_number": None,
                 },
+                "_tracking_parts": [],
             },
         )
+        tracking_number = _extract_tracking_number(row)
+        if tracking_number and tracking_number not in order_entry["_tracking_parts"]:
+            order_entry["_tracking_parts"].append(tracking_number)
+        if len(order_entry["_tracking_parts"]) == 1:
+            merged_tracking = order_entry["_tracking_parts"][0]
+        elif len(order_entry["_tracking_parts"]) > 1:
+            merged_tracking = " + ".join(order_entry["_tracking_parts"])
+        else:
+            merged_tracking = None
+        order_entry["tracking_number"] = merged_tracking
+        order_entry["raw_data"]["tracking_number"] = merged_tracking
 
         order_entry["items"].append(
             {
-                "platform_item_id": external_item_id,
-                "platform_sku": external_sku,
+                "platform_item_id": _pick(row, "external_item_id", "Order - Number") or None,
+                "platform_sku": _pick(row, "Item - SKU", "external_sku", "sku", "SKU") or None,
                 "asin": (row.get("external_asin") or "").strip() or None,
-                "title": item_name,
+                "title": (
+                    _pick(row, "Item - Name", "item_name", "title", "Item Name", "Product Name")
+                    or "Imported order line"
+                ),
                 "quantity": quantity,
                 "unit_price": unit_price,
                 "total_price": total_price,
@@ -351,7 +416,24 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
             }
         )
 
+    for order_entry in grouped.values():
+        order_entry.pop("_tracking_parts", None)
+
     return list(grouped.values()), seen, skipped
+
+
+def _write_unmatched_shipstation_exceptions(fieldnames: list[str], rows: list[dict[str, str]]) -> None:
+    if not fieldnames:
+        return
+    try:
+        _UNMATCHED_EXCEPTIONS_CSV_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with _UNMATCHED_EXCEPTIONS_CSV_PATH.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            for row in rows:
+                writer.writerow({name: row.get(name, "") for name in fieldnames})
+    except Exception:
+        logger.exception("Failed to write ShipStation unmatched exceptions CSV")
 
 
 def _coalesce(value: Optional[str]) -> Optional[str]:

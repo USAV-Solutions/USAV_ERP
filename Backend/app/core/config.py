@@ -92,6 +92,33 @@ class Settings(BaseSettings):
     ebay_refresh_token_purchasing: str = ""
     ebay_refresh_token_usav: str = ""
     ebay_refresh_token_dragon: str = ""
+    ebay_marketplace_id_mekong: str = "EBAY_US"
+    ebay_marketplace_id_usav: str = "EBAY_US"
+    ebay_marketplace_id_dragon: str = "EBAY_US"
+    ebay_country_mekong: str = "US"
+    ebay_country_usav: str = "US"
+    ebay_country_dragon: str = "US"
+    ebay_currency_mekong: str = "USD"
+    ebay_currency_usav: str = "USD"
+    ebay_currency_dragon: str = "USD"
+    ebay_location_mekong: str = ""
+    ebay_location_usav: str = ""
+    ebay_location_dragon: str = ""
+    ebay_postal_code_mekong: str = ""
+    ebay_postal_code_usav: str = ""
+    ebay_postal_code_dragon: str = ""
+    ebay_dispatch_time_max_mekong: int = 1
+    ebay_dispatch_time_max_usav: int = 1
+    ebay_dispatch_time_max_dragon: int = 1
+    ebay_payment_profile_id_mekong: str = ""
+    ebay_payment_profile_id_usav: str = ""
+    ebay_payment_profile_id_dragon: str = ""
+    ebay_return_profile_id_mekong: str = ""
+    ebay_return_profile_id_usav: str = ""
+    ebay_return_profile_id_dragon: str = ""
+    ebay_shipping_profile_id_mekong: str = ""
+    ebay_shipping_profile_id_usav: str = ""
+    ebay_shipping_profile_id_dragon: str = ""
     
     # Ecwid Integration
     ecwid_store_id: str = ""
