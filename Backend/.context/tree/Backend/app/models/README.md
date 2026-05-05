@@ -16,6 +16,7 @@ SQLAlchemy ORM entities and enums for inventory, orders, purchasing, users, and 
 - `PlatformListing.variant_id` is nullable after migration `0024`; unresolved listings are valid and must not be treated as data corruption.
 - `PlatformListing.external_ref_id` is now unique per platform only when non-null; do not repurpose `merchant_sku` as canonical listing identity.
 - `PlatformListing.listing_condition` is a free-form string by design (platform-native values differ); do not coerce it into internal condition enums.
+- `PurchaseOrderItem.unit_price` is high precision (`Numeric(12,6)`) while purchase totals remain currency precision (`Numeric(12,2)`); avoid forcing unit prices back to 2 decimals in write paths.
 
 ## Child Folders
 - (No child folders)

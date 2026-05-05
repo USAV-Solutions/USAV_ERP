@@ -99,6 +99,14 @@ const zohoSyncColor = {
 
 const ebayPurchaseSources: PurchaseFileImportSource[] = ['ebay_mekong', 'ebay_purchasing', 'ebay_usav', 'ebay_dragon']
 
+function formatUnitPrice(value: number): string {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) {
+    return '-'
+  }
+  return numeric.toFixed(6).replace(/\.?0+$/, '')
+}
+
 function getPurchaseImportSourceLabel(source: PurchaseFileImportSource): string {
   switch (source) {
     case 'goodwill':
@@ -234,7 +242,7 @@ function AddPurchaseOrderItemRow({ poId, onChanged, onNotify, onDone }: AddPurch
             type="number"
             value={unitPrice}
             onChange={(e) => setUnitPrice(e.target.value)}
-            inputProps={{ min: 0, step: 0.01 }}
+            inputProps={{ min: 0, step: 0.001 }}
             sx={{ width: 120 }}
           />
         </TableCell>
@@ -422,7 +430,7 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
         </TableCell>
         <TableCell>{item.variant_sku || '-'}</TableCell>
         <TableCell align="center">{item.quantity}</TableCell>
-        <TableCell align="right">{item.unit_price}</TableCell>
+        <TableCell align="right">{formatUnitPrice(item.unit_price)}</TableCell>
         <TableCell align="center">
           <Chip size="small" color={itemStatusColor[item.status]} label={item.status} />
         </TableCell>
@@ -527,7 +535,14 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
           <TextField label="Item Name" value={externalItemName} onChange={(e) => setExternalItemName(e.target.value)} fullWidth />
           <TextField label="Condition Note" value={conditionNote} onChange={(e) => setConditionNote(e.target.value)} fullWidth multiline minRows={2} />
           <TextField label="Quantity" type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} fullWidth />
-          <TextField label="Unit Price" type="number" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} fullWidth />
+          <TextField
+            label="Unit Price"
+            type="number"
+            value={unitPrice}
+            onChange={(e) => setUnitPrice(e.target.value)}
+            inputProps={{ min: 0, step: 0.001 }}
+            fullWidth
+          />
           <TextField
             label="Total Price (Auto)"
             type="number"

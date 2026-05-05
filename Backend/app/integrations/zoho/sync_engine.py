@@ -430,6 +430,13 @@ def purchase_order_to_zoho_payload(
         except Exception:
             return 0.0
 
+    def _compute_po_line_rate(item: Any) -> float:
+        quantity = int(getattr(item, "quantity", 0) or 0)
+        total_price = _to_decimal(getattr(item, "total_price", 0), default="0")
+        if quantity > 0 and total_price > Decimal("0"):
+            return float(total_price / Decimal(quantity))
+        return _to_float(getattr(item, "unit_price", 0))
+
     tax_amount = _to_float(getattr(po, "tax_amount", 0))
     shipping_amount = _to_float(getattr(po, "shipping_amount", 0))
     handling_amount = _to_float(getattr(po, "handling_amount", 0))
@@ -495,7 +502,7 @@ def purchase_order_to_zoho_payload(
         li: dict[str, Any] = {
             "name": item.external_item_name,
             "quantity": item.quantity,
-            "rate": float(item.unit_price),
+            "rate": _compute_po_line_rate(item),
         }
         if variant and variant.zoho_item_id:
             li["item_id"] = variant.zoho_item_id
