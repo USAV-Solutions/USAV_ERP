@@ -1,5 +1,6 @@
 """Repositories for purchasing domain."""
 from datetime import date
+from decimal import Decimal
 from typing import Optional, Sequence
 
 from sqlalchemy import and_, desc, exists, func, not_, or_, select
@@ -55,6 +56,8 @@ class PurchaseOrderRepository(BaseRepository[PurchaseOrder]):
         item_match_status: str | None = None,
         zoho_sync_status: ZohoSyncStatus | None = None,
         source: str | None = None,
+        total_amount: Decimal | None = None,
+        total_amount_range: Decimal = Decimal("0"),
         sort_by: str = "order_date",
         sort_dir: str = "desc",
     ) -> Sequence[PurchaseOrder]:
@@ -88,6 +91,12 @@ class PurchaseOrderRepository(BaseRepository[PurchaseOrder]):
         source_query = str(source or "").strip()
         if source_query:
             stmt = stmt.where(func.lower(PurchaseOrder.source).like(f"%{source_query.lower()}%"))
+        if total_amount is not None:
+            range_value = total_amount_range if total_amount_range >= 0 else Decimal("0")
+            lower_bound = total_amount - range_value
+            upper_bound = total_amount + range_value
+            stmt = stmt.where(PurchaseOrder.total_amount >= lower_bound)
+            stmt = stmt.where(PurchaseOrder.total_amount <= upper_bound)
 
         unmatched_exists = exists(
             select(1).where(

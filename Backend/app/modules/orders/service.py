@@ -178,13 +178,13 @@ class OrderSyncService:
             logger.debug(f"[DEBUG.INTERNAL_API] {platform_name}: Starting ingestion of {len(external_orders)} orders")
             for idx, ext_order in enumerate(external_orders, 1):
                 logger.debug(f"{platform_name}: Ingesting order {idx}/{len(external_orders)}: {ext_order.platform_order_id}")
-                was_new = await self._ingest_order(
+                ingest_state = await self._ingest_order(
                     ext_order,
                     order_platform,
                     response,
                     source=source or self._platform_source(platform_name),
                 )
-                if not was_new:
+                if ingest_state == "unchanged":
                     response.skipped_duplicates += 1
                     logger.debug(f"{platform_name}: Order {ext_order.platform_order_id} was duplicate, skipped")
 
@@ -245,13 +245,13 @@ class OrderSyncService:
                 raise ValueError(f"Unknown platform mapping for '{platform_name}'")
 
             for ext_order in external_orders:
-                was_new = await self._ingest_order(
+                ingest_state = await self._ingest_order(
                     ext_order,
                     order_platform,
                     response,
                     source=source or self._platform_source(platform_name),
                 )
-                if not was_new:
+                if ingest_state == "unchanged":
                     response.skipped_duplicates += 1
 
             await self.session.commit()
@@ -350,18 +350,25 @@ class OrderSyncService:
         response: SyncResponse,
         *,
         source: str,
-    ) -> bool:
+    ) -> str:
         """
-        Insert a single external order + items.
+        Insert or update a single external order + items.
 
-        Returns True if the order was new, False if it was a duplicate.
+        Returns one of: ``created``, ``updated``, ``unchanged``.
         """
         # Deduplication check
         existing = await self.order_repo.get_by_external_id(
             platform, ext.platform_order_id,
         )
         if existing is not None:
-            return False
+            changed = await self._update_existing_order(
+                existing=existing,
+                ext=ext,
+                platform=platform,
+                response=response,
+                source=source,
+            )
+            return "updated" if changed else "unchanged"
 
         # Upsert/lookup Customer (if any data is available)
         customer_id = await self._get_or_create_customer(ext, source=source)
@@ -389,7 +396,7 @@ class OrderSyncService:
         except IntegrityError:
             # Race condition – another request inserted the same order
             await self.session.rollback()
-            return False
+            return "unchanged"
 
         response.new_orders += 1
 
@@ -397,7 +404,212 @@ class OrderSyncService:
         for ext_item in ext.items:
             await self._ingest_item(ext_item, order, platform, response)
 
-        return True
+        return "created"
+
+    async def _update_existing_order(
+        self,
+        *,
+        existing: Order,
+        ext: ExternalOrder,
+        platform: OrderPlatform,
+        response: SyncResponse,
+        source: str,
+    ) -> bool:
+        changed = False
+
+        customer_id = await self._get_or_create_customer(ext, source=source)
+        if customer_id is not None and existing.customer_id != customer_id:
+            existing.customer_id = customer_id
+            changed = True
+
+        if source and existing.source != source:
+            existing.source = source
+            changed = True
+
+        if ext.platform_order_number and existing.external_order_number != ext.platform_order_number:
+            existing.external_order_number = ext.platform_order_number
+            changed = True
+
+        incoming_ordered_at = ext.ordered_at
+        if incoming_ordered_at is not None and existing.ordered_at != incoming_ordered_at:
+            existing.ordered_at = incoming_ordered_at
+            changed = True
+
+        incoming_tracking = self._extract_tracking_number(ext)
+        if incoming_tracking and existing.tracking_number != incoming_tracking:
+            existing.tracking_number = incoming_tracking
+            changed = True
+
+        incoming_subtotal = Decimal(str(ext.subtotal))
+        incoming_tax = Decimal(str(ext.tax))
+        incoming_shipping = Decimal(str(ext.shipping))
+        incoming_total = Decimal(str(ext.total))
+        incoming_currency = ext.currency or "USD"
+
+        if existing.subtotal_amount != incoming_subtotal:
+            existing.subtotal_amount = incoming_subtotal
+            changed = True
+        if existing.tax_amount != incoming_tax:
+            existing.tax_amount = incoming_tax
+            changed = True
+        if existing.shipping_amount != incoming_shipping:
+            existing.shipping_amount = incoming_shipping
+            changed = True
+        if existing.total_amount != incoming_total:
+            existing.total_amount = incoming_total
+            changed = True
+        if existing.currency != incoming_currency:
+            existing.currency = incoming_currency
+            changed = True
+        if existing.platform_data != ext.raw_data:
+            existing.platform_data = ext.raw_data
+            changed = True
+
+        item_changed = await self._upsert_existing_order_items(
+            order=existing,
+            ext_items=ext.items,
+            platform=platform,
+            response=response,
+        )
+        if item_changed:
+            changed = True
+
+        if changed:
+            self.session.add(existing)
+        return changed
+
+    @staticmethod
+    def _item_identity_key(
+        external_item_id: Optional[str],
+        external_sku: Optional[str],
+        item_name: Optional[str],
+    ) -> str:
+        item_id = str(external_item_id or "").strip().lower()
+        if item_id:
+            return f"id:{item_id}"
+        sku = str(external_sku or "").strip().lower()
+        if sku:
+            return f"sku:{sku}"
+        title = str(item_name or "").strip().lower()
+        return f"title:{title}"
+
+    async def _upsert_existing_order_items(
+        self,
+        *,
+        order: Order,
+        ext_items: Sequence[ExternalOrderItem],
+        platform: OrderPlatform,
+        response: SyncResponse,
+    ) -> bool:
+        existing_items = (
+            await self.session.execute(select(OrderItem).where(OrderItem.order_id == order.id))
+        ).scalars().all()
+
+        by_key: dict[str, list[OrderItem]] = {}
+        for item in existing_items:
+            key = self._item_identity_key(item.external_item_id, item.external_sku, item.item_name)
+            by_key.setdefault(key, []).append(item)
+
+        changed = False
+        for ext_item in ext_items:
+            key = self._item_identity_key(ext_item.platform_item_id, ext_item.platform_sku, ext_item.title)
+            bucket = by_key.get(key) or []
+            if bucket:
+                item = bucket.pop(0)
+                item_changed = await self._update_existing_item_fields(
+                    item=item,
+                    ext_item=ext_item,
+                    platform=platform,
+                    response=response,
+                )
+                if item_changed:
+                    self.session.add(item)
+                    changed = True
+                continue
+
+            await self._ingest_item(ext_item, order, platform, response)
+            changed = True
+
+        return changed
+
+    async def _update_existing_item_fields(
+        self,
+        *,
+        item: OrderItem,
+        ext_item: ExternalOrderItem,
+        platform: OrderPlatform,
+        response: SyncResponse,
+    ) -> bool:
+        changed = False
+
+        if item.external_item_id != ext_item.platform_item_id:
+            item.external_item_id = ext_item.platform_item_id
+            changed = True
+        if item.external_sku != ext_item.platform_sku:
+            item.external_sku = ext_item.platform_sku
+            changed = True
+        if item.external_asin != ext_item.asin:
+            item.external_asin = ext_item.asin
+            changed = True
+        if item.item_name != ext_item.title:
+            item.item_name = ext_item.title
+            changed = True
+        if item.quantity != ext_item.quantity:
+            item.quantity = ext_item.quantity
+            changed = True
+
+        incoming_unit = Decimal(str(ext_item.unit_price))
+        incoming_total = Decimal(str(ext_item.total_price))
+        if item.unit_price != incoming_unit:
+            item.unit_price = incoming_unit
+            changed = True
+        if item.total_price != incoming_total:
+            item.total_price = incoming_total
+            changed = True
+        if item.item_metadata != ext_item.raw_data:
+            item.item_metadata = ext_item.raw_data
+            changed = True
+
+        if item.status == OrderItemStatus.UNMATCHED:
+            variant_id: Optional[int] = None
+            item_status = OrderItemStatus.UNMATCHED
+
+            entity_platform = _ORDER_TO_ENTITY_PLATFORM.get(platform)
+            if entity_platform and ext_item.platform_item_id:
+                listing = await self.listing_repo.get_active_by_external_ref(
+                    entity_platform, ext_item.platform_item_id,
+                )
+                if listing is not None:
+                    variant_id = listing.variant_id
+                    item_status = OrderItemStatus.MATCHED
+                    response.auto_matched += 1
+
+            if variant_id is None and entity_platform and ext_item.platform_sku:
+                listing = await self.listing_repo.get_active_by_external_ref(
+                    entity_platform, ext_item.platform_sku,
+                )
+                if listing is not None:
+                    variant_id = listing.variant_id
+                    item_status = OrderItemStatus.MATCHED
+                    response.auto_matched += 1
+
+            if variant_id is None and entity_platform and ext_item.title:
+                listing = await self.listing_repo.search_active_by_listed_name(
+                    entity_platform, ext_item.title,
+                )
+                if listing is not None:
+                    variant_id = listing.variant_id
+                    item_status = OrderItemStatus.MATCHED
+                    response.auto_matched += 1
+
+            if item.variant_id != variant_id:
+                item.variant_id = variant_id
+                changed = True
+            if item.status != item_status:
+                item.status = item_status
+                changed = True
+
+        return changed
 
     @staticmethod
     def _platform_source(platform_name: str) -> str:

@@ -572,6 +572,8 @@ export default function PurchasingManagement() {
   const [zohoSyncFilter, setZohoSyncFilter] = useState<ZohoSyncStatus | 'ALL'>('ALL')
   const [sourceFilter, setSourceFilter] = useState<string>('ALL')
   const [poNumberSearch, setPoNumberSearch] = useState('')
+  const [totalAmountSearch, setTotalAmountSearch] = useState('')
+  const [totalAmountRange, setTotalAmountRange] = useState('0')
   const [orderDateFrom, setOrderDateFrom] = useState('')
   const [orderDateTo, setOrderDateTo] = useState('')
   const [filtersDialogOpen, setFiltersDialogOpen] = useState(false)
@@ -648,6 +650,8 @@ export default function PurchasingManagement() {
       zohoSyncFilter,
       sourceFilter,
       poNumberSearch,
+      totalAmountSearch,
+      totalAmountRange,
       orderDateFrom,
       orderDateTo,
     ],
@@ -663,6 +667,8 @@ export default function PurchasingManagement() {
           itemMatchFilter === 'ALL' ? undefined : itemMatchFilter === 'MATCHED' ? 'matched' : 'unmatched',
         zohoSyncStatus: zohoSyncFilter === 'ALL' ? undefined : zohoSyncFilter,
         source: sourceFilter === 'ALL' ? undefined : sourceFilter,
+        totalAmount: totalAmountSearch ? Number(totalAmountSearch) : undefined,
+        totalAmountRange: totalAmountSearch ? Number(totalAmountRange || '0') : undefined,
         orderDateFrom: orderDateFrom || undefined,
         orderDateTo: orderDateTo || undefined,
       }),
@@ -678,6 +684,8 @@ export default function PurchasingManagement() {
       zohoSyncFilter,
       sourceFilter,
       poNumberSearch,
+      totalAmountSearch,
+      totalAmountRange,
       orderDateFrom,
       orderDateTo,
     ],
@@ -701,6 +709,8 @@ export default function PurchasingManagement() {
             itemMatchFilter === 'ALL' ? undefined : itemMatchFilter === 'MATCHED' ? 'matched' : 'unmatched',
           zohoSyncStatus: zohoSyncFilter === 'ALL' ? undefined : zohoSyncFilter,
           source: sourceFilter === 'ALL' ? undefined : sourceFilter,
+          totalAmount: totalAmountSearch ? Number(totalAmountSearch) : undefined,
+          totalAmountRange: totalAmountSearch ? Number(totalAmountRange || '0') : undefined,
           orderDateFrom: orderDateFrom || undefined,
           orderDateTo: orderDateTo || undefined,
         })
@@ -981,6 +991,7 @@ export default function PurchasingManagement() {
     itemMatchFilter !== 'ALL',
     zohoSyncFilter !== 'ALL',
     sourceFilter !== 'ALL',
+    !!totalAmountSearch,
     !!orderDateFrom,
     !!orderDateTo,
     sortBy !== 'order_date',
@@ -995,6 +1006,8 @@ export default function PurchasingManagement() {
     setZohoSyncFilter('ALL')
     setSourceFilter('ALL')
     setPoNumberSearch('')
+    setTotalAmountSearch('')
+    setTotalAmountRange('0')
     setSortBy('order_date')
     setSortDir('desc')
     setPage(0)
@@ -1066,6 +1079,30 @@ export default function PurchasingManagement() {
                 }}
                 sx={{ minWidth: 280, flex: 1 }}
               />
+              <TextField
+                size="small"
+                label="Price Search"
+                type="number"
+                value={totalAmountSearch}
+                onChange={(e) => {
+                  setTotalAmountSearch(e.target.value)
+                  setPage(0)
+                }}
+                inputProps={{ min: 0, step: 0.01 }}
+                sx={{ minWidth: 150 }}
+              />
+              <TextField
+                size="small"
+                label="Range +/-"
+                type="number"
+                value={totalAmountRange}
+                onChange={(e) => {
+                  setTotalAmountRange(e.target.value)
+                  setPage(0)
+                }}
+                inputProps={{ min: 0, step: 0.01 }}
+                sx={{ width: 120 }}
+              />
               <Button
                 variant={activeFilterCount > 0 ? 'contained' : 'outlined'}
                 startIcon={<FilterList />}
@@ -1084,6 +1121,8 @@ export default function PurchasingManagement() {
                   zohoSyncFilter === 'ALL' &&
                   sourceFilter === 'ALL' &&
                   !poNumberSearch &&
+                  !totalAmountSearch &&
+                  totalAmountRange === '0' &&
                   sortBy === 'order_date' &&
                   sortDir === 'desc'
                 }
@@ -1852,6 +1891,30 @@ export default function PurchasingManagement() {
                 <MenuItem value="ZOHO_IMPORT">ZOHO_IMPORT</MenuItem>
               </Select>
             </FormControl>
+
+            <TextField
+              size="small"
+              type="number"
+              label="Price Search"
+              value={totalAmountSearch}
+              onChange={(e) => {
+                setTotalAmountSearch(e.target.value)
+                setPage(0)
+              }}
+              inputProps={{ min: 0, step: 0.01 }}
+            />
+
+            <TextField
+              size="small"
+              type="number"
+              label="Approx Range +/-"
+              value={totalAmountRange}
+              onChange={(e) => {
+                setTotalAmountRange(e.target.value)
+                setPage(0)
+              }}
+              inputProps={{ min: 0, step: 0.01 }}
+            />
 
             <TextField
               size="small"

@@ -30,6 +30,19 @@ const API_SOURCES: SalesImportApiSource[] = [
   'WALMART',
 ]
 
+function toApiSinceIso(dateText: string): string {
+  return new Date(`${dateText}T00:00:00`).toISOString()
+}
+
+function toApiUntilIso(dateText: string): string {
+  const now = new Date()
+  const todayText = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  if (dateText === todayText) {
+    return now.toISOString()
+  }
+  return new Date(`${dateText}T23:59:59.999`).toISOString()
+}
+
 export default function OrderImportButton() {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
@@ -45,8 +58,8 @@ export default function OrderImportButton() {
     mutationFn: () =>
       importOrdersFromApi({
         source: apiSource,
-        since: new Date(`${since}T00:00:00`).toISOString(),
-        until: new Date(`${until}T23:59:59.999`).toISOString(),
+        since: toApiSinceIso(since),
+        until: toApiUntilIso(until),
       }),
     onSuccess: (data) => {
       setMessage(`Imported ${data.new_orders} orders (${data.new_items} items).`)
