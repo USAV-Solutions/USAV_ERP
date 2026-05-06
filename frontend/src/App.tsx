@@ -8,6 +8,8 @@ import InventoryManagement from './pages/InventoryManagement'
 import ProductListings from './pages/ProductListings'
 import OrdersManagement from './pages/OrdersManagement'
 import PurchasingManagement from './pages/PurchasingManagement'
+import AccountingReports from './pages/accounting/AccountingReports'
+import BankConversion from './pages/accounting/BankConversion'
 import UserManagement from './pages/UserManagement'
 import Layout from './components/common/Layout'
 import RoleGuard from './components/guards/RoleGuard'
@@ -27,7 +29,7 @@ function App() {
       {/* Protected Routes */}
       <Route
         element={
-          <RoleGuard allowedRoles={['ADMIN', 'WAREHOUSE_OP', 'SALES_REP']}>
+          <RoleGuard allowedRoles={['ADMIN', 'WAREHOUSE_OP', 'SALES_REP', 'ACCOUNTANT']}>
             <Layout />
           </RoleGuard>
         }
@@ -49,6 +51,12 @@ function App() {
         <Route element={<RoleGuard allowedRoles={['ADMIN', 'SALES_REP', 'WAREHOUSE_OP']} />}>
           <Route path="/orders" element={<OrdersManagement />} />
           <Route path="/purchasing" element={<PurchasingManagement />} />
+        </Route>
+
+        {/* Accounting Routes */}
+        <Route element={<RoleGuard allowedRoles={['ADMIN', 'ACCOUNTANT']} />}>
+          <Route path="/accounting/reports" element={<AccountingReports />} />
+          <Route path="/accounting/bank-convert" element={<BankConversion />} />
         </Route>
 
         {/* Admin Routes */}

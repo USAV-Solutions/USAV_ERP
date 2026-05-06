@@ -1,7 +1,7 @@
 ﻿# Backend\app\modules
 
 ## What This Folder Does
-Domain modules grouping route + schema + service logic by business area.
+Domain modules grouping route + schema + service logic by business area, including Accounting phase-1 scaffold routes guarded for ADMIN/ACCOUNTANT users.
 
 ## Typical Contents
 - Python modules, schemas, or support assets scoped to this domain.
@@ -12,6 +12,7 @@ Domain modules grouping route + schema + service logic by business area.
 - Making cross-layer changes here but forgetting migration/frontend alignment.
 
 ## Child Folders
+- `accounting/`
 - `auth/`
 - `inventory/`
 - `orders/`
