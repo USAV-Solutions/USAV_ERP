@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700">
+  <rect width="1200" height="700" fill="#f7f7f9"/>
+  <rect x="40" y="40" width="1120" height="620" rx="12" fill="#ffffff" stroke="#d5d7dc"/>
+  <text x="80" y="105" font-size="44" font-family="Arial" fill="#1f2a37">BoA Format 1 Sample</text>
+  <text x="80" y="150" font-size="24" font-family="Arial" fill="#667085">Placeholder reference image</text>
+</svg>

@@ -120,3 +120,8 @@ export const PURCHASING = {
   MATCH_ITEM: (itemId: number) => `/purchases/items/${itemId}/match`,
   MARK_DELIVERED: (id: number) => `/purchases/${id}/mark-delivered`,
 }
+
+export const ACCOUNTING = {
+  PURCHASE_ORDER_REPORTS: '/accounting/reports/purchase-orders',
+  PURCHASE_ORDER_REPORTS_EXPORT: '/accounting/reports/purchase-orders/export',
+}

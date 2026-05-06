@@ -16,7 +16,7 @@ interface QuickAction {
   path: string
   icon: React.ReactNode
   color: string
-  roles: ('ADMIN' | 'WAREHOUSE_OP' | 'SALES_REP')[]
+  roles: ('ADMIN' | 'WAREHOUSE_OP' | 'SALES_REP' | 'ACCOUNTANT')[]
 }
 
 const quickActions: QuickAction[] = [
@@ -75,6 +75,7 @@ export default function Dashboard() {
       case 'ADMIN': return 'error'
       case 'WAREHOUSE_OP': return 'primary'
       case 'SALES_REP': return 'success'
+      case 'ACCOUNTANT': return 'warning'
       default: return 'secondary'
     }
   }
@@ -84,6 +85,7 @@ export default function Dashboard() {
       case 'ADMIN': return 'Administrator'
       case 'WAREHOUSE_OP': return 'Warehouse Operator'
       case 'SALES_REP': return 'Sales Representative'
+      case 'ACCOUNTANT': return 'Accountant'
       default: return role
     }
   }

@@ -9,6 +9,7 @@ SQLAlchemy ORM entities and enums for inventory, orders, purchasing, users, and 
 
 ## Common Pitfalls
 - Adding enum values in Python without DB enum migration.
+- `UserRole` now includes `ACCOUNTANT`; role-expansion requires database enum migration before assigning that role in persisted user records.
 - Adding non-null columns without safe default/backfill.
 - New purchase-order Zoho billing columns are intentionally deferred at ORM load time to keep legacy databases (without migration `0023`) from failing simple list/read queries.
 - `Customer.source` is nullable and overwrite-oriented (latest source wins during ingestion); avoid adding uniqueness assumptions around this field.

@@ -264,4 +264,4 @@ docker-compose up -d
 2. Run `docker-compose up -d` to start
 3. Access frontend at http://localhost:3000
 4. Check backend API docs at http://localhost:8000/docs
-5. Monitor with `docker-compose logs -f`
+5. Monitor with `docker-compose logs -f`!

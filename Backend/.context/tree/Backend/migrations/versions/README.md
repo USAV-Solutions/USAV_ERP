@@ -18,6 +18,7 @@ Concrete Alembic revision files; source of truth for schema transitions.
 - Migration `0027` adds `platform_listing.listing_quantity`, `listing_type`, `listing_condition`, and `upc`; API schemas and listing UI must ship together or fields will appear missing/inert.
 - Migration `0028` drops duplicated customer/shipping snapshot columns from `orders`; it first backfills missing `customer` fields from latest order snapshots per customer.
 - Migration `0029` extends `order_platform_enum` with `SHOPIFY`; update backend/frontend enum lists in lockstep to avoid serialization/filter errors.
+- Migration `0031` extends `user_role` with `ACCOUNTANT`; apply before assigning accountant users or role writes will fail at the DB enum boundary.
 
 ## Child Folders
 - (No child folders)

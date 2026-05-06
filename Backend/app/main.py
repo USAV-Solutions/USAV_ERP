@@ -17,6 +17,7 @@ from app.api import api_router
 from app.core.config import settings
 from app.core.database import close_db, engine
 from app.modules.orders.routes import router as orders_router
+from app.modules.accounting.routes import router as accounting_router
 from app.modules.sync.endpoints import router as sync_router
 from app.integrations.zoho.webhooks import (
     register_webhook_handler,
@@ -34,6 +35,9 @@ logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
+# Suppress very noisy multipart upload parser debug traces in development.
+logging.getLogger("python_multipart").setLevel(logging.WARNING)
+logging.getLogger("python_multipart.multipart").setLevel(logging.WARNING)
 
 
 @asynccontextmanager
@@ -177,6 +181,7 @@ async def root():
 # Include API router with prefix
 app.include_router(api_router, prefix=settings.api_prefix)
 app.include_router(orders_router, prefix=settings.api_prefix)
+app.include_router(accounting_router, prefix=settings.api_prefix)
 app.include_router(sync_router, prefix=settings.api_prefix)
 
 # Zoho webhooks live outside the API prefix so that Zoho's static

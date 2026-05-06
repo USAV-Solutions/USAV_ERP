@@ -39,7 +39,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axiosClient from '../api/axiosClient'
 
-type UserRole = 'ADMIN' | 'WAREHOUSE_OP' | 'SALES_REP'
+type UserRole = 'ADMIN' | 'WAREHOUSE_OP' | 'SALES_REP' | 'ACCOUNTANT'
 
 interface User {
   id: number
@@ -73,11 +73,12 @@ const initialFormData: UserFormData = {
   is_active: true,
 }
 
-const getRoleColor = (role: UserRole): 'error' | 'primary' | 'success' => {
+const getRoleColor = (role: UserRole): 'error' | 'primary' | 'success' | 'warning' => {
   switch (role) {
     case 'ADMIN': return 'error'
     case 'WAREHOUSE_OP': return 'primary'
     case 'SALES_REP': return 'success'
+    case 'ACCOUNTANT': return 'warning'
     default: return 'primary'
   }
 }
@@ -87,6 +88,7 @@ const getRoleLabel = (role: UserRole): string => {
     case 'ADMIN': return 'Administrator'
     case 'WAREHOUSE_OP': return 'Warehouse Op'
     case 'SALES_REP': return 'Sales Rep'
+    case 'ACCOUNTANT': return 'Accountant'
     default: return role
   }
 }
@@ -442,6 +444,7 @@ export default function UserManagement() {
                 <MenuItem value="ADMIN">Administrator</MenuItem>
                 <MenuItem value="WAREHOUSE_OP">Warehouse Operator</MenuItem>
                 <MenuItem value="SALES_REP">Sales Representative</MenuItem>
+                <MenuItem value="ACCOUNTANT">Accountant</MenuItem>
               </Select>
             </FormControl>
             <FormControlLabel
