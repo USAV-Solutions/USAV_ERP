@@ -109,6 +109,8 @@ class OrderBrief(BaseModel):
     tax_amount: Decimal
     shipping_amount: Decimal
     total_amount: Decimal
+    platform_total_amount: Decimal = Field(default=Decimal("0.00"))
+    zoho_total_amount: Decimal = Field(default=Decimal("0.00"))
     currency: str
     ordered_at: Optional[datetime] = None
     created_at: datetime
@@ -145,6 +147,8 @@ class OrderDetail(BaseModel):
     tax_amount: Decimal
     shipping_amount: Decimal
     total_amount: Decimal
+    platform_total_amount: Decimal = Field(default=Decimal("0.00"))
+    zoho_total_amount: Decimal = Field(default=Decimal("0.00"))
     currency: str
 
     ordered_at: Optional[datetime] = None

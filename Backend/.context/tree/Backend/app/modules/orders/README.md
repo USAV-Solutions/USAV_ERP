@@ -23,6 +23,9 @@ Sales orders domain: ingestion/import, listing-centric matching, filtering, cust
 - Tracking numbers are now normalized into order headers from API/CSV payloads; keep adapter/raw key mappings (`trackingNumber`, `tracking_number`, `Tracking Number`) aligned.
 - ShipStation multi-line orders can carry different tracking values per row; import now stores a unique merged header string (`tracking_1 + tracking_2 + ...`) in `orders.tracking_number`.
 - Order list responses now include `subtotal_amount`, `tax_amount`, and `shipping_amount` so frontend totals can consistently compute `subtotal + tax + shipping`.
+- `CSV_GENERIC` order import persists `orders.source=SHIPSTATION_CSV` for all imported orders (including platform-detected batches) instead of using `*_API` source values.
+- When CSV rows omit subtotal/order-line totals, import derives subtotal from summed item row totals; if order total is missing, fallback total is calculated as `line_total + tax + shipping + handling`.
+- Order list/detail responses now include `platform_total_amount` and `zoho_total_amount`; `zoho_total_amount` excludes tax for marketplace platforms (`AMAZON`, `WALMART`, and all eBay stores) and includes tax for other platforms.
 - `order_item.variant_id` is denormalized once `platform_listing_id` is introduced; code paths that update listing assignments must keep `order_item.variant_id` in sync.
 
 ## Child Folders

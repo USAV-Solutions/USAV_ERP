@@ -20,7 +20,8 @@ Zoho client/sync engine used for outbound and inbound synchronization flows.
 - Sales-order outbound payload uses `salesorder_number` (from `external_order_number` fallback `external_order_id`) and reserves `reference_number` for tracking (`Order.tracking_number`). Legacy duplicate detection still falls back to matching `reference_number == external_order_id` for older rows.
 - Sales-order source is sent through SO custom fields (`api_name=cf_source`) using SO-specific dropdown mapping: `Ebay_Dragon`, `Ebay_Mekong`, `Ebay_USAV`, `ECWID`, `Amazon`, `Walmart`, fallback `Other`.
 - Zoho can return code `15` for sales-order `shipping_address` length; outbound sales-order payload now omits `shipping_address` and relies on `customer_id` contact addresses instead.
-- Sales-order outbound payload now sends `shipping_charge` from `Order.shipping_amount` for all sources. For `ECWID_API` orders, each line is forced to `tax_percentage=0` and order tax is sent as `adjustment` with `adjustment_description="Tax adjustment"`.
+- Sales-order outbound payload now sends `shipping_charge` from `Order.shipping_amount` for all sources and always syncs totals using Zoho-total math: line total + shipping + inferred handling, plus tax only for non-marketplace platforms.
+- Sales-order outbound tax handling is platform-based: for marketplaces (`AMAZON`, `WALMART`, all `EBAY_*`) payload tax is forced to 0 (via zero tax adjustment and line `tax_percentage=0`); for other ecommerce platforms (for example `ECWID`, `SHOPIFY`) tax is preserved in payload adjustment.
 - Purchase-order outbound line `rate` should be derived from `PurchaseOrderItem.total_price / quantity` when available (not only `unit_price`) to avoid cent drift on multi-qty lines (example: `26.99 / 5 = 5.398`).
 
 ## Child Folders
