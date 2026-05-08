@@ -17,11 +17,14 @@ from app.models import Platform, PlatformSyncStatus
 from app.models.entities import ProductVariant, ProductIdentity, ProductFamily
 from app.repositories import PlatformListingRepository, ProductVariantRepository
 from app.modules.inventory.schemas import (
+    EbayCreateStartResponse,
     EbayCategorySuggestion,
     EbayCategorySuggestionsRequest,
     EbayCategorySuggestionsResponse,
     EbayListingDraftRequest,
     EbayListingDraftResponse,
+    ListingCreatePlatformCapability,
+    ListingCreateScaffoldResponse,
     EbayPolicyProfiles,
     EbayPublishRequest,
     EbayPublishResponse,
@@ -176,6 +179,61 @@ async def list_platform_listings(
         skip=skip,
         limit=limit,
         items=[PlatformListingResponse.model_validate(item) for item in items]
+    )
+
+
+@router.get("/create/scaffold", response_model=ListingCreateScaffoldResponse)
+async def get_listing_create_scaffold() -> ListingCreateScaffoldResponse:
+    """Scaffold endpoint for new listing-create UI flows."""
+    return ListingCreateScaffoldResponse(
+        message="Listing creation scaffold is active. eBay is enabled first.",
+        supported_platforms=[
+            ListingCreatePlatformCapability(
+                platform=Platform.EBAY_MEKONG,
+                enabled=True,
+                status="SCAFFOLDED",
+                notes="Use this as the first create-new-listing flow target.",
+            ),
+            ListingCreatePlatformCapability(
+                platform=Platform.EBAY_USAV,
+                enabled=True,
+                status="SCAFFOLDED",
+                notes="Use this as the first create-new-listing flow target.",
+            ),
+            ListingCreatePlatformCapability(
+                platform=Platform.EBAY_DRAGON,
+                enabled=True,
+                status="SCAFFOLDED",
+                notes="Use this as the first create-new-listing flow target.",
+            ),
+            ListingCreatePlatformCapability(
+                platform=Platform.AMAZON,
+                enabled=False,
+                status="NOT_STARTED",
+                notes="Scaffold placeholder for future expansion.",
+            ),
+            ListingCreatePlatformCapability(
+                platform=Platform.ECWID,
+                enabled=False,
+                status="NOT_STARTED",
+                notes="Scaffold placeholder for future expansion.",
+            ),
+            ListingCreatePlatformCapability(
+                platform=Platform.WALMART,
+                enabled=False,
+                status="NOT_STARTED",
+                notes="Scaffold placeholder for future expansion.",
+            ),
+        ],
+    )
+
+
+@router.post("/create/ebay/start", response_model=EbayCreateStartResponse)
+async def start_create_ebay_listing_flow() -> EbayCreateStartResponse:
+    """Scaffold endpoint for eBay create-listing flow bootstrapping."""
+    return EbayCreateStartResponse(
+        message="eBay create-new-listing flow scaffold is wired. Full workflow implementation pending.",
+        status="SCAFFOLDED",
     )
 
 

@@ -42,6 +42,8 @@ export const LOOKUPS = {
 // Listing endpoints
 export const LISTINGS = {
   LIST: '/listings',
+  CREATE_SCAFFOLD: '/listings/create/scaffold',
+  CREATE_EBAY_START: '/listings/create/ebay/start',
   LISTING: (id: number) => `/listings/${id}`,
   BY_PLATFORM_REF: (platform: string, refId: string) => `/listings/platform/${platform}/ref/${refId}`,
   PENDING: '/listings/pending',

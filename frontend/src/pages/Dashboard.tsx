@@ -39,7 +39,7 @@ const quickActions: QuickAction[] = [
   {
     title: 'Product Listings',
     description: 'View and manage marketplace listings',
-    path: '/catalog/listings',
+    path: '/catalog/listings/active',
     icon: <Storefront sx={{ fontSize: 40 }} />,
     color: '#9c27b0',
     roles: ['ADMIN', 'SALES_REP'],
