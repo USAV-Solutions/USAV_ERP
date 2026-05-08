@@ -10,7 +10,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, require_roles
@@ -28,6 +28,7 @@ router = APIRouter(
 )
 
 GroupByType = Literal["sku", "week", "month", "quarter", "year", "source", "vendor"]
+OrderByType = Literal["total_price", "sku", "source", "date"]
 
 
 def _group_value(group_by: GroupByType, order_date: date | None, sku: str | None, source: str | None, vendor: str | None) -> str:
@@ -142,6 +143,10 @@ async def _build_purchase_order_report(
     start_date: date,
     end_date: date,
     group_by: GroupByType,
+    item_filter: list[str] | None = None,
+    source_filter: list[str] | None = None,
+    vendor_filter: list[str] | None = None,
+    order_by: OrderByType = "date",
 ) -> list[dict[str, object]]:
     stmt = (
         select(
@@ -162,6 +167,22 @@ async def _build_purchase_order_report(
         .outerjoin(ProductVariant, ProductVariant.id == PurchaseOrderItem.variant_id)
         .where(and_(PurchaseOrder.order_date >= start_date, PurchaseOrder.order_date <= end_date))
     )
+    if item_filter:
+        stmt = stmt.where(
+            or_(
+                *[
+                    or_(
+                        ProductVariant.full_sku.ilike(f"%{token}%"),
+                        PurchaseOrderItem.external_item_name.ilike(f"%{token}%"),
+                    )
+                    for token in item_filter
+                ]
+            )
+        )
+    if source_filter:
+        stmt = stmt.where(PurchaseOrder.source.in_(source_filter))
+    if vendor_filter:
+        stmt = stmt.where(or_(*[Vendor.name.ilike(f"%{token}%") for token in vendor_filter]))
     rows = (await db.execute(stmt)).mappings().all()
 
     grouped: dict[str, dict[str, object]] = {}
@@ -196,8 +217,21 @@ async def _build_purchase_order_report(
         entry["shipping"] = Decimal(entry["shipping"]) + Decimal(row["shipping_amount"] or 0)
         entry["handling"] = Decimal(entry["handling"]) + Decimal(row["handling_amount"] or 0)
 
+    grouped_values = list(grouped.values())
+    if order_by == "total_price":
+        grouped_values.sort(key=lambda value: Decimal(value["total_price"]), reverse=True)
+    elif order_by == "sku":
+        grouped_values.sort(key=lambda value: str(value["sku"] or "").lower())
+    elif order_by == "source":
+        grouped_values.sort(key=lambda value: str(value["source"] or "").lower())
+    else:
+        grouped_values.sort(
+            key=lambda value: value["order_date"] if isinstance(value["order_date"], date) else date.min,
+            reverse=True,
+        )
+
     report_rows: list[dict[str, object]] = []
-    for _, value in sorted(grouped.items(), key=lambda item: item[0]):
+    for value in grouped_values:
         report_rows.append(
             {
                 "group": value["group"],
@@ -217,6 +251,58 @@ async def _build_purchase_order_report(
     return report_rows
 
 
+async def _build_purchase_order_filter_options(
+    db: AsyncSession,
+    start_date: date,
+    end_date: date,
+) -> dict[str, object]:
+    stmt = (
+        select(
+            ProductVariant.full_sku.label("sku"),
+            PurchaseOrder.source.label("source"),
+            Vendor.name.label("vendor"),
+            PurchaseOrderItem.external_item_name.label("name"),
+        )
+        .join(PurchaseOrderItem, PurchaseOrderItem.purchase_order_id == PurchaseOrder.id)
+        .join(Vendor, Vendor.id == PurchaseOrder.vendor_id)
+        .outerjoin(ProductVariant, ProductVariant.id == PurchaseOrderItem.variant_id)
+        .where(and_(PurchaseOrder.order_date >= start_date, PurchaseOrder.order_date <= end_date))
+    )
+    rows = (await db.execute(stmt)).mappings().all()
+
+    item_options: dict[str, str] = {}
+    for row in rows:
+        sku = (row["sku"] or "").strip()
+        name = (row["name"] or "").strip()
+        label = ""
+        value = ""
+        if sku and name:
+            label = f"{sku} - {name}"
+            value = sku
+        elif sku:
+            label = sku
+            value = sku
+        elif name:
+            label = name
+            value = name
+        if value and value not in item_options:
+            item_options[value] = label
+    source_values = sorted({(row["source"] or "").strip() for row in rows if (row["source"] or "").strip()})
+    vendor_values = sorted({(row["vendor"] or "").strip() for row in rows if (row["vendor"] or "").strip()})
+    return {
+        "item_options": [{"value": value, "label": label} for value, label in sorted(item_options.items(), key=lambda item: item[1].lower())],
+        "source_options": source_values,
+        "vendor_options": vendor_values,
+    }
+
+
+def _clean_filters(values: list[str] | None) -> list[str] | None:
+    if not values:
+        return None
+    cleaned = [value.strip() for value in values if value and value.strip()]
+    return cleaned or None
+
+
 @router.get("/reports")
 async def get_reports_stub(_: CurrentUser):
     """Phase 1 scaffold endpoint for accounting reports."""
@@ -228,12 +314,25 @@ async def get_purchase_order_reports(
     _: CurrentUser,
     start_date: date = Query(...),
     end_date: date = Query(...),
+    order_by: OrderByType = Query("date"),
     group_by: GroupByType = Query("month"),
+    item: list[str] | None = Query(default=None),
+    source: list[str] | None = Query(default=None),
+    vendor: list[str] | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ):
     if end_date < start_date:
         return {"rows": [], "message": "end_date must be on or after start_date"}
-    rows = await _build_purchase_order_report(db, start_date=start_date, end_date=end_date, group_by=group_by)
+    rows = await _build_purchase_order_report(
+        db,
+        start_date=start_date,
+        end_date=end_date,
+        order_by=order_by,
+        group_by=group_by,
+        item_filter=_clean_filters(item),
+        source_filter=_clean_filters(source),
+        vendor_filter=_clean_filters(vendor),
+    )
     return {"rows": rows}
 
 
@@ -242,13 +341,26 @@ async def export_purchase_order_reports(
     _: CurrentUser,
     start_date: date = Query(...),
     end_date: date = Query(...),
+    order_by: OrderByType = Query("date"),
     group_by: GroupByType = Query("month"),
+    item: list[str] | None = Query(default=None),
+    source: list[str] | None = Query(default=None),
+    vendor: list[str] | None = Query(default=None),
     file_type: Literal["csv", "xlsx"] = Query("csv"),
     db: AsyncSession = Depends(get_db),
 ):
     if end_date < start_date:
         end_date = start_date
-    rows = await _build_purchase_order_report(db, start_date=start_date, end_date=end_date, group_by=group_by)
+    rows = await _build_purchase_order_report(
+        db,
+        start_date=start_date,
+        end_date=end_date,
+        order_by=order_by,
+        group_by=group_by,
+        item_filter=_clean_filters(item),
+        source_filter=_clean_filters(source),
+        vendor_filter=_clean_filters(vendor),
+    )
     headers = ["group", "order_date", "order_number", "item", "sku", "source", "quantity", "total_price", "tax", "shipping", "handling", "vendor"]
     stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
@@ -271,6 +383,18 @@ async def export_purchase_order_reports(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/reports/purchase-orders/filter-options")
+async def get_purchase_order_report_filter_options(
+    _: CurrentUser,
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    if end_date < start_date:
+        return {"item_options": [], "source_options": [], "vendor_options": []}
+    return await _build_purchase_order_filter_options(db, start_date=start_date, end_date=end_date)
 
 
 @router.post("/bank-convert")
@@ -316,4 +440,3 @@ async def bank_convert(
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{file_stem}_{format_type}.csv"'},
     )
-
