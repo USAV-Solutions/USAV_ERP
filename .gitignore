@@ -108,5 +108,7 @@ migrations/versions/__pycache__/
 venv/
 BackendVenv/
 
+mnt/
 
 .codex
+.agents/
