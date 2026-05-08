@@ -13,7 +13,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import api_router
+from app.api import get_api_router
 from app.core.config import settings
 from app.core.database import close_db, engine
 from app.modules.orders.routes import router as orders_router
@@ -179,7 +179,7 @@ async def root():
 
 
 # Include API router with prefix
-app.include_router(api_router, prefix=settings.api_prefix)
+app.include_router(get_api_router(), prefix=settings.api_prefix)
 app.include_router(orders_router, prefix=settings.api_prefix)
 app.include_router(accounting_router, prefix=settings.api_prefix)
 app.include_router(sync_router, prefix=settings.api_prefix)
