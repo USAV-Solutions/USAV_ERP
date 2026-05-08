@@ -7,10 +7,11 @@ import {
   Card,
   CardContent,
   Checkbox,
+  Chip,
+  CircularProgress,
   Divider,
   FormControlLabel,
   Grid,
-  MenuItem,
   Paper,
   Stack,
   Tab,
@@ -21,7 +22,10 @@ import {
 import { useNavigate } from 'react-router-dom'
 import axiosClient from '../api/axiosClient'
 import { CATALOG, LISTINGS } from '../api/endpoints'
-import { Platform, Variant } from '../types/inventory'
+import { Platform, ProductFamily, ProductIdentity, Variant } from '../types/inventory'
+import SearchField from '../components/common/SearchField'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
+import { compileSearchMatcher } from '../utils/search'
 
 type WizardStep = 0 | 1 | 2 | 3
 
@@ -162,6 +166,9 @@ export default function CreateProductListing() {
   const [activePlatformTab, setActivePlatformTab] = useState<DestinationKey>('EBAY_USAV')
   const [uiError, setUiError] = useState<string | null>(null)
   const [draftLoadedForPlatform, setDraftLoadedForPlatform] = useState<Platform | null>(null)
+  const [variantSearchInput, setVariantSearchInput] = useState('')
+  const [variantSearchFocused, setVariantSearchFocused] = useState(false)
+  const debouncedVariantSearch = useDebouncedValue(variantSearchInput, 200)
 
   const { data: variantsData = [], isLoading: variantsLoading } = useQuery({
     queryKey: ['variants-for-listing-create'],
@@ -170,6 +177,54 @@ export default function CreateProductListing() {
       return (response.data?.items || []) as Variant[]
     },
   })
+  const { data: identitiesData = [] } = useQuery({
+    queryKey: ['identities-for-listing-create'],
+    queryFn: async () => {
+      const response = await axiosClient.get(CATALOG.IDENTITIES, { params: { limit: 1000 } })
+      return (response.data?.items || []) as ProductIdentity[]
+    },
+  })
+  const { data: familiesData = [] } = useQuery({
+    queryKey: ['families-for-listing-create'],
+    queryFn: async () => {
+      const response = await axiosClient.get(CATALOG.FAMILIES, { params: { limit: 1000 } })
+      return (response.data?.items || []) as ProductFamily[]
+    },
+  })
+
+  const enhancedVariants = useMemo(() => {
+    const familyMap = new Map<number, ProductFamily>()
+    familiesData.forEach((f) => familyMap.set(f.product_id, f))
+
+    const identityMap = new Map<number, ProductIdentity & { family?: ProductFamily }>()
+    identitiesData.forEach((i) => {
+      identityMap.set(i.id, { ...i, family: familyMap.get(i.product_id) })
+    })
+
+    return variantsData.map((variant) => ({
+      ...variant,
+      identity: identityMap.get(variant.identity_id),
+    }))
+  }, [variantsData, identitiesData, familiesData])
+
+  const selectedVariant = useMemo(
+    () => enhancedVariants.find((v) => v.id === state.variant_id) || null,
+    [enhancedVariants, state.variant_id],
+  )
+
+  const filteredVariants = useMemo(() => {
+    const matchesSearch = compileSearchMatcher(debouncedVariantSearch)
+    return enhancedVariants.filter((variant) =>
+      matchesSearch([
+        variant.identity?.family?.base_name,
+        variant.variant_name,
+        variant.full_sku,
+        variant.identity?.generated_upis_h,
+        variant.identity?.family?.brand?.name,
+      ]),
+    )
+  }, [enhancedVariants, debouncedVariantSearch])
+  const showVariantSuggestions = variantSearchFocused && debouncedVariantSearch.trim().length > 0
 
   const selectedEbayPlatform = useMemo<Platform | null>(() => {
     if (state.destinations.EBAY_USAV) return 'EBAY_USAV'
@@ -422,28 +477,85 @@ export default function CreateProductListing() {
   const renderCoreDetailsStep = () => (
     <Stack spacing={2}>
       <Typography variant="h6">Step 2: Core Details</Typography>
-      <TextField
-        select
-        label="Variant *"
-        value={state.variant_id ?? ''}
-        onChange={(e) => {
-          const id = Number(e.target.value)
-          const variant = variantsData.find((v) => v.id === id)
-          setState((prev) => ({
-            ...prev,
-            variant_id: id,
-            master_sku: variant?.full_sku || prev.master_sku,
-          }))
-          setDraftLoadedForPlatform(null)
-        }}
-        disabled={variantsLoading}
-      >
-        {variantsData.map((v) => (
-          <MenuItem key={v.id} value={v.id}>
-            {v.full_sku}
-          </MenuItem>
-        ))}
-      </TextField>
+      <SearchField
+        placeholder="Search by name, SKU, or brand..."
+        value={variantSearchInput}
+        onChange={setVariantSearchInput}
+        size="small"
+        sx={{ width: '100%' }}
+        onFocus={() => setVariantSearchFocused(true)}
+        onBlur={() => setTimeout(() => setVariantSearchFocused(false), 120)}
+      />
+      {showVariantSuggestions ? (
+        <Paper variant="outlined" sx={{ maxHeight: 260, overflowY: 'auto' }}>
+          {variantsLoading ? (
+            <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+              <CircularProgress size={16} />
+              <Typography variant="body2">Loading variants...</Typography>
+            </Box>
+          ) : filteredVariants.length === 0 ? (
+            <Box sx={{ p: 2 }}>
+              <Typography variant="body2" color="text.secondary">
+                No variants found.
+              </Typography>
+            </Box>
+          ) : (
+            filteredVariants.slice(0, 50).map((variant) => {
+              const isSelected = state.variant_id === variant.id
+              return (
+                <Box
+                  key={variant.id}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    setState((prev) => ({
+                      ...prev,
+                      variant_id: variant.id,
+                      master_sku: variant.full_sku || prev.master_sku,
+                    }))
+                    setDraftLoadedForPlatform(null)
+                    setVariantSearchInput(variant.full_sku)
+                    setVariantSearchFocused(false)
+                  }}
+                  sx={{
+                    px: 1.5,
+                    py: 1,
+                    cursor: 'pointer',
+                    borderBottom: '1px solid',
+                    borderColor: 'divider',
+                    bgcolor: isSelected ? 'action.selected' : 'transparent',
+                    '&:hover': { bgcolor: 'action.hover' },
+                  }}
+                >
+                  <Typography variant="body2" fontFamily="monospace">
+                    {variant.full_sku}
+                  </Typography>
+                  <Typography variant="body2">
+                    {variant.variant_name || variant.identity?.family?.base_name || '-'}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {(variant.identity?.type || 'Product') + ' · '}
+                    {(variant.identity?.generated_upis_h || '-') + ' · '}
+                    {(variant.identity?.family?.brand?.name || '-') + ' · '}
+                    {(variant.condition_code || 'U')}
+                  </Typography>
+                </Box>
+              )
+            })
+          )}
+        </Paper>
+      ) : null}
+      {selectedVariant ? (
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+          <Chip size="small" label={`Selected: ${selectedVariant.full_sku}`} />
+          <Chip
+            size="small"
+            variant="outlined"
+            label={selectedVariant.variant_name || selectedVariant.identity?.family?.base_name || 'Unnamed'}
+          />
+        </Box>
+      ) : (
+        <Alert severity="warning">Select a variant to continue.</Alert>
+      )}
       <TextField
         label="Master Title *"
         value={state.master_title}

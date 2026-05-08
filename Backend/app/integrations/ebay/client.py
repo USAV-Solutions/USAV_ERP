@@ -902,6 +902,25 @@ class EbayClient(BasePlatformClient):
                 "</ShippingPackageDetails>"
             )
 
+        seller_profiles_xml = ""
+        payment_profile_id = (payload.get("payment_profile_id") or "").strip() if isinstance(payload.get("payment_profile_id"), str) else payload.get("payment_profile_id")
+        return_profile_id = (payload.get("return_profile_id") or "").strip() if isinstance(payload.get("return_profile_id"), str) else payload.get("return_profile_id")
+        shipping_profile_id = (payload.get("shipping_profile_id") or "").strip() if isinstance(payload.get("shipping_profile_id"), str) else payload.get("shipping_profile_id")
+        if payment_profile_id and return_profile_id and shipping_profile_id:
+            seller_profiles_xml = (
+                "<SellerProfiles>"
+                "<SellerPaymentProfile>"
+                f"<PaymentProfileID>{text(payment_profile_id)}</PaymentProfileID>"
+                "</SellerPaymentProfile>"
+                "<SellerReturnProfile>"
+                f"<ReturnProfileID>{text(return_profile_id)}</ReturnProfileID>"
+                "</SellerReturnProfile>"
+                "<SellerShippingProfile>"
+                f"<ShippingProfileID>{text(shipping_profile_id)}</ShippingProfileID>"
+                "</SellerShippingProfile>"
+                "</SellerProfiles>"
+            )
+
         return f"""<?xml version="1.0" encoding="utf-8"?>
 <AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <ErrorLanguage>en_US</ErrorLanguage>
@@ -926,17 +945,7 @@ class EbayClient(BasePlatformClient):
     <PictureDetails>{picture_urls_xml}</PictureDetails>
     <ItemSpecifics>{item_specifics_xml}</ItemSpecifics>
     {package_xml}
-    <SellerProfiles>
-      <SellerPaymentProfile>
-        <PaymentProfileID>{text(payload["payment_profile_id"])}</PaymentProfileID>
-      </SellerPaymentProfile>
-      <SellerReturnProfile>
-        <ReturnProfileID>{text(payload["return_profile_id"])}</ReturnProfileID>
-      </SellerReturnProfile>
-      <SellerShippingProfile>
-        <ShippingProfileID>{text(payload["shipping_profile_id"])}</ShippingProfileID>
-      </SellerShippingProfile>
-    </SellerProfiles>
+    {seller_profiles_xml}
   </Item>
 </AddFixedPriceItemRequest>"""
 

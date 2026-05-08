@@ -1,4 +1,7 @@
 from app.integrations.ebay.client import EbayClient
+from app.models import Platform
+from app.modules.inventory.routes.listings import _resolve_business_policy_ids
+from fastapi import HTTPException
 
 
 def _client() -> EbayClient:
@@ -75,3 +78,62 @@ def test_add_fixed_price_item_xml_contains_required_fields_and_cdata():
     assert "<![CDATA[<p>Hello</p>]]>" in xml_payload
     assert "<PictureDetails><PictureURL>https://example.com/image.jpg</PictureURL></PictureDetails>" in xml_payload
     assert "<SellerProfiles>" in xml_payload
+
+
+def test_add_fixed_price_item_xml_omits_seller_profiles_when_policy_ids_absent():
+    client = _client()
+    payload = {
+        "title": "No policy IDs",
+        "description": "desc",
+        "category_id": "1234",
+        "price": 19.99,
+        "quantity": 2,
+        "condition_id": 1000,
+        "country": "US",
+        "currency": "USD",
+        "dispatch_time_max": 1,
+        "location": "Texas",
+        "postal_code": "75001",
+        "sku": "SKU-1",
+        "picture_urls": ["https://example.com/image.jpg"],
+        "item_specifics": [{"Name": "Brand", "Value": ["Acme"]}],
+        "shipping_package_details": {
+            "WeightMajor": "1",
+            "WeightMinor": "0",
+            "PackageLength": "10.00",
+            "PackageWidth": "4.00",
+            "PackageDepth": "2.00",
+        },
+    }
+    xml_payload = client.build_add_fixed_price_item_xml(payload)
+    assert "<SellerProfiles>" not in xml_payload
+
+
+def test_resolve_business_policy_ids_all_or_none():
+    assert _resolve_business_policy_ids({}, Platform.EBAY_USAV) is None
+    assert _resolve_business_policy_ids(
+        {
+            "payment_profile_id": "111",
+            "return_profile_id": "222",
+            "shipping_profile_id": "333",
+        },
+        Platform.EBAY_USAV,
+    ) == {
+        "payment_profile_id": "111",
+        "return_profile_id": "222",
+        "shipping_profile_id": "333",
+    }
+    try:
+        _resolve_business_policy_ids(
+            {
+                "payment_profile_id": "111",
+                "return_profile_id": "",
+                "shipping_profile_id": "333",
+            },
+            Platform.EBAY_USAV,
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert "Incomplete eBay business policy IDs" in str(exc.detail)
+    else:
+        raise AssertionError("Expected HTTPException for partial eBay business policy IDs")

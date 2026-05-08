@@ -82,7 +82,14 @@ def _resolve_listing_defaults(
     variant: ProductVariant,
     platform: Platform,
 ) -> dict[str, object]:
-    existing_listing = next((l for l in (variant.listings or []) if l.platform == platform), None)
+    raw_listings = getattr(variant, "listings", None)
+    if raw_listings is None:
+        listings = []
+    elif isinstance(raw_listings, (list, tuple)):
+        listings = raw_listings
+    else:
+        listings = [raw_listings]
+    existing_listing = next((l for l in listings if l and l.platform == platform), None)
     identity = variant.identity
     family = identity.family if identity else None
     brand_name = family.brand.name if family and family.brand else None
@@ -150,6 +157,32 @@ def _parse_float_or_none(value: object | None) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _resolve_business_policy_ids(
+    store_defaults: dict[str, object],
+    platform: Platform,
+) -> dict[str, str] | None:
+    payment_profile_id = str(store_defaults.get("payment_profile_id") or "").strip()
+    return_profile_id = str(store_defaults.get("return_profile_id") or "").strip()
+    shipping_profile_id = str(store_defaults.get("shipping_profile_id") or "").strip()
+    profile_values = (payment_profile_id, return_profile_id, shipping_profile_id)
+    present_count = sum(1 for value in profile_values if value)
+    if present_count == 0:
+        return None
+    if present_count != 3:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Incomplete eBay business policy IDs for {platform.value}. "
+                "Provide either all of payment/return/shipping profile IDs, or none."
+            ),
+        )
+    return {
+        "payment_profile_id": payment_profile_id,
+        "return_profile_id": return_profile_id,
+        "shipping_profile_id": shipping_profile_id,
+    }
 
 
 @router.get("", response_model=PaginatedResponse)
@@ -248,14 +281,10 @@ async def get_ebay_listing_draft(
     defaults = _resolve_listing_defaults(variant, data.platform)
     identity = variant.identity
     store_defaults = client.get_store_listing_defaults()
-    payment_profile_id = str(store_defaults["payment_profile_id"]).strip()
-    return_profile_id = str(store_defaults["return_profile_id"]).strip()
-    shipping_profile_id = str(store_defaults["shipping_profile_id"]).strip()
-    if not payment_profile_id or not return_profile_id or not shipping_profile_id:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Missing eBay business policy IDs for {data.platform.value}",
-        )
+    seller_profiles = _resolve_business_policy_ids(store_defaults, data.platform)
+    payment_profile_id = seller_profiles["payment_profile_id"] if seller_profiles else ""
+    return_profile_id = seller_profiles["return_profile_id"] if seller_profiles else ""
+    shipping_profile_id = seller_profiles["shipping_profile_id"] if seller_profiles else ""
     condition_text = defaults["condition_text"]
     condition_id = client.to_condition_id(condition_text)
     shipping_package_details = client.to_shipping_package_details(
@@ -379,11 +408,7 @@ async def publish_ebay_listing(
         raise HTTPException(status_code=400, detail="At least one picture URL is required")
 
     store_defaults = client.get_store_listing_defaults()
-    payment_profile_id = str(store_defaults["payment_profile_id"]).strip()
-    return_profile_id = str(store_defaults["return_profile_id"]).strip()
-    shipping_profile_id = str(store_defaults["shipping_profile_id"]).strip()
-    if not payment_profile_id or not return_profile_id or not shipping_profile_id:
-        raise HTTPException(status_code=400, detail=f"Missing eBay business policy IDs for {data.platform.value}")
+    seller_profiles = _resolve_business_policy_ids(store_defaults, data.platform)
 
     country = str(store_defaults["country"]).strip()
     currency = str(store_defaults["currency"]).strip()
@@ -464,24 +489,20 @@ async def publish_ebay_listing(
         "picture_urls": picture_urls,
         "item_specifics": specifics,
         "shipping_package_details": shipping_package_details,
-        "payment_profile_id": payment_profile_id,
-        "return_profile_id": return_profile_id,
-        "shipping_profile_id": shipping_profile_id,
     }
+    if seller_profiles:
+        payload.update(seller_profiles)
     publish_result = await client.add_fixed_price_item(payload)
     item_id = str(publish_result["item_id"])
     platform_metadata = {
         "category_id": data.category_id,
         "picture_urls": picture_urls,
         "item_specifics": specifics,
-        "seller_profiles": {
-            "payment_profile_id": payment_profile_id,
-            "return_profile_id": return_profile_id,
-            "shipping_profile_id": shipping_profile_id,
-        },
         "dispatch_time_max": dispatch_time_max,
         "shipping_package_details": shipping_package_details,
     }
+    if seller_profiles:
+        platform_metadata["seller_profiles"] = seller_profiles
 
     listing_data = {
         "variant_id": variant.id,
