@@ -25,6 +25,7 @@ from app.modules.inventory.schemas import (
     EbayListingDraftResponse,
     ListingCreatePlatformCapability,
     ListingCreateScaffoldResponse,
+    PlatformListingMatchRequest,
     EbayPolicyProfiles,
     EbayPublishRequest,
     EbayPublishResponse,
@@ -707,4 +708,94 @@ async def mark_listing_error(
         "sync_error_message": error_message,
     })
     
+    return PlatformListingResponse.model_validate(listing)
+
+
+@router.post("/{listing_id}/match", response_model=PlatformListingResponse)
+async def match_listing_to_variant(
+    listing_id: int,
+    data: PlatformListingMatchRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Attach a listing to a variant SKU."""
+    listing_repo = PlatformListingRepository(db)
+    variant_repo = ProductVariantRepository(db)
+    listing = await listing_repo.get(listing_id)
+    if not listing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Platform listing {listing_id} not found",
+        )
+
+    variant = await variant_repo.get(data.variant_id)
+    if not variant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Product variant {data.variant_id} not found",
+        )
+
+    existing = await listing_repo.get_by_variant_platform(data.variant_id, listing.platform)
+    if existing and existing.id != listing.id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Listing for variant {data.variant_id} on {listing.platform.value} already exists",
+        )
+
+    listing = await listing_repo.update(
+        listing,
+        {
+            "variant_id": data.variant_id,
+            "sync_status": PlatformSyncStatus.PENDING,
+            "sync_error_message": None,
+        },
+    )
+    return PlatformListingResponse.model_validate(listing)
+
+
+@router.post("/{listing_id}/unmatch", response_model=PlatformListingResponse)
+async def unmatch_listing_from_variant(
+    listing_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Detach a listing from any variant SKU."""
+    repo = PlatformListingRepository(db)
+    listing = await repo.get(listing_id)
+    if not listing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Platform listing {listing_id} not found",
+        )
+
+    listing = await repo.update(
+        listing,
+        {
+            "variant_id": None,
+            "sync_status": PlatformSyncStatus.PENDING,
+            "sync_error_message": None,
+        },
+    )
+    return PlatformListingResponse.model_validate(listing)
+
+
+@router.post("/{listing_id}/sync", response_model=PlatformListingResponse)
+async def queue_listing_sync(
+    listing_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Queue listing for sync (status-only scaffold)."""
+    repo = PlatformListingRepository(db)
+    listing = await repo.get(listing_id)
+    if not listing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Platform listing {listing_id} not found",
+        )
+
+    listing = await repo.update(
+        listing,
+        {
+            "sync_status": PlatformSyncStatus.PENDING,
+            "sync_error_message": None,
+        },
+    )
     return PlatformListingResponse.model_validate(listing)

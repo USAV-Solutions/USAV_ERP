@@ -170,3 +170,7 @@ class ListingCreateScaffoldResponse(BaseModel):
 class EbayCreateStartResponse(BaseModel):
     message: str
     status: str
+
+
+class PlatformListingMatchRequest(BaseModel):
+    variant_id: int = Field(..., ge=1, description="Variant ID to attach to this listing")
