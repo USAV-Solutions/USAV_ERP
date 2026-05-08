@@ -35,6 +35,7 @@ from app.modules.inventory.schemas.inventory import (
     InventorySummary,
 )
 from app.modules.inventory.schemas.listings import (
+    EbayCreateStartResponse,
     EbayCategorySuggestion,
     EbayCategorySuggestionsRequest,
     EbayCategorySuggestionsResponse,
@@ -44,6 +45,9 @@ from app.modules.inventory.schemas.listings import (
     EbayPublishRequest,
     EbayPublishResponse,
     EbaySpecificInput,
+    ListingCreatePlatformCapability,
+    ListingCreateScaffoldResponse,
+    PlatformListingMatchRequest,
     PlatformListingCreate,
     PlatformListingResponse,
     PlatformListingUpdate,
@@ -115,6 +119,10 @@ __all__ = [
     "PlatformListingCreate",
     "PlatformListingResponse",
     "PlatformListingUpdate",
+    "ListingCreatePlatformCapability",
+    "ListingCreateScaffoldResponse",
+    "EbayCreateStartResponse",
+    "PlatformListingMatchRequest",
     "EbayCategorySuggestion",
     "EbayCategorySuggestionsRequest",
     "EbayCategorySuggestionsResponse",

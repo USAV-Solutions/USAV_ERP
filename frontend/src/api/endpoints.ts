@@ -42,12 +42,20 @@ export const LOOKUPS = {
 // Listing endpoints
 export const LISTINGS = {
   LIST: '/listings',
+  CREATE_SCAFFOLD: '/listings/create/scaffold',
+  CREATE_EBAY_START: '/listings/create/ebay/start',
+  EBAY_DRAFT: '/listings/ebay/draft',
+  EBAY_CATEGORY_SUGGESTIONS: '/listings/ebay/category-suggestions',
+  EBAY_PUBLISH: '/listings/ebay/publish',
   LISTING: (id: number) => `/listings/${id}`,
   BY_PLATFORM_REF: (platform: string, refId: string) => `/listings/platform/${platform}/ref/${refId}`,
   PENDING: '/listings/pending',
   ERRORS: '/listings/errors',
   MARK_SYNCED: (id: number) => `/listings/${id}/mark-synced`,
   MARK_ERROR: (id: number) => `/listings/${id}/mark-error`,
+  SYNC: (id: number) => `/listings/${id}/sync`,
+  MATCH: (id: number) => `/listings/${id}/match`,
+  UNMATCH: (id: number) => `/listings/${id}/unmatch`,
 }
 
 // Product Image endpoints

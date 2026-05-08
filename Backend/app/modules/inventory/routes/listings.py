@@ -17,11 +17,15 @@ from app.models import Platform, PlatformSyncStatus
 from app.models.entities import ProductVariant, ProductIdentity, ProductFamily
 from app.repositories import PlatformListingRepository, ProductVariantRepository
 from app.modules.inventory.schemas import (
+    EbayCreateStartResponse,
     EbayCategorySuggestion,
     EbayCategorySuggestionsRequest,
     EbayCategorySuggestionsResponse,
     EbayListingDraftRequest,
     EbayListingDraftResponse,
+    ListingCreatePlatformCapability,
+    ListingCreateScaffoldResponse,
+    PlatformListingMatchRequest,
     EbayPolicyProfiles,
     EbayPublishRequest,
     EbayPublishResponse,
@@ -176,6 +180,61 @@ async def list_platform_listings(
         skip=skip,
         limit=limit,
         items=[PlatformListingResponse.model_validate(item) for item in items]
+    )
+
+
+@router.get("/create/scaffold", response_model=ListingCreateScaffoldResponse)
+async def get_listing_create_scaffold() -> ListingCreateScaffoldResponse:
+    """Scaffold endpoint for new listing-create UI flows."""
+    return ListingCreateScaffoldResponse(
+        message="Listing creation scaffold is active. eBay is enabled first.",
+        supported_platforms=[
+            ListingCreatePlatformCapability(
+                platform=Platform.EBAY_MEKONG,
+                enabled=True,
+                status="SCAFFOLDED",
+                notes="Use this as the first create-new-listing flow target.",
+            ),
+            ListingCreatePlatformCapability(
+                platform=Platform.EBAY_USAV,
+                enabled=True,
+                status="SCAFFOLDED",
+                notes="Use this as the first create-new-listing flow target.",
+            ),
+            ListingCreatePlatformCapability(
+                platform=Platform.EBAY_DRAGON,
+                enabled=True,
+                status="SCAFFOLDED",
+                notes="Use this as the first create-new-listing flow target.",
+            ),
+            ListingCreatePlatformCapability(
+                platform=Platform.AMAZON,
+                enabled=False,
+                status="NOT_STARTED",
+                notes="Scaffold placeholder for future expansion.",
+            ),
+            ListingCreatePlatformCapability(
+                platform=Platform.ECWID,
+                enabled=False,
+                status="NOT_STARTED",
+                notes="Scaffold placeholder for future expansion.",
+            ),
+            ListingCreatePlatformCapability(
+                platform=Platform.WALMART,
+                enabled=False,
+                status="NOT_STARTED",
+                notes="Scaffold placeholder for future expansion.",
+            ),
+        ],
+    )
+
+
+@router.post("/create/ebay/start", response_model=EbayCreateStartResponse)
+async def start_create_ebay_listing_flow() -> EbayCreateStartResponse:
+    """Scaffold endpoint for eBay create-listing flow bootstrapping."""
+    return EbayCreateStartResponse(
+        message="eBay create-new-listing flow scaffold is wired. Full workflow implementation pending.",
+        status="SCAFFOLDED",
     )
 
 
@@ -649,4 +708,94 @@ async def mark_listing_error(
         "sync_error_message": error_message,
     })
     
+    return PlatformListingResponse.model_validate(listing)
+
+
+@router.post("/{listing_id}/match", response_model=PlatformListingResponse)
+async def match_listing_to_variant(
+    listing_id: int,
+    data: PlatformListingMatchRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Attach a listing to a variant SKU."""
+    listing_repo = PlatformListingRepository(db)
+    variant_repo = ProductVariantRepository(db)
+    listing = await listing_repo.get(listing_id)
+    if not listing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Platform listing {listing_id} not found",
+        )
+
+    variant = await variant_repo.get(data.variant_id)
+    if not variant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Product variant {data.variant_id} not found",
+        )
+
+    existing = await listing_repo.get_by_variant_platform(data.variant_id, listing.platform)
+    if existing and existing.id != listing.id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Listing for variant {data.variant_id} on {listing.platform.value} already exists",
+        )
+
+    listing = await listing_repo.update(
+        listing,
+        {
+            "variant_id": data.variant_id,
+            "sync_status": PlatformSyncStatus.PENDING,
+            "sync_error_message": None,
+        },
+    )
+    return PlatformListingResponse.model_validate(listing)
+
+
+@router.post("/{listing_id}/unmatch", response_model=PlatformListingResponse)
+async def unmatch_listing_from_variant(
+    listing_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Detach a listing from any variant SKU."""
+    repo = PlatformListingRepository(db)
+    listing = await repo.get(listing_id)
+    if not listing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Platform listing {listing_id} not found",
+        )
+
+    listing = await repo.update(
+        listing,
+        {
+            "variant_id": None,
+            "sync_status": PlatformSyncStatus.PENDING,
+            "sync_error_message": None,
+        },
+    )
+    return PlatformListingResponse.model_validate(listing)
+
+
+@router.post("/{listing_id}/sync", response_model=PlatformListingResponse)
+async def queue_listing_sync(
+    listing_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Queue listing for sync (status-only scaffold)."""
+    repo = PlatformListingRepository(db)
+    listing = await repo.get(listing_id)
+    if not listing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Platform listing {listing_id} not found",
+        )
+
+    listing = await repo.update(
+        listing,
+        {
+            "sync_status": PlatformSyncStatus.PENDING,
+            "sync_error_message": None,
+        },
+    )
     return PlatformListingResponse.model_validate(listing)

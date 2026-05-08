@@ -14,6 +14,8 @@ Inventory route handlers split by feature surface (variants, listings, images, e
 - `thumbnail_url` is SKU-path scoped; when `full_sku` changes, clear/recompute `thumbnail_url` to avoid cross-SKU thumbnails being shown.
 - eBay publish endpoints under listings now validate required store defaults and business policy IDs before calling eBay; missing env config returns `400` instead of attempting remote publish.
 - eBay publish flow persists identity dimension/weight only when DB fields are currently empty, then maps these values to Trading `ShippingPackageDetails`; incomplete package inputs hard-fail publish validation.
+- Listing creation UI scaffolding now has dedicated routes under `/listings/create/*`; these are intentional placeholders and return scaffold status until full creation flows are implemented.
+- Active Listings UI actions now rely on listing routes for `POST /listings/{id}/sync`, `POST /listings/{id}/match`, and `POST /listings/{id}/unmatch`; these currently update listing sync/match state in DB and do not call remote platform APIs directly.
 
 ## Child Folders
 - (No child folders)

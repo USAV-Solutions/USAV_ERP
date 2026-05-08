@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard'
 import WarehouseOps from './pages/WarehouseOps'
 import InventoryManagement from './pages/InventoryManagement'
 import ProductListings from './pages/ProductListings'
+import CreateProductListing from './pages/CreateProductListing'
 import OrdersManagement from './pages/OrdersManagement'
 import PurchasingManagement from './pages/PurchasingManagement'
 import AccountingReports from './pages/accounting/AccountingReports'
@@ -44,7 +45,9 @@ function App() {
         {/* Catalog Routes */}
         <Route element={<RoleGuard allowedRoles={['ADMIN', 'SALES_REP']} />}>
           <Route path="/catalog/inventory" element={<InventoryManagement />} />
-          <Route path="/catalog/listings" element={<ProductListings />} />
+          <Route path="/catalog/listings" element={<Navigate to="/catalog/listings/active" replace />} />
+          <Route path="/catalog/listings/active" element={<ProductListings />} />
+          <Route path="/catalog/listings/create" element={<CreateProductListing />} />
         </Route>
 
         {/* Orders Routes */}

@@ -37,10 +37,11 @@ import {
   Error as ErrorIcon,
   CheckCircle,
   Schedule,
-  Delete,
-  Edit,
   ExpandMore,
   ExpandLess,
+  Visibility,
+  Link as LinkIcon,
+  LinkOff,
 } from '@mui/icons-material'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axiosClient from '../api/axiosClient'
@@ -406,28 +407,35 @@ function EditListingDialog({ open, onClose, listing }: EditListingDialogProps) {
 export default function ProductListings() {
   const [searchInput, setSearchInput] = useState('')
   const debouncedSearch = useDebouncedValue(searchInput, 200)
+  const [viewMode, setViewMode] = useState<'ALL' | 'BY_SKU'>('ALL')
   const [platformFilter, setPlatformFilter] = useState<Platform | ''>('')
   const [statusFilter, setStatusFilter] = useState<string>('')
+  const [matchFilter, setMatchFilter] = useState<'ALL' | 'MATCHED' | 'UNMATCHED'>('ALL')
+  const [filtersDialogOpen, setFiltersDialogOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(25)
-  const [expandedFamilies, setExpandedFamilies] = useState<Set<number>>(new Set())
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+  const [matchingListingId, setMatchingListingId] = useState<number | null>(null)
+  const [selectedMatchVariant, setSelectedMatchVariant] = useState<any | null>(null)
   const [editingListing, setEditingListing] = useState<EnhancedListing | null>(null)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const { hasRole } = useAuth()
   const queryClient = useQueryClient()
 
-  // Fetch listings
-  const { data: listingsData, isLoading: listingsLoading } = useQuery({
-    queryKey: ['listings', platformFilter, statusFilter],
+  const { data: listingsResponse, isLoading: listingsLoading, isFetching: listingsFetching } = useQuery({
+    queryKey: ['listings', page, rowsPerPage, platformFilter, statusFilter],
     queryFn: async () => {
-      const params: Record<string, any> = { limit: 1000 }
+      const params: Record<string, any> = { skip: page * rowsPerPage, limit: rowsPerPage }
       if (platformFilter) params.platform = platformFilter
       if (statusFilter) params.sync_status = statusFilter
-      
       const response = await axiosClient.get(LISTINGS.LIST, { params })
-      return response.data.items || []
+      return {
+        total: Number(response.data?.total || 0),
+        items: (response.data?.items || []) as PlatformListing[],
+      }
     },
+    placeholderData: (previousData) => previousData,
   })
 
   // Fetch variants for listing creation
@@ -466,6 +474,37 @@ export default function ProductListings() {
       queryClient.invalidateQueries({ queryKey: ['listings'] })
     },
   })
+  const syncMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const response = await axiosClient.post(LISTINGS.SYNC(id))
+      return response.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['listings'] })
+    },
+  })
+  const matchMutation = useMutation({
+    mutationFn: async ({ listingId, variantId }: { listingId: number; variantId: number }) => {
+      const response = await axiosClient.post(LISTINGS.MATCH(listingId), { variant_id: variantId })
+      return response.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['listings'] })
+      setMatchingListingId(null)
+      setSelectedMatchVariant(null)
+    },
+  })
+  const unmatchMutation = useMutation({
+    mutationFn: async (listingId: number) => {
+      const response = await axiosClient.post(LISTINGS.UNMATCH(listingId))
+      return response.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['listings'] })
+      setMatchingListingId(null)
+      setSelectedMatchVariant(null)
+    },
+  })
 
   // Enhanced variants with identity/family data
   const enhancedVariants = useMemo(() => {
@@ -487,71 +526,82 @@ export default function ProductListings() {
 
   // Enhanced listings with variant/identity/family data
   const enhancedListings: EnhancedListing[] = useMemo(() => {
-    if (!listingsData) return []
+    if (!listingsResponse?.items) return []
     
     const variantMap = new Map<number, any>()
     enhancedVariants.forEach((v: any) => variantMap.set(v.id, v))
     
-    return listingsData.map((l: PlatformListing) => ({
+    return listingsResponse.items.map((l: PlatformListing) => ({
       ...l,
       variant: variantMap.get(l.variant_id),
     }))
-  }, [listingsData, enhancedVariants])
+  }, [listingsResponse, enhancedVariants])
 
-  // Filter by search query
+  // Filter by search query + match state
   const filteredListings = useMemo(() => {
     const matchesSearch = compileSearchMatcher(debouncedSearch)
     return enhancedListings.filter((listing) => {
-      return matchesSearch([
+      const matchesText = matchesSearch([
         listing.variant?.full_sku,
         listing.variant?.identity?.family?.base_name,
+        listing.listed_name,
         listing.external_ref_id,
       ])
+      if (!matchesText) return false
+      if (matchFilter === 'MATCHED') return Boolean(listing.variant_id)
+      if (matchFilter === 'UNMATCHED') return !listing.variant_id
+      return true
     })
-  }, [enhancedListings, debouncedSearch])
+  }, [enhancedListings, debouncedSearch, matchFilter])
 
-  // Group listings by product family
-  interface FamilyGroup {
-    productId: number
-    familyName: string
-    brandName?: string
+  interface SkuGroup {
+    key: string
+    sku: string
+    name: string
+    thumbnail?: string
+    type?: string
+    condition?: string
+    color?: string
     listings: EnhancedListing[]
   }
 
-  const groupedByFamily: FamilyGroup[] = useMemo(() => {
-    const groups = new Map<number, FamilyGroup>()
+  const groupedBySku: SkuGroup[] = useMemo(() => {
+    const groups = new Map<string, SkuGroup>()
 
     filteredListings.forEach((listing) => {
-      const productId = listing.variant?.identity?.family?.product_id ?? -1
-      const familyName = listing.variant?.identity?.family?.base_name || 'Unknown'
-      const brandName = listing.variant?.identity?.family?.brand?.name
-
-      if (!groups.has(productId)) {
-        groups.set(productId, {
-          productId,
-          familyName,
-          brandName,
+      const key = listing.variant_id ? `sku-${listing.variant_id}` : 'unmatched'
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          sku: listing.variant?.full_sku || 'Unmatched Listings',
+          name: listing.variant?.identity?.family?.base_name || 'Listings with no matched SKU',
+          thumbnail: listing.variant?.thumbnail_url,
+          type: listing.variant?.identity?.identity_type || '-',
+          condition: listing.listing_condition || listing.variant?.condition_code || '-',
+          color: listing.variant?.color_code || '-',
           listings: [],
         })
       }
-      groups.get(productId)!.listings.push(listing)
+      groups.get(key)!.listings.push(listing)
     })
 
-    return Array.from(groups.values()).sort((a, b) =>
-      a.familyName.localeCompare(b.familyName),
-    )
+    return Array.from(groups.values()).sort((a, b) => {
+      if (a.key === 'unmatched') return -1
+      if (b.key === 'unmatched') return 1
+      return a.sku.localeCompare(b.sku)
+    })
   }, [filteredListings])
 
-  const paginatedFamilies = groupedByFamily.slice(
-    page * rowsPerPage,
-    page * rowsPerPage + rowsPerPage,
-  )
+  const totalListings = listingsResponse?.total || 0
+  useEffect(() => {
+    setPage(0)
+  }, [viewMode, platformFilter, statusFilter, matchFilter, debouncedSearch, rowsPerPage])
 
-  const toggleFamily = (productId: number) => {
-    setExpandedFamilies((prev) => {
+  const toggleGroup = (key: string) => {
+    setExpandedGroups((prev) => {
       const next = new Set(prev)
-      if (next.has(productId)) next.delete(productId)
-      else next.add(productId)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       return next
     })
   }
@@ -571,11 +621,151 @@ export default function ProductListings() {
     return PLATFORMS.find(p => p.value === platform)?.label || platform
   }
 
+  const buildListingLink = (listing: EnhancedListing) => {
+    const externalRef = (listing.external_ref_id || '').trim()
+    if (!externalRef) return null
+    if (listing.platform.startsWith('EBAY_')) return `https://www.ebay.com/itm/${externalRef}`
+    if (listing.platform === 'AMAZON') return `https://amazon.com/dp/${externalRef}`
+    if (listing.platform === 'WALMART') return `https://www.walmart.com/ip/${externalRef}`
+    return null
+  }
+
+  const renderListingRow = (listing: EnhancedListing) => {
+    const isMatching = matchingListingId === listing.id
+    const listingLink = buildListingLink(listing)
+    const anyPending =
+      syncMutation.isPending || matchMutation.isPending || unmatchMutation.isPending || deleteMutation.isPending
+    return (
+      <Fragment key={listing.id}>
+        <TableRow hover sx={{ cursor: 'pointer' }} onClick={() => handleEdit(listing)}>
+          <TableCell>
+            <Chip size="small" label={getPlatformLabel(listing.platform)} variant="outlined" />
+          </TableCell>
+          <TableCell>{listing.listed_name || '-'}</TableCell>
+          <TableCell>
+            <Typography variant="body2" fontFamily="monospace">
+              {listing.external_ref_id || '-'}
+            </Typography>
+          </TableCell>
+          <TableCell>{listing.listing_price != null ? `$${listing.listing_price.toFixed(2)}` : '-'}</TableCell>
+          <TableCell>{listing.listing_quantity ?? '-'}</TableCell>
+          <TableCell>{getSyncStatusChip(listing.sync_status, listing.sync_error_message)}</TableCell>
+          <TableCell>
+            <Box sx={{ display: 'flex', gap: 0.5 }}>
+              <Tooltip title="Queue Sync">
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      syncMutation.mutate(listing.id)
+                    }}
+                    disabled={anyPending}
+                  >
+                    <Refresh fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+              <Tooltip title="View Platform Listing">
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (listingLink) window.open(listingLink, '_blank', 'noopener,noreferrer')
+                    }}
+                    disabled={!listingLink}
+                  >
+                    <Visibility fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+              {!listing.variant_id ? (
+                <Tooltip title="Match to SKU">
+                  <span>
+                    <IconButton
+                      size="small"
+                      color="primary"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setMatchingListingId((prev) => (prev === listing.id ? null : listing.id))
+                        setSelectedMatchVariant(null)
+                      }}
+                      disabled={anyPending}
+                    >
+                      <LinkIcon fontSize="small" />
+                    </IconButton>
+                  </span>
+                </Tooltip>
+              ) : (
+                <Tooltip title="Unmatch from SKU">
+                  <span>
+                    <IconButton
+                      size="small"
+                      color="error"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        unmatchMutation.mutate(listing.id)
+                      }}
+                      disabled={anyPending}
+                    >
+                      <LinkOff fontSize="small" />
+                    </IconButton>
+                  </span>
+                </Tooltip>
+              )}
+            </Box>
+          </TableCell>
+        </TableRow>
+        {isMatching && (
+          <TableRow>
+            <TableCell colSpan={7}>
+              <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', py: 1 }}>
+                <Autocomplete
+                  options={enhancedVariants}
+                  getOptionLabel={(option: any) => `${option.full_sku} - ${option.identity?.family?.base_name || 'Unknown'}`}
+                  value={selectedMatchVariant}
+                  onChange={(_, value) => setSelectedMatchVariant(value)}
+                  renderInput={(params) => <TextField {...params} label="Match to SKU" size="small" />}
+                  sx={{ minWidth: 360 }}
+                />
+                <Button
+                  size="small"
+                  variant="contained"
+                  onClick={() => {
+                    if (!selectedMatchVariant) return
+                    matchMutation.mutate({ listingId: listing.id, variantId: selectedMatchVariant.id })
+                  }}
+                  disabled={!selectedMatchVariant || matchMutation.isPending}
+                >
+                  Match
+                </Button>
+                <Button size="small" onClick={() => setMatchingListingId(null)}>
+                  Cancel
+                </Button>
+              </Box>
+            </TableCell>
+          </TableRow>
+        )}
+      </Fragment>
+    )
+  }
+
+  const clearAllFilters = () => {
+    setPlatformFilter('')
+    setStatusFilter('')
+    setMatchFilter('ALL')
+  }
+
+  const activeFilterCount = [platformFilter ? 1 : 0, statusFilter ? 1 : 0, matchFilter !== 'ALL' ? 1 : 0].reduce(
+    (sum, n) => sum + n,
+    0,
+  )
+
   return (
     <Box>
-      {/* Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4">Product Listings</Typography>
+        <Typography variant="h4">Active Listings</Typography>
         {hasRole(['ADMIN', 'SALES_REP']) && (
           <Button
             variant="contained"
@@ -587,219 +777,139 @@ export default function ProductListings() {
         )}
       </Box>
 
-      {/* Filters */}
       <Paper sx={{ p: 2, mb: 3 }}>
-        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+          <Button
+            size="small"
+            variant={viewMode === 'ALL' ? 'contained' : 'outlined'}
+            onClick={() => setViewMode('ALL')}
+          >
+            All Listings
+          </Button>
+          <Button
+            size="small"
+            variant={viewMode === 'BY_SKU' ? 'contained' : 'outlined'}
+            onClick={() => setViewMode('BY_SKU')}
+          >
+            Listings to SKU
+          </Button>
           <SearchField
-            placeholder="Search by SKU, name, or external ID..."
+            placeholder="Search by SKU, item name, external ID, or listed name..."
             value={searchInput}
             onChange={setSearchInput}
             size="small"
             sx={{ flexGrow: 1, minWidth: 250 }}
           />
-          
-          <FormControl size="small" sx={{ minWidth: 150 }}>
-            <InputLabel>Platform</InputLabel>
-            <Select
-              value={platformFilter}
-              label="Platform"
-              onChange={(e: SelectChangeEvent<Platform | ''>) => setPlatformFilter(e.target.value as Platform | '')}
-            >
-              <MenuItem value="">All Platforms</MenuItem>
-              {PLATFORMS.map((p) => (
-                <MenuItem key={p.value} value={p.value}>
-                  {p.label}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-
-          <FormControl size="small" sx={{ minWidth: 130 }}>
-            <InputLabel>Status</InputLabel>
-            <Select
-              value={statusFilter}
-              label="Status"
-              onChange={(e: SelectChangeEvent<string>) => setStatusFilter(e.target.value)}
-            >
-              <MenuItem value="">All Statuses</MenuItem>
-              <MenuItem value="SYNCED">Synced</MenuItem>
-              <MenuItem value="PENDING">Pending</MenuItem>
-              <MenuItem value="ERROR">Error</MenuItem>
-            </Select>
-          </FormControl>
-
-          <IconButton
-            onClick={() => queryClient.invalidateQueries({ queryKey: ['listings'] })}
-            title="Refresh"
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => setFiltersDialogOpen(true)}
           >
+            Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+          </Button>
+          <Button size="small" onClick={clearAllFilters} disabled={activeFilterCount === 0}>
+            Clear
+          </Button>
+          <IconButton onClick={() => queryClient.invalidateQueries({ queryKey: ['listings'] })} title="Refresh">
             <Refresh />
           </IconButton>
         </Box>
       </Paper>
 
-      {/* Listings Table – grouped by Product Family */}
       <Paper>
-        <TableContainer>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell sx={{ width: 40 }} />
-                <TableCell>Product Family</TableCell>
-                <TableCell>Brand</TableCell>
-                <TableCell align="center">Listings</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {listingsLoading ? (
+        {listingsFetching && !listingsLoading && (
+          <Box sx={{ px: 2, pt: 1 }}>
+            <Typography variant="caption" color="text.secondary">
+              Loading page...
+            </Typography>
+          </Box>
+        )}
+        {listingsLoading ? (
+          <Box sx={{ py: 6, textAlign: 'center' }}>
+            <CircularProgress size={24} />
+          </Box>
+        ) : filteredListings.length === 0 ? (
+          <Box sx={{ py: 6, textAlign: 'center' }}>
+            <Typography color="text.secondary">No listings found</Typography>
+          </Box>
+        ) : viewMode === 'ALL' ? (
+          <TableContainer>
+            <Table>
+              <TableHead>
                 <TableRow>
-                  <TableCell colSpan={4} align="center">
-                    <CircularProgress size={24} />
-                  </TableCell>
+                  <TableCell>Platform</TableCell>
+                  <TableCell>Listed Name</TableCell>
+                  <TableCell>External Ref ID</TableCell>
+                  <TableCell>Price</TableCell>
+                  <TableCell>Qty</TableCell>
+                  <TableCell>Sync Status</TableCell>
+                  <TableCell>Actions</TableCell>
                 </TableRow>
-              ) : paginatedFamilies.length === 0 ? (
+              </TableHead>
+              <TableBody>{filteredListings.map((listing) => renderListingRow(listing))}</TableBody>
+            </Table>
+          </TableContainer>
+        ) : (
+          <TableContainer>
+            <Table>
+              <TableHead>
                 <TableRow>
-                  <TableCell colSpan={4} align="center">
-                    No listings found
-                  </TableCell>
+                  <TableCell sx={{ width: 40 }} />
+                  <TableCell>SKU</TableCell>
+                  <TableCell>Name</TableCell>
+                  <TableCell>Thumbnail</TableCell>
+                  <TableCell>Type</TableCell>
+                  <TableCell>Condition</TableCell>
+                  <TableCell>Color</TableCell>
+                  <TableCell align="center">Listings</TableCell>
                 </TableRow>
-              ) : (
-                paginatedFamilies.map((group) => {
-                  const isExpanded = expandedFamilies.has(group.productId)
+              </TableHead>
+              <TableBody>
+                {groupedBySku.map((group) => {
+                  const isExpanded = expandedGroups.has(group.key)
                   return (
-                    <Fragment key={group.productId}>
-                      <TableRow
-                        hover
-                        sx={{ cursor: 'pointer', '& > *': { borderBottom: isExpanded ? 'unset' : undefined } }}
-                        onClick={() => toggleFamily(group.productId)}
-                      >
-                        <TableCell sx={{ width: 40, px: 1 }}>
-                          <IconButton size="small">
-                            {isExpanded ? <ExpandLess /> : <ExpandMore />}
-                          </IconButton>
+                    <Fragment key={group.key}>
+                      <TableRow hover sx={{ cursor: 'pointer' }} onClick={() => toggleGroup(group.key)}>
+                        <TableCell>
+                          <IconButton size="small">{isExpanded ? <ExpandLess /> : <ExpandMore />}</IconButton>
                         </TableCell>
                         <TableCell>
-                          <Typography variant="body2" fontWeight={500}>
-                            {group.familyName}
+                          <Typography variant="body2" fontFamily="monospace">
+                            {group.sku}
                           </Typography>
                         </TableCell>
-                        <TableCell>{group.brandName || '-'}</TableCell>
+                        <TableCell>{group.name}</TableCell>
+                        <TableCell>
+                          {group.thumbnail ? (
+                            <img src={group.thumbnail} alt={group.sku} style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 4 }} />
+                          ) : (
+                            '-'
+                          )}
+                        </TableCell>
+                        <TableCell>{group.type || '-'}</TableCell>
+                        <TableCell>{group.condition || '-'}</TableCell>
+                        <TableCell>{group.color || '-'}</TableCell>
                         <TableCell align="center">
-                          <Chip size="small" label={`${group.listings.length} listing(s)`} />
+                          <Chip size="small" label={group.listings.length} />
                         </TableCell>
                       </TableRow>
                       <TableRow>
-                        <TableCell sx={{ py: 0 }} colSpan={4}>
+                        <TableCell colSpan={8} sx={{ py: 0 }}>
                           <Collapse in={isExpanded} timeout="auto" unmountOnExit>
-                            <Box sx={{ py: 1, px: 2, bgcolor: 'grey.50' }}>
+                            <Box sx={{ p: 1.5, bgcolor: 'grey.50' }}>
                               <Table size="small">
                                 <TableHead>
                                   <TableRow>
-                                    <TableCell>SKU</TableCell>
                                     <TableCell>Platform</TableCell>
                                     <TableCell>Listed Name</TableCell>
                                     <TableCell>External Ref ID</TableCell>
                                     <TableCell>Price</TableCell>
                                     <TableCell>Qty</TableCell>
-                                    <TableCell>Type</TableCell>
-                                    <TableCell>Condition</TableCell>
-                                    <TableCell>UPC</TableCell>
-                                    <TableCell>Derived Details</TableCell>
                                     <TableCell>Sync Status</TableCell>
-                                    <TableCell>Last Synced</TableCell>
                                     <TableCell>Actions</TableCell>
                                   </TableRow>
                                 </TableHead>
-                                <TableBody>
-                                  {group.listings.map((listing) => (
-                                    <TableRow key={listing.id}>
-                                      <TableCell>
-                                        <Typography variant="body2" fontFamily="monospace">
-                                          {listing.variant?.full_sku || '-'}
-                                        </Typography>
-                                      </TableCell>
-                                      <TableCell>
-                                        <Chip
-                                          size="small"
-                                          label={getPlatformLabel(listing.platform)}
-                                          variant="outlined"
-                                        />
-                                      </TableCell>
-                                      <TableCell>
-                                        <Tooltip title={listing.listed_name || ''}>
-                                          <Typography variant="body2" sx={{ maxWidth: 280, whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
-                                            {listing.listed_name || '-'}
-                                          </Typography>
-                                        </Tooltip>
-                                      </TableCell>
-                                      <TableCell>
-                                        <Typography variant="body2" fontFamily="monospace">
-                                          {listing.external_ref_id || '-'}
-                                        </Typography>
-                                      </TableCell>
-                                      <TableCell>
-                                        {listing.listing_price != null ? `$${listing.listing_price.toFixed(2)}` : '-'}
-                                      </TableCell>
-                                      <TableCell>{listing.listing_quantity ?? '-'}</TableCell>
-                                      <TableCell>{listing.listing_type || '-'}</TableCell>
-                                      <TableCell>{listing.listing_condition || listing.variant?.condition_code || '-'}</TableCell>
-                                      <TableCell>{listing.upc || '-'}</TableCell>
-                                      <TableCell>
-                                        <Typography variant="caption" sx={{ display: 'block' }}>
-                                          Brand: {listing.variant?.identity?.family?.brand?.name || '-'}
-                                        </Typography>
-                                        <Typography variant="caption" sx={{ display: 'block' }}>
-                                          Color: {listing.variant?.color_code || '-'}
-                                        </Typography>
-                                        <Typography variant="caption" sx={{ display: 'block' }}>
-                                          L/W/H: {listing.variant?.identity?.dimension_length ?? '-'} / {listing.variant?.identity?.dimension_width ?? '-'} / {listing.variant?.identity?.dimension_height ?? '-'}
-                                        </Typography>
-                                        <Typography variant="caption" sx={{ display: 'block' }}>
-                                          Weight: {listing.variant?.identity?.weight ?? '-'}
-                                        </Typography>
-                                      </TableCell>
-                                      <TableCell>
-                                        {getSyncStatusChip(listing.sync_status, listing.sync_error_message)}
-                                      </TableCell>
-                                      <TableCell>
-                                        {listing.last_synced_at
-                                          ? new Date(listing.last_synced_at).toLocaleDateString()
-                                          : '-'}
-                                      </TableCell>
-                                      <TableCell>
-                                        {hasRole(['ADMIN', 'SALES_REP']) && (
-                                          <>
-                                            <Tooltip title="Edit Listing">
-                                              <IconButton
-                                                size="small"
-                                                onClick={(e) => {
-                                                  e.stopPropagation()
-                                                  handleEdit(listing)
-                                                }}
-                                              >
-                                                <Edit fontSize="small" />
-                                              </IconButton>
-                                            </Tooltip>
-                                            {hasRole(['ADMIN']) && (
-                                              <Tooltip title="Delete Listing">
-                                                <IconButton
-                                                  size="small"
-                                                  color="error"
-                                                  onClick={(e) => {
-                                                    e.stopPropagation()
-                                                    handleDelete(listing.id)
-                                                  }}
-                                                  disabled={deleteMutation.isPending}
-                                                >
-                                                  <Delete fontSize="small" />
-                                                </IconButton>
-                                              </Tooltip>
-                                            )}
-                                          </>
-                                        )}
-                                      </TableCell>
-                                    </TableRow>
-                                  ))}
-                                </TableBody>
+                                <TableBody>{group.listings.map((listing) => renderListingRow(listing))}</TableBody>
                               </Table>
                             </Box>
                           </Collapse>
@@ -807,26 +917,25 @@ export default function ProductListings() {
                       </TableRow>
                     </Fragment>
                   )
-                })
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
         <TablePagination
-          rowsPerPageOptions={[10, 25, 50, 100]}
           component="div"
-          count={groupedByFamily.length}
+          rowsPerPageOptions={[10, 25, 50, 100]}
+          count={totalListings}
           rowsPerPage={rowsPerPage}
           page={page}
-          onPageChange={(_: unknown, newPage: number) => setPage(newPage)}
-          onRowsPerPageChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-            setRowsPerPage(parseInt(e.target.value, 10))
+          onPageChange={(_event, newPage) => setPage(newPage)}
+          onRowsPerPageChange={(event) => {
+            setRowsPerPage(parseInt(event.target.value, 10))
             setPage(0)
           }}
         />
       </Paper>
 
-      {/* Create Listing Dialog */}
       <CreateListingDialog
         open={createDialogOpen}
         onClose={() => setCreateDialogOpen(false)}
@@ -837,6 +946,65 @@ export default function ProductListings() {
         onClose={() => setEditDialogOpen(false)}
         listing={editingListing}
       />
+
+      <Dialog open={filtersDialogOpen} onClose={() => setFiltersDialogOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>Listing Filters</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'grid', gap: 2, mt: 1 }}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Platform</InputLabel>
+              <Select
+                value={platformFilter}
+                label="Platform"
+                onChange={(e: SelectChangeEvent<Platform | ''>) => setPlatformFilter(e.target.value as Platform | '')}
+              >
+                <MenuItem value="">All Platforms</MenuItem>
+                {PLATFORMS.map((p) => (
+                  <MenuItem key={p.value} value={p.value}>
+                    {p.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl fullWidth size="small">
+              <InputLabel>Sync Status</InputLabel>
+              <Select value={statusFilter} label="Sync Status" onChange={(e: SelectChangeEvent<string>) => setStatusFilter(e.target.value)}>
+                <MenuItem value="">All Statuses</MenuItem>
+                <MenuItem value="SYNCED">Synced</MenuItem>
+                <MenuItem value="PENDING">Pending</MenuItem>
+                <MenuItem value="ERROR">Error</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl fullWidth size="small">
+              <InputLabel>Match State</InputLabel>
+              <Select
+                value={matchFilter}
+                label="Match State"
+                onChange={(e: SelectChangeEvent<'ALL' | 'MATCHED' | 'UNMATCHED'>) =>
+                  setMatchFilter(e.target.value as 'ALL' | 'MATCHED' | 'UNMATCHED')
+                }
+              >
+                <MenuItem value="ALL">All</MenuItem>
+                <MenuItem value="MATCHED">Matched</MenuItem>
+                <MenuItem value="UNMATCHED">Unmatched</MenuItem>
+              </Select>
+            </FormControl>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              clearAllFilters()
+              setFiltersDialogOpen(false)
+            }}
+          >
+            Reset
+          </Button>
+          <Button variant="contained" onClick={() => setFiltersDialogOpen(false)}>
+            Apply
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }

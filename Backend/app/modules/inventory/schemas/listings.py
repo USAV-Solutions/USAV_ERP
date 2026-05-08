@@ -153,3 +153,24 @@ class EbayPublishResponse(BaseModel):
     variant_id: int
     item_id: str
     sync_status: PlatformSyncStatus
+
+
+class ListingCreatePlatformCapability(BaseModel):
+    platform: Platform
+    enabled: bool
+    status: str
+    notes: str
+
+
+class ListingCreateScaffoldResponse(BaseModel):
+    message: str
+    supported_platforms: list[ListingCreatePlatformCapability] = Field(default_factory=list)
+
+
+class EbayCreateStartResponse(BaseModel):
+    message: str
+    status: str
+
+
+class PlatformListingMatchRequest(BaseModel):
+    variant_id: int = Field(..., ge=1, description="Variant ID to attach to this listing")

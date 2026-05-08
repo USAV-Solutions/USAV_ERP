@@ -34,6 +34,7 @@ import {
   Transform,
   ExpandLess,
   ExpandMore,
+  PlaylistAdd,
 } from '@mui/icons-material'
 import { useAuth } from '../../hooks/useAuth'
 
@@ -51,7 +52,15 @@ const navItems: NavItem[] = [
   { title: 'Dashboard', path: '/', icon: <Dashboard />, roles: ['ADMIN', 'WAREHOUSE_OP', 'SALES_REP'] },
   { title: 'Warehouse Operations', path: '/warehouse/ops', icon: <Search />, roles: ['ADMIN', 'WAREHOUSE_OP'] },
   { title: 'Inventory Management', path: '/catalog/inventory', icon: <Inventory />, roles: ['ADMIN', 'SALES_REP'] },
-  { title: 'Product Listings', path: '/catalog/listings', icon: <Storefront />, roles: ['ADMIN', 'SALES_REP'] },
+  {
+    title: 'Product Listings',
+    icon: <Storefront />,
+    roles: ['ADMIN', 'SALES_REP'],
+    children: [
+      { title: 'Active Listings', path: '/catalog/listings/active', icon: <Storefront />, roles: ['ADMIN', 'SALES_REP'] },
+      { title: 'Create New Listing', path: '/catalog/listings/create', icon: <PlaylistAdd />, roles: ['ADMIN', 'SALES_REP'] },
+    ],
+  },
   { title: 'Orders', path: '/orders', icon: <ShoppingCart />, roles: ['ADMIN', 'SALES_REP', 'WAREHOUSE_OP'] },
   { title: 'Purchasing', path: '/purchasing', icon: <LocalShipping />, roles: ['ADMIN', 'SALES_REP', 'WAREHOUSE_OP'] },
   {
@@ -71,12 +80,16 @@ export default function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
   const [accountingOpen, setAccountingOpen] = useState(location.pathname.startsWith('/accounting/'))
+  const [productListingsOpen, setProductListingsOpen] = useState(location.pathname.startsWith('/catalog/listings/'))
   const { user, logout, hasRole } = useAuth()
   const navigate = useNavigate()
 
   useEffect(() => {
     if (location.pathname.startsWith('/accounting/')) {
       setAccountingOpen(true)
+    }
+    if (location.pathname.startsWith('/catalog/listings/')) {
+      setProductListingsOpen(true)
     }
   }, [location.pathname])
 
@@ -134,13 +147,21 @@ export default function Layout() {
             return (
               <Box key={`${item.title}-${index}`}>
                 <ListItem disablePadding>
-                  <ListItemButton onClick={() => setAccountingOpen((open) => !open)}>
+                  <ListItemButton
+                    onClick={() => {
+                      if (item.title === 'Accounting') {
+                        setAccountingOpen((open) => !open)
+                        return
+                      }
+                      setProductListingsOpen((open) => !open)
+                    }}
+                  >
                     <ListItemIcon>{item.icon}</ListItemIcon>
                     <ListItemText primary={item.title} />
-                    {accountingOpen ? <ExpandLess /> : <ExpandMore />}
+                    {(item.title === 'Accounting' ? accountingOpen : productListingsOpen) ? <ExpandLess /> : <ExpandMore />}
                   </ListItemButton>
                 </ListItem>
-                <Collapse in={accountingOpen} timeout="auto" unmountOnExit>
+                <Collapse in={item.title === 'Accounting' ? accountingOpen : productListingsOpen} timeout="auto" unmountOnExit>
                   <List component="div" disablePadding>
                     {visibleChildren.map((child) => (
                       <ListItem key={child.path} disablePadding>
