@@ -155,6 +155,14 @@ export default function OrderItemsPanel({ orderId, headerAction }: OrderItemsPan
             {Number(order.shipping_amount || 0).toFixed(2)}
           </Typography>
         </Box>
+        <Box sx={{ minWidth: 120, flexShrink: 0 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            Zoho Total
+          </Typography>
+          <Typography variant="body2" sx={{ fontSize: '0.82rem' }}>
+            {order.currency} {Number(order.zoho_total_amount || 0).toFixed(2)}
+          </Typography>
+        </Box>
         <Box sx={{ minWidth: 220, maxWidth: 360, flexShrink: 1, overflow: 'hidden' }}>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
             Shipping Address

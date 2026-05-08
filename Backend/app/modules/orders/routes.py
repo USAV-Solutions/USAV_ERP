@@ -23,6 +23,7 @@ import io
 import logging
 from pathlib import Path
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -74,6 +75,46 @@ from app.api.deps import AdminOrSalesUser, AdminUser
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/orders", tags=["Orders"])
+
+_MARKETPLACE_ZOHO_EXCLUDE_TAX_PLATFORMS = {
+    OrderPlatform.AMAZON,
+    OrderPlatform.WALMART,
+    OrderPlatform.EBAY_MEKONG,
+    OrderPlatform.EBAY_USAV,
+    OrderPlatform.EBAY_DRAGON,
+}
+
+
+def _to_money_decimal(value: object) -> Decimal:
+    try:
+        return Decimal(str(value or 0))
+    except Exception:
+        return Decimal("0")
+
+
+def _quantize_money(value: Decimal) -> Decimal:
+    return value.quantize(Decimal("0.01"))
+
+
+def _compute_order_totals(order) -> tuple[Decimal, Decimal]:
+    line_total = _to_money_decimal(order.subtotal_amount)
+    tax = _to_money_decimal(order.tax_amount)
+    shipping = _to_money_decimal(order.shipping_amount)
+    stored_total = _to_money_decimal(order.total_amount)
+
+    # Infer handling from stored platform total when present.
+    inferred_handling = stored_total - (line_total + tax + shipping)
+    if inferred_handling < Decimal("0"):
+        inferred_handling = Decimal("0")
+
+    platform_total = stored_total if stored_total > Decimal("0") else (line_total + tax + shipping)
+
+    if order.platform in _MARKETPLACE_ZOHO_EXCLUDE_TAX_PLATFORMS:
+        zoho_total = line_total + shipping + inferred_handling
+    else:
+        zoho_total = line_total + tax + shipping + inferred_handling
+
+    return _quantize_money(platform_total), _quantize_money(zoho_total)
 
 _IMPORT_SOURCE_TO_PLATFORM: dict[SalesImportApiSource, str] = {
     SalesImportApiSource.ECWID: "ECWID",
@@ -374,15 +415,16 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
                 "subtotal": _as_float(row, "subtotal_amount", "subtotal", "Amount - Order Subtotal", default=0.0),
                 "tax": _as_float(row, "tax_amount", "tax", "Amount - Order Tax", default=0.0),
                 "shipping": _as_float(row, "shipping_amount", "Amount - Shipping Cost", "shipping", "Amount - Order Shipping", default=0.0),
+                "handling": _as_float(row, "handling_amount", "handling", "Amount - Handling", "Amount - Handling Cost", default=0.0),
                 "total": _as_float(row, "total_amount", "total", "Amount - Order Total", default=0.0),
                 "currency": _pick(row, "currency") or "USD",
                 "ordered_at": ordered_at,
                 "items": [],
                 "tracking_number": None,
                 "raw_data": {
-                    "import_source": "CSV_GENERIC",
+                    "import_source": "SHIPSTATION_CSV",
                     "platform_name": platform_name,
-                    "source": _pick(row, "source", "Source", "order_source", "Order Source") or None,
+                    "source": "SHIPSTATION_CSV",
                     "tracking_number": None,
                 },
                 "_tracking_parts": [],
@@ -417,6 +459,21 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
         )
 
     for order_entry in grouped.values():
+        # CSV shapes vary; when subtotal is missing, derive line total from item rows.
+        line_total = sum(float(item.get("total_price") or 0.0) for item in order_entry.get("items", []))
+        subtotal = float(order_entry.get("subtotal") or 0.0)
+        tax = float(order_entry.get("tax") or 0.0)
+        shipping = float(order_entry.get("shipping") or 0.0)
+        handling = float(order_entry.get("handling") or 0.0)
+        platform_total = float(order_entry.get("total") or 0.0)
+
+        if subtotal <= 0 and line_total > 0:
+            subtotal = line_total
+            order_entry["subtotal"] = subtotal
+
+        if platform_total <= 0:
+            order_entry["total"] = subtotal + tax + shipping + handling
+
         order_entry.pop("_tracking_parts", None)
 
     return list(grouped.values()), seen, skipped
@@ -852,7 +909,7 @@ async def import_orders_from_file(
             ordered_at=row["ordered_at"],
             items=items,
             raw_data=row["raw_data"],
-            customer_source=(row.get("raw_data") or {}).get("source"),
+            customer_source=None,
             tracking_number=row.get("tracking_number"),
         )
         orders_by_platform.setdefault(platform_name, []).append(external_order)
@@ -871,7 +928,7 @@ async def import_orders_from_file(
             client,
             datetime(1970, 1, 1, tzinfo=timezone.utc),
             datetime.now(timezone.utc),
-            source=_PLATFORM_TO_SOURCE.get(platform_name, source.value),
+            source="SHIPSTATION_CSV",
         )
         aggregate["new_orders"] += result.new_orders
         aggregate["new_items"] += result.new_items
@@ -965,6 +1022,8 @@ async def list_orders(
         else:
             items = [raw_items]
         
+        platform_total_amount, zoho_total_amount = _compute_order_totals(o)
+
         briefs.append(
             OrderBrief(
                 id=o.id,
@@ -981,6 +1040,8 @@ async def list_orders(
                 tax_amount=o.tax_amount,
                 shipping_amount=o.shipping_amount,
                 total_amount=o.total_amount,
+                platform_total_amount=platform_total_amount,
+                zoho_total_amount=zoho_total_amount,
                 currency=o.currency,
                 ordered_at=o.ordered_at,
                 created_at=o.created_at,
@@ -1006,7 +1067,11 @@ async def get_order(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Order {order_id} not found.",
         )
-    return OrderDetail.model_validate(order)
+    platform_total_amount, zoho_total_amount = _compute_order_totals(order)
+    detail = OrderDetail.model_validate(order)
+    detail.platform_total_amount = platform_total_amount
+    detail.zoho_total_amount = zoho_total_amount
+    return detail
 
 
 @router.patch("/{order_id}", response_model=OrderDetail)

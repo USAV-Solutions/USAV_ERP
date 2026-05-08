@@ -69,6 +69,14 @@ VALID_ZOHO_SO_SOURCE_VALUES = {
     "Walmart",
 }
 
+_MARKETPLACE_ORDER_PLATFORMS = {
+    "AMAZON",
+    "WALMART",
+    "EBAY_MEKONG",
+    "EBAY_USAV",
+    "EBAY_DRAGON",
+}
+
 EXACT_ZOHO_CONTACT_SOURCE_MAP = {
     "EBAY_DRAGON": "Ebay_Dragon",
     "EBAY_DRAGON_API": "Ebay_Dragon",
@@ -1942,9 +1950,11 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
     if customer.email:
         payload["email"] = customer.email
 
+    platform_name = str(getattr(order, "platform", "") or "").strip().upper()
+    is_marketplace_order = platform_name in _MARKETPLACE_ORDER_PLATFORMS
+
     # Line items
     line_items: list[dict[str, Any]] = []
-    is_ecwid_source = str(getattr(order, "source", "") or "").strip().upper() == "ECWID_API"
     for item in (order.items or []):
         li: dict[str, Any] = {
             "name": item.item_name,
@@ -1963,7 +1973,7 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
         variant = getattr(item, "variant", None)
         if variant and variant.zoho_item_id:
             li["item_id"] = variant.zoho_item_id
-        if is_ecwid_source:
+        if is_marketplace_order:
             li["tax_percentage"] = 0.0
         line_items.append(li)
     payload["line_items"] = line_items
@@ -1981,13 +1991,22 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
     # Shipping address is already on the linked Zoho contact (customer_id).
     # Avoid sending per-order shipping_address to prevent Zoho code 15 failures.
 
-    shipping_charge = float(order.shipping_amount or 0)
-    payload["shipping_charge"] = shipping_charge
+    line_total = Decimal(str(getattr(order, "subtotal_amount", 0) or 0))
+    tax_amount = Decimal(str(getattr(order, "tax_amount", 0) or 0))
+    shipping_amount = Decimal(str(getattr(order, "shipping_amount", 0) or 0))
+    stored_platform_total = Decimal(str(getattr(order, "total_amount", 0) or 0))
+    inferred_handling = stored_platform_total - (line_total + tax_amount + shipping_amount)
+    if inferred_handling < Decimal("0"):
+        inferred_handling = Decimal("0")
 
-    if is_ecwid_source:
-        tax_adjustment = float(order.tax_amount or 0)
-        payload["adjustment"] = tax_adjustment
-        payload["adjustment_description"] = "Tax adjustment"
+    payload["shipping_charge"] = float(shipping_amount)
+
+    if is_marketplace_order:
+        payload["adjustment"] = float(inferred_handling)
+        payload["adjustment_description"] = "Handling fee"
+    else:
+        payload["adjustment"] = float(tax_amount + inferred_handling)
+        payload["adjustment_description"] = "Tax + Handling fee"
 
     return payload
 

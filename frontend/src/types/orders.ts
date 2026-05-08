@@ -119,6 +119,8 @@ export interface OrderBrief {
   tax_amount: string
   shipping_amount: string
   total_amount: string
+  platform_total_amount: string
+  zoho_total_amount: string
   currency: string
   ordered_at: string | null
   created_at: string
@@ -150,6 +152,8 @@ export interface OrderDetail {
   tax_amount: string
   shipping_amount: string
   total_amount: string
+  platform_total_amount: string
+  zoho_total_amount: string
   currency: string
 
   ordered_at: string | null

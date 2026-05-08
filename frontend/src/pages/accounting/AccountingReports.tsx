@@ -1,11 +1,17 @@
 import { useMemo, useState } from 'react'
 import {
   Alert,
+  Autocomplete,
   Box,
   Button,
   Card,
   CardContent,
+  Checkbox,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   FormControl,
   Grid,
   InputLabel,
@@ -25,7 +31,9 @@ import { useQuery } from '@tanstack/react-query'
 import {
   exportPurchaseOrderReport,
   fetchPurchaseOrderReport,
+  fetchPurchaseOrderReportFilterOptions,
   type GroupBy,
+  type OrderBy,
 } from '../../api/accountingReports'
 
 function toIsoDate(value: Date): string {
@@ -45,47 +53,81 @@ function downloadBlob(blob: Blob, filename: string): void {
 
 export default function AccountingReports() {
   const today = useMemo(() => new Date(), [])
-  const [startDate, setStartDate] = useState<string>(toIsoDate(new Date(today.getFullYear(), today.getMonth(), 1)))
-  const [endDate, setEndDate] = useState<string>(toIsoDate(today))
+  const initialStartDate = toIsoDate(new Date(today.getFullYear(), today.getMonth(), 1))
+  const initialEndDate = toIsoDate(today)
+
+  const [startDate, setStartDate] = useState<string>(initialStartDate)
+  const [endDate, setEndDate] = useState<string>(initialEndDate)
   const [groupBy, setGroupBy] = useState<GroupBy>('month')
+  const [orderBy, setOrderBy] = useState<OrderBy>('date')
+  const [filterOpen, setFilterOpen] = useState<boolean>(false)
+
+  const [item, setItem] = useState<{ value: string; label: string }[]>([])
+  const [source, setSource] = useState<string[]>([])
+  const [vendor, setVendor] = useState<string[]>([])
+
+  const [appliedStartDate, setAppliedStartDate] = useState<string>(initialStartDate)
+  const [appliedEndDate, setAppliedEndDate] = useState<string>(initialEndDate)
+  const [appliedGroupBy, setAppliedGroupBy] = useState<GroupBy>('month')
+  const [appliedOrderBy, setAppliedOrderBy] = useState<OrderBy>('date')
+  const [appliedItem, setAppliedItem] = useState<string[]>([])
+  const [appliedSource, setAppliedSource] = useState<string[]>([])
+  const [appliedVendor, setAppliedVendor] = useState<string[]>([])
+
   const [exporting, setExporting] = useState<'csv' | 'xlsx' | null>(null)
   const [exportError, setExportError] = useState<string>('')
 
   const reportQuery = useQuery({
-    queryKey: ['purchase-order-report', startDate, endDate, groupBy],
-    queryFn: () => fetchPurchaseOrderReport({ startDate, endDate, groupBy }),
+    queryKey: ['purchase-order-report', appliedStartDate, appliedEndDate, appliedGroupBy, appliedOrderBy, appliedItem, appliedSource, appliedVendor],
+    queryFn: () => fetchPurchaseOrderReport({
+      startDate: appliedStartDate,
+      endDate: appliedEndDate,
+      groupBy: appliedGroupBy,
+      orderBy: appliedOrderBy,
+      item: appliedItem,
+      source: appliedSource,
+      vendor: appliedVendor,
+    }),
     staleTime: 60_000,
   })
 
-  const quickThisWeek = () => {
-    const now = new Date()
-    const day = now.getDay() || 7
-    const start = new Date(now)
-    start.setDate(now.getDate() - day + 1)
-    const end = new Date(start)
-    end.setDate(start.getDate() + 6)
-    setStartDate(toIsoDate(start))
-    setEndDate(toIsoDate(end))
-  }
+  const filterOptionsQuery = useQuery({
+    queryKey: ['purchase-order-report-filter-options', startDate, endDate],
+    queryFn: () => fetchPurchaseOrderReportFilterOptions({ startDate, endDate }),
+    staleTime: 60_000,
+    enabled: filterOpen,
+  })
 
-  const quickThisMonth = () => {
-    const now = new Date()
-    setStartDate(toIsoDate(new Date(now.getFullYear(), now.getMonth(), 1)))
-    setEndDate(toIsoDate(new Date(now.getFullYear(), now.getMonth() + 1, 0)))
-  }
+  const itemOptions = filterOptionsQuery.data?.item_options ?? []
+  const sourceOptions = filterOptionsQuery.data?.source_options ?? []
+  const vendorOptions = filterOptionsQuery.data?.vendor_options ?? []
 
-  const quickThisYear = () => {
-    const now = new Date()
-    setStartDate(toIsoDate(new Date(now.getFullYear(), 0, 1)))
-    setEndDate(toIsoDate(new Date(now.getFullYear(), 11, 31)))
+  const applyFilter = () => {
+    setAppliedStartDate(startDate)
+    setAppliedEndDate(endDate)
+    setAppliedGroupBy(groupBy)
+    setAppliedOrderBy(orderBy)
+    setAppliedItem(item.map((option) => option.value.trim()).filter(Boolean))
+    setAppliedSource(source.map((value) => value.trim()).filter(Boolean))
+    setAppliedVendor(vendor.map((value) => value.trim()).filter(Boolean))
+    setFilterOpen(false)
   }
 
   const handleExport = async (fileType: 'csv' | 'xlsx') => {
     try {
       setExportError('')
       setExporting(fileType)
-      const blob = await exportPurchaseOrderReport({ startDate, endDate, groupBy, fileType })
-      downloadBlob(blob, `purchase_order_report_${groupBy}.${fileType}`)
+      const blob = await exportPurchaseOrderReport({
+        startDate: appliedStartDate,
+        endDate: appliedEndDate,
+        groupBy: appliedGroupBy,
+        orderBy: appliedOrderBy,
+        item: appliedItem,
+        source: appliedSource,
+        vendor: appliedVendor,
+        fileType,
+      })
+      downloadBlob(blob, `purchase_order_report_${appliedGroupBy}.${fileType}`)
     } catch {
       setExportError('Failed to export report')
     } finally {
@@ -122,6 +164,22 @@ export default function AccountingReports() {
           </Grid>
           <Grid item xs={12} md={3}>
             <FormControl fullWidth>
+              <InputLabel id="order-by-label">Order By</InputLabel>
+              <Select
+                labelId="order-by-label"
+                value={orderBy}
+                label="Order By"
+                onChange={(event) => setOrderBy(event.target.value as OrderBy)}
+              >
+                <MenuItem value="total_price">Total Price</MenuItem>
+                <MenuItem value="sku">SKU</MenuItem>
+                <MenuItem value="source">Source</MenuItem>
+                <MenuItem value="date">Date</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid item xs={12} md={3}>
+            <FormControl fullWidth>
               <InputLabel id="group-by-label">Group By</InputLabel>
               <Select
                 labelId="group-by-label"
@@ -141,12 +199,89 @@ export default function AccountingReports() {
           </Grid>
           <Grid item xs={12} md={3}>
             <Stack direction="row" spacing={1} sx={{ height: '100%', alignItems: 'center' }}>
-              <Button variant="outlined" onClick={quickThisWeek}>This Week</Button>
-              <Button variant="outlined" onClick={quickThisMonth}>This Month</Button>
-              <Button variant="outlined" onClick={quickThisYear}>This Year</Button>
+              <Button variant="contained" onClick={() => setFilterOpen(true)}>Filter</Button>
             </Stack>
           </Grid>
         </Grid>
+
+        <Dialog open={filterOpen} onClose={() => setFilterOpen(false)} fullWidth maxWidth="md">
+          <DialogTitle>Filters</DialogTitle>
+          <DialogContent>
+            <Grid container spacing={2} sx={{ mt: 0.5 }}>
+              <Grid item xs={12} md={6}>
+                <Autocomplete
+                  multiple
+                  disableCloseOnSelect
+                  options={itemOptions}
+                  value={item}
+                  onChange={(_, values) => setItem(values)}
+                  loading={filterOptionsQuery.isLoading}
+                  isOptionEqualToValue={(option, value) => option.value === value.value}
+                  getOptionLabel={(option) => option.label}
+                  renderInput={(params) => <TextField {...params} label="SKU / Name" placeholder="Search SKU or name and select" />}
+                  renderOption={(props, option, { selected }) => (
+                    <li {...props}>
+                      <Checkbox checked={selected} sx={{ mr: 1 }} />
+                      {option.label}
+                    </li>
+                  )}
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Autocomplete
+                  multiple
+                  disableCloseOnSelect
+                  options={sourceOptions}
+                  value={source}
+                  onChange={(_, values) => setSource(values)}
+                  loading={filterOptionsQuery.isLoading}
+                  renderInput={(params) => <TextField {...params} label="Source" placeholder="Select sources" />}
+                  renderOption={(props, option, { selected }) => (
+                    <li {...props}>
+                      <Checkbox checked={selected} sx={{ mr: 1 }} />
+                      {option}
+                    </li>
+                  )}
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Autocomplete
+                  multiple
+                  disableCloseOnSelect
+                  options={vendorOptions}
+                  value={vendor}
+                  onChange={(_, values) => setVendor(values)}
+                  loading={filterOptionsQuery.isLoading}
+                  renderInput={(params) => <TextField {...params} label="Vendor" placeholder="Search and select vendors" />}
+                  renderOption={(props, option, { selected }) => (
+                    <li {...props}>
+                      <Checkbox checked={selected} sx={{ mr: 1 }} />
+                      {option}
+                    </li>
+                  )}
+                />
+              </Grid>
+            </Grid>
+            {filterOptionsQuery.error ? (
+              <Alert severity="error" sx={{ mt: 2 }}>
+                Failed to load filter options.
+              </Alert>
+            ) : null}
+          </DialogContent>
+          <DialogActions>
+            <Button
+              onClick={() => {
+                setItem([])
+                setSource([])
+                setVendor([])
+              }}
+            >
+              Clear
+            </Button>
+            <Button onClick={() => setFilterOpen(false)}>Cancel</Button>
+            <Button variant="contained" onClick={applyFilter}>Apply Filter</Button>
+          </DialogActions>
+        </Dialog>
 
         <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
           <Button

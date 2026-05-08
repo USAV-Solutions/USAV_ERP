@@ -132,4 +132,5 @@ export const PURCHASING = {
 export const ACCOUNTING = {
   PURCHASE_ORDER_REPORTS: '/accounting/reports/purchase-orders',
   PURCHASE_ORDER_REPORTS_EXPORT: '/accounting/reports/purchase-orders/export',
+  PURCHASE_ORDER_REPORT_FILTER_OPTIONS: '/accounting/reports/purchase-orders/filter-options',
 }

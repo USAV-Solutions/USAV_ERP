@@ -648,7 +648,7 @@ export default function OrdersManagement() {
                 <TableCell>Tracking</TableCell>
                 <TableCell>Customer</TableCell>
                 <TableCell align="center">Unmatched</TableCell>
-                <TableCell align="right">Total</TableCell>
+                <TableCell align="right">Platform Total</TableCell>
                 <TableCell>Shipping Status</TableCell>
                 <TableCell>Zoho Sync</TableCell>
                 <TableCell>Ordered</TableCell>
@@ -721,7 +721,7 @@ export default function OrdersManagement() {
                         </TableCell>
                         <TableCell align="right">
                           <Typography variant="body2">
-                            {order.currency} {(Number(order.subtotal_amount || 0) + Number(order.tax_amount || 0) + Number(order.shipping_amount || 0)).toFixed(2)}
+                            {order.currency} {Number(order.platform_total_amount || order.total_amount || 0).toFixed(2)}
                           </Typography>
                         </TableCell>
                         <TableCell>

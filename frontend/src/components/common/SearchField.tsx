@@ -9,6 +9,8 @@ interface SearchFieldProps {
   fullWidth?: boolean
   sx?: TextFieldProps['sx']
   onChange: (value: string) => void
+  onFocus?: TextFieldProps['onFocus']
+  onBlur?: TextFieldProps['onBlur']
 }
 
 export default function SearchField({
@@ -18,6 +20,8 @@ export default function SearchField({
   fullWidth = false,
   sx,
   onChange,
+  onFocus,
+  onBlur,
 }: SearchFieldProps) {
   const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
     onChange(event.target.value)
@@ -27,6 +31,8 @@ export default function SearchField({
     <TextField
       value={value}
       onChange={handleChange}
+      onFocus={onFocus}
+      onBlur={onBlur}
       placeholder={placeholder}
       size={size}
       fullWidth={fullWidth}
