@@ -2,14 +2,18 @@
 Platform Listing API endpoints.
 Manages listings for external platforms (Zoho, Amazon, eBay, etc.).
 """
+import logging
+import shutil
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api.deps import AdminOrSalesUser
 from app.core.config import settings
 from app.core.database import get_db
 from app.integrations.ebay.client import EbayClient
@@ -17,6 +21,8 @@ from app.models import Platform, PlatformSyncStatus
 from app.models.entities import ProductVariant, ProductIdentity, ProductFamily
 from app.repositories import PlatformListingRepository, ProductVariantRepository
 from app.modules.inventory.schemas import (
+    EbayAvailableImage,
+    EbayAvailableImagesResponse,
     EbayCreateStartResponse,
     EbayCategorySuggestion,
     EbayCategorySuggestionsRequest,
@@ -29,6 +35,9 @@ from app.modules.inventory.schemas import (
     EbayPolicyProfiles,
     EbayPublishRequest,
     EbayPublishResponse,
+    EbaySendImageResult,
+    EbaySendImagesRequest,
+    EbaySendImagesResponse,
     PaginatedResponse,
     PlatformListingCreate,
     PlatformListingResponse,
@@ -36,6 +45,9 @@ from app.modules.inventory.schemas import (
 )
 
 router = APIRouter(prefix="/listings", tags=["Platform Listings"])
+logger = logging.getLogger(__name__)
+EBAY_LISTING_MAX_PICTURES = 24
+EBAY_WIZARD_ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tiff", ".avif", ".heic"}
 
 
 def _build_ebay_client_for_platform(platform: Platform) -> EbayClient:
@@ -183,6 +195,57 @@ def _resolve_business_policy_ids(
         "return_profile_id": return_profile_id,
         "shipping_profile_id": shipping_profile_id,
     }
+
+
+def _build_variant_image_dir(full_sku: str) -> Path:
+    return Path(settings.product_images_path) / "sku" / full_sku
+
+
+def _sanitize_image_id(image_id: str) -> str:
+    clean = (image_id or "").strip().replace("\\", "/")
+    if ".." in clean or clean.startswith("/") or clean == "":
+        raise HTTPException(status_code=400, detail=f"Invalid image_id '{image_id}'")
+    return clean
+
+
+def _collect_available_sku_images(full_sku: str) -> list[EbayAvailableImage]:
+    variant_dir = _build_variant_image_dir(full_sku)
+    if not variant_dir.is_dir():
+        return []
+
+    results: list[EbayAvailableImage] = []
+    for path in sorted(variant_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        ext = path.suffix.lower()
+        if ext not in EBAY_WIZARD_ALLOWED_IMAGE_EXTENSIONS:
+            continue
+        rel = path.relative_to(variant_dir).as_posix()
+        parts = rel.split("/")
+        listing = parts[0] if len(parts) > 1 else "flat"
+        results.append(
+            EbayAvailableImage(
+                image_id=rel,
+                filename=path.name,
+                listing=listing,
+                relative_path=rel,
+                preview_url=f"/product-images/sku/{full_sku}/{rel}",
+            )
+        )
+    return results
+
+
+def _resolve_image_file_path(full_sku: str, image_id: str) -> Path:
+    variant_dir = _build_variant_image_dir(full_sku)
+    clean_id = _sanitize_image_id(image_id)
+    target = (variant_dir / clean_id).resolve()
+    try:
+        target.relative_to(variant_dir.resolve())
+    except Exception:
+        raise HTTPException(status_code=400, detail=f"Invalid image_id '{image_id}'")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail=f"Image not found for image_id '{image_id}'")
+    return target
 
 
 @router.get("", response_model=PaginatedResponse)
@@ -338,6 +401,10 @@ async def get_ebay_category_suggestions(
     data: EbayCategorySuggestionsRequest,
     db: AsyncSession = Depends(get_db),
 ):
+    logger.debug(
+        "[DEBUG.EXTERNAL_API] eBay category suggestion request payload=%s",
+        data.model_dump(),
+    )
     client = _build_ebay_client_for_platform(data.platform)
     variant = await _load_variant_context(db, data.variant_id)
     defaults = _resolve_listing_defaults(variant, data.platform)
@@ -357,15 +424,41 @@ async def get_ebay_category_suggestions(
     marketplace_id = str(store_defaults["marketplace_id"])
     category_tree_id = await client.get_default_category_tree_id(marketplace_id)
     suggestions = await client.get_category_suggestions(category_tree_id, query_text)
+    logger.debug(
+        "[DEBUG.EXTERNAL_API] eBay category suggestion resolved params platform=%s variant_id=%s marketplace_id=%s category_tree_id=%s query=%s",
+        data.platform.value,
+        data.variant_id,
+        marketplace_id,
+        category_tree_id,
+        query_text,
+    )
+    logger.debug(
+        "[DEBUG.EXTERNAL_API] eBay category suggestion raw response=%s",
+        suggestions,
+    )
     parsed: list[EbayCategorySuggestion] = []
     for entry in suggestions:
         category = entry.get("category") or {}
         ancestors = entry.get("categoryTreeNodeAncestors") or []
-        category_tokens = [
-            ancestor.get("category", {}).get("categoryName")
-            for ancestor in ancestors
-            if ancestor.get("category", {}).get("categoryName")
-        ]
+        category_tokens = []
+        # eBay taxonomy responses may return ancestor names either as:
+        # - ancestor.category.categoryName
+        # - ancestor.categoryName
+        # Normalize both and sort by level so the UI can render root -> leaf paths.
+        normalized_ancestors: list[tuple[int, str]] = []
+        for ancestor in ancestors:
+            nested_name = ancestor.get("category", {}).get("categoryName")
+            flat_name = ancestor.get("categoryName")
+            name = nested_name or flat_name
+            if not name:
+                continue
+            try:
+                level = int(ancestor.get("categoryTreeNodeLevel") or 0)
+            except (TypeError, ValueError):
+                level = 0
+            normalized_ancestors.append((level, str(name)))
+        normalized_ancestors.sort(key=lambda item: item[0])
+        category_tokens = [name for _, name in normalized_ancestors]
         if category.get("categoryName"):
             category_tokens.append(category.get("categoryName"))
         category_id = category.get("categoryId")
@@ -384,6 +477,130 @@ async def get_ebay_category_suggestions(
         category_tree_id=category_tree_id,
         query=query_text,
         suggestions=parsed,
+    )
+
+
+@router.get("/ebay/images/available/{variant_id}", response_model=EbayAvailableImagesResponse)
+async def get_ebay_available_images(
+    variant_id: int,
+    _user: AdminOrSalesUser,
+    db: AsyncSession = Depends(get_db),
+):
+    variant = await _load_variant_context(db, variant_id)
+    available = _collect_available_sku_images(variant.full_sku)
+    return EbayAvailableImagesResponse(
+        variant_id=variant.id,
+        sku=variant.full_sku,
+        available_images=available,
+    )
+
+
+@router.post("/ebay/images/upload", response_model=EbayAvailableImagesResponse)
+async def upload_ebay_listing_images(
+    _user: AdminOrSalesUser,
+    variant_id: int = Form(...),
+    files: list[UploadFile] = File(...),
+    listing_index: int = Form(0),
+    db: AsyncSession = Depends(get_db),
+):
+    if listing_index < 0 or listing_index > 9999:
+        raise HTTPException(status_code=400, detail="Invalid listing_index")
+    variant = await _load_variant_context(db, variant_id)
+    variant_dir = _build_variant_image_dir(variant.full_sku)
+    listing_dir = variant_dir / f"listing-{listing_index}"
+    listing_dir.mkdir(parents=True, exist_ok=True)
+
+    existing_indices = []
+    for existing in listing_dir.iterdir():
+        if not existing.is_file():
+            continue
+        name = existing.name
+        if not name.startswith("img-"):
+            continue
+        stem = name.split(".", 1)[0]
+        try:
+            existing_indices.append(int(stem.replace("img-", "")))
+        except ValueError:
+            continue
+    next_index = (max(existing_indices) + 1) if existing_indices else 0
+
+    uploaded = 0
+    for upload in files:
+        if not upload.filename:
+            continue
+        ext = Path(upload.filename).suffix.lower()
+        if ext not in EBAY_WIZARD_ALLOWED_IMAGE_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"Unsupported image type: {ext}")
+        target_name = f"img-{next_index}{ext}"
+        next_index += 1
+        target_tmp = listing_dir / f"{target_name}.tmp"
+        target_final = listing_dir / target_name
+        with target_tmp.open("wb") as buffer:
+            shutil.copyfileobj(upload.file, buffer)
+        target_tmp.replace(target_final)
+        uploaded += 1
+    if uploaded == 0:
+        raise HTTPException(status_code=400, detail="No valid files uploaded")
+
+    available = _collect_available_sku_images(variant.full_sku)
+    return EbayAvailableImagesResponse(
+        variant_id=variant.id,
+        sku=variant.full_sku,
+        available_images=available,
+    )
+
+
+@router.post("/ebay/images/send", response_model=EbaySendImagesResponse)
+async def send_ebay_listing_images(
+    data: EbaySendImagesRequest,
+    _user: AdminOrSalesUser,
+    db: AsyncSession = Depends(get_db),
+):
+    if len(data.image_ids) > EBAY_LISTING_MAX_PICTURES:
+        raise HTTPException(status_code=400, detail=f"eBay listing supports up to {EBAY_LISTING_MAX_PICTURES} images")
+    client = _build_ebay_client_for_platform(data.platform)
+    variant = await _load_variant_context(db, data.variant_id)
+    seen: set[str] = set()
+    ordered_image_ids: list[str] = []
+    for raw_id in data.image_ids:
+        image_id = _sanitize_image_id(raw_id)
+        if image_id in seen:
+            continue
+        seen.add(image_id)
+        ordered_image_ids.append(image_id)
+
+    if not ordered_image_ids:
+        raise HTTPException(status_code=400, detail="At least one image must be selected")
+
+    results: list[EbaySendImageResult] = []
+    eps_urls: list[str] = []
+    for image_id in ordered_image_ids:
+        try:
+            file_path = _resolve_image_file_path(variant.full_sku, image_id)
+            image_url = await client.create_media_image_from_file(file_path)
+            results.append(
+                EbaySendImageResult(
+                    image_id=image_id,
+                    success=True,
+                    image_url=image_url,
+                )
+            )
+            eps_urls.append(image_url)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            results.append(
+                EbaySendImageResult(
+                    image_id=image_id,
+                    success=False,
+                    error=str(exc),
+                )
+            )
+    return EbaySendImagesResponse(
+        platform=data.platform,
+        variant_id=variant.id,
+        eps_image_urls=eps_urls,
+        results=results,
     )
 
 

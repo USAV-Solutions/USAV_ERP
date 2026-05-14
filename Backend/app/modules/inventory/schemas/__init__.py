@@ -35,6 +35,8 @@ from app.modules.inventory.schemas.inventory import (
     InventorySummary,
 )
 from app.modules.inventory.schemas.listings import (
+    EbayAvailableImage,
+    EbayAvailableImagesResponse,
     EbayCreateStartResponse,
     EbayCategorySuggestion,
     EbayCategorySuggestionsRequest,
@@ -44,6 +46,9 @@ from app.modules.inventory.schemas.listings import (
     EbayPolicyProfiles,
     EbayPublishRequest,
     EbayPublishResponse,
+    EbaySendImageResult,
+    EbaySendImagesRequest,
+    EbaySendImagesResponse,
     EbaySpecificInput,
     ListingCreatePlatformCapability,
     ListingCreateScaffoldResponse,
@@ -128,9 +133,14 @@ __all__ = [
     "EbayCategorySuggestionsResponse",
     "EbayListingDraftRequest",
     "EbayListingDraftResponse",
+    "EbayAvailableImage",
+    "EbayAvailableImagesResponse",
     "EbayPolicyProfiles",
     "EbayPublishRequest",
     "EbayPublishResponse",
+    "EbaySendImagesRequest",
+    "EbaySendImageResult",
+    "EbaySendImagesResponse",
     "EbaySpecificInput",
     # Lookups
     "BrandCreate",
