@@ -15,6 +15,7 @@ One-off operational scripts for backfills, cleanup, reconciliation, and migratio
 - Source backfill scripts should treat `GOODWILL_SHIPPED` as the canonical shipped Goodwill PO source value; normalize legacy shipped-source rows upstream before running source-based reconciliation.
 - `zoho_po_resync_orchestrator.py` enforces explicit `--start-date/--end-date`; do not assume calendar-quarter defaults when running deletes or reconciliations.
 - In orchestrator stages, write operations require `--apply`; dry-run remains default even for delete/reconcile flows.
+- `zoho_po_resync_orchestrator.py` uses Zoho Inventory bill/payment endpoints (not Zoho Books), matching orgs without Books permissions.
 
 ## Child Folders
 - (No child folders)
