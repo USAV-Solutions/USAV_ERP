@@ -1151,19 +1151,24 @@ def _build_receive_payload(
     if not po_id:
         return None
 
-    by_sku, by_name = _po_line_item_maps(full_po)
     line_items: list[dict[str, Any]] = []
-    for row in receive_rows:
-        sku = _clean(row.get("SKU"))
-        item_name = _clean(row.get("Item Name"))
-        qty = _safe_float(row.get("Quantity Received"), 0.0)
-        if qty <= 0:
+    # Use current PO line items only (post-upsert mapping), not CSV SKU/product IDs.
+    for line in full_po.get("line_items") or []:
+        if not isinstance(line, dict):
             continue
-        source = by_sku.get(sku) or by_name.get(item_name)
-        item_id = _clean((source or {}).get("item_id"))
-        if not item_id:
+        item_id = _clean(line.get("item_id"))
+        line_item_id = _clean(line.get("line_item_id") or line.get("purchaseorder_item_id"))
+        qty = _safe_float(str(line.get("quantity") or line.get("quantity_received") or ""), 0.0)
+        if not item_id or qty <= 0:
             continue
-        line_items.append({"item_id": item_id, "quantity": qty, "quantity_received": qty})
+        payload_line = {
+            "item_id": item_id,
+            "quantity": qty,
+            "quantity_received": qty,
+        }
+        if line_item_id:
+            payload_line["line_item_id"] = line_item_id
+        line_items.append(payload_line)
 
     if not line_items:
         return None
@@ -1189,33 +1194,29 @@ def _build_bill_payload(
     if not po_id or not vendor_id:
         return None
 
-    by_sku, by_name = _po_line_item_maps(full_po)
     sample = bill_rows[0]
     line_items: list[dict[str, Any]] = []
-    for row in bill_rows:
-        quantity = _safe_float(row.get("Quantity"), 0.0)
-        rate = _safe_float(row.get("Rate"), 0.0)
+    # Use current PO line items only (post-upsert mapping), not CSV SKU/product IDs.
+    for line in full_po.get("line_items") or []:
+        if not isinstance(line, dict):
+            continue
+        item_id = _clean(line.get("item_id"))
+        po_item_id = _clean(line.get("purchaseorder_item_id") or line.get("line_item_id"))
+        quantity = _safe_float(str(line.get("quantity") or ""), 0.0)
+        rate = _safe_float(str(line.get("purchase_rate") or line.get("rate") or line.get("bcy_rate") or ""), 0.0)
         if quantity <= 0:
             continue
 
-        item_id = _clean(row.get("Product ID"))
-        if not item_id:
-            sku = _clean(row.get("SKU"))
-            item_name = _clean(row.get("Item Name"))
-            source = by_sku.get(sku) or by_name.get(item_name)
-            item_id = _clean((source or {}).get("item_id"))
-        if not item_id:
-            continue
-
-        line_items.append(
-            {
-                "item_id": item_id,
-                "quantity": quantity,
-                "rate": rate,
-                "name": _clean(row.get("Item Name")),
-                "description": _clean(row.get("Description")),
-            }
-        )
+        payload_line: dict[str, Any] = {
+            "quantity": quantity,
+        }
+        if po_item_id:
+            payload_line["purchaseorder_item_id"] = po_item_id
+        if item_id:
+            payload_line["item_id"] = item_id
+        if rate > 0:
+            payload_line["rate"] = rate
+        line_items.append(payload_line)
 
     if not line_items:
         return None
