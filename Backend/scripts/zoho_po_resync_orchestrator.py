@@ -118,6 +118,11 @@ def _safe_float(value: str | None, default: float = 0.0) -> float:
         return default
 
 
+def _is_zoho_unauthorized(exc: Exception) -> bool:
+    text = str(exc)
+    return '"code":57' in text or "not authorized" in text.lower()
+
+
 def _read_csv_rows(path: Path) -> list[dict[str, str]]:
     with path.open("r", encoding="utf-8-sig", newline="") as f:
         return list(csv.DictReader(f))
@@ -130,6 +135,54 @@ def _validate_csv_headers(path: Path, required_headers: set[str]) -> None:
     missing = sorted(required_headers - found)
     if missing:
         raise ValueError(f"CSV {path} missing required headers: {missing}")
+
+
+async def _inventory_list_bills(
+    client: ZohoClient,
+    *,
+    page: int = 1,
+    per_page: int = 200,
+    date_start: Optional[str] = None,
+    date_end: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    params: dict[str, Any] = {
+        "page": page,
+        "per_page": per_page,
+        "filter_by": "Status.All",
+    }
+    if date_start:
+        params["date_start"] = date_start
+    if date_end:
+        params["date_end"] = date_end
+    result = await client._request("GET", "/bills", api="inventory", params=params)
+    return result.get("bills", []) or []
+
+
+async def _inventory_get_bill(client: ZohoClient, bill_id: str) -> dict[str, Any]:
+    result = await client._request("GET", f"/bills/{bill_id}", api="inventory")
+    return result.get("bill", {}) or {}
+
+
+async def _inventory_create_bill(client: ZohoClient, bill_payload: dict[str, Any]) -> dict[str, Any]:
+    result = await client._request(
+        "POST",
+        "/bills",
+        api="inventory",
+        data={"JSONString": json.dumps(bill_payload)},
+    )
+    return result.get("bill", {}) or {}
+
+
+async def _inventory_delete_bill(client: ZohoClient, bill_id: str) -> dict[str, Any]:
+    return await client._request("DELETE", f"/bills/{bill_id}", api="inventory")
+
+
+async def _inventory_delete_vendor_payment(client: ZohoClient, vendor_payment_id: str) -> dict[str, Any]:
+    return await client._request("DELETE", f"/vendorpayments/{vendor_payment_id}", api="inventory")
+
+
+async def _inventory_delete_bill_payment(client: ZohoClient, bill_id: str, bill_payment_id: str) -> dict[str, Any]:
+    return await client._request("DELETE", f"/bills/{bill_id}/payments/{bill_payment_id}", api="inventory")
 
 
 @dataclass
@@ -175,7 +228,8 @@ class BillIdResolver:
         page = 1
         per_page = 200
         while True:
-            rows = await self.client.list_bills(
+            rows = await _inventory_list_bills(
+                self.client,
                 date_start=self.start_date.isoformat(),
                 date_end=self.end_date.isoformat(),
                 page=page,
@@ -213,7 +267,7 @@ class BillIdResolver:
         per_page = 200
         max_pages = 50
         while page <= max_pages:
-            rows = await self.client.list_bills(page=page, per_page=per_page)
+            rows = await _inventory_list_bills(self.client, page=page, per_page=per_page)
             if not rows:
                 break
             for row in rows:
@@ -317,6 +371,15 @@ async def _delete_stage(
     unresolved_payment_rows: list[dict[str, str]] = []
     payment_targets: list[dict[str, str]] = []
     for row in scope.payment_refs:
+        vendor_payment_id = _clean(row.get("vendor_payment_id"))
+        if vendor_payment_id:
+            payment_targets.append(
+                {
+                    **row,
+                    "delete_mode": "vendor_payment",
+                }
+            )
+            continue
         bill_number = _clean(row.get("bill_number"))
         bill_id = await resolver.resolve(bill_number)
         if not bill_id:
@@ -333,6 +396,7 @@ async def _delete_stage(
         payment_targets.append(
             {
                 **row,
+                "delete_mode": "bill_payment",
                 "bill_id": bill_id,
             }
         )
@@ -341,15 +405,27 @@ async def _delete_stage(
     payment_failed: list[dict[str, str]] = []
     total_payments = len(payment_targets)
     for idx, row in enumerate(payment_targets, start=1):
+        delete_mode = _clean(row.get("delete_mode"))
+        vendor_payment_id = _clean(row.get("vendor_payment_id"))
         bill_id = _clean(row.get("bill_id"))
         bill_payment_id = _clean(row.get("bill_payment_id"))
         if dry_run:
             payment_deleted.append(row)
         else:
             try:
-                await client.delete_bill_payment(bill_id=bill_id, bill_payment_id=bill_payment_id)
+                if delete_mode == "vendor_payment" and vendor_payment_id:
+                    await _inventory_delete_vendor_payment(client, vendor_payment_id)
+                else:
+                    await _inventory_delete_bill_payment(client, bill_id=bill_id, bill_payment_id=bill_payment_id)
                 payment_deleted.append(row)
             except Exception as exc:
+                if delete_mode == "bill_payment" and _is_zoho_unauthorized(exc) and vendor_payment_id:
+                    try:
+                        await _inventory_delete_vendor_payment(client, vendor_payment_id)
+                        payment_deleted.append({**row, "delete_mode": "vendor_payment_fallback"})
+                        continue
+                    except Exception as fallback_exc:
+                        exc = fallback_exc
                 payment_failed.append(
                     {
                         **{k: _clean(v) for k, v in row.items()},
@@ -367,7 +443,7 @@ async def _delete_stage(
             bill_deleted.append(bill_id)
         else:
             try:
-                await client.delete_bill(bill_id)
+                await _inventory_delete_bill(client, bill_id)
                 bill_deleted.append(bill_id)
             except Exception as exc:
                 bill_failed.append({"bill_id": bill_id, "error": str(exc)})
@@ -645,7 +721,7 @@ async def _collect_zoho_dependencies(
             if not bill_id:
                 continue
 
-            bill_full = await client.get_bill(bill_id)
+            bill_full = await _inventory_get_bill(client, bill_id)
             bills_by_id[bill_id] = bill_full
             bill_number = _clean(bill_full.get("bill_number") or bill.get("bill_number"))
             if bill_number:
@@ -935,7 +1011,7 @@ async def _reconcile_stage(
                 vendor_id_by_bill_number[bill_number] = vendor_id
 
             try:
-                created = await client.create_bill(payload)
+                created = await _inventory_create_bill(client, payload)
                 created_id = _clean(created.get("bill_id"))
                 if bill_number and created_id:
                     created_bill_id_by_number[bill_number] = created_id
