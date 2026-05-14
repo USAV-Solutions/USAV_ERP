@@ -137,6 +137,22 @@ def _validate_csv_headers(path: Path, required_headers: set[str]) -> None:
         raise ValueError(f"CSV {path} missing required headers: {missing}")
 
 
+def _chunks(values: list[str], size: int) -> list[list[str]]:
+    if size <= 0:
+        return [values]
+    return [values[i : i + size] for i in range(0, len(values), size)]
+
+
+def _is_zoho_success_response(response: Any) -> bool:
+    if not isinstance(response, dict):
+        return False
+    code = response.get("code")
+    try:
+        return int(code) == 0
+    except Exception:
+        return False
+
+
 async def _inventory_list_bills(
     client: ZohoClient,
     *,
@@ -183,6 +199,42 @@ async def _inventory_delete_vendor_payment(client: ZohoClient, vendor_payment_id
 
 async def _inventory_delete_bill_payment(client: ZohoClient, bill_id: str, bill_payment_id: str) -> dict[str, Any]:
     return await client._request("DELETE", f"/bills/{bill_id}/payments/{bill_payment_id}", api="inventory")
+
+
+async def _inventory_bulk_delete_receives(client: ZohoClient, receive_ids: list[str]) -> dict[str, Any]:
+    ids = [v for v in (_clean(x) for x in receive_ids) if v]
+    if not ids:
+        return {"code": 0, "message": "no-op"}
+    response = await client._request(
+        "DELETE",
+        "/purchasereceives",
+        api="inventory",
+        params={
+            "purchasereceive_id": ",".join(ids),
+            "bulk_delete": "true",
+        },
+    )
+    if not _is_zoho_success_response(response):
+        raise ValueError(f"Inventory bulk receive delete failed: {response}")
+    return response
+
+
+async def _inventory_bulk_delete_bills(client: ZohoClient, bill_ids: list[str]) -> dict[str, Any]:
+    ids = [v for v in (_clean(x) for x in bill_ids) if v]
+    if not ids:
+        return {"code": 0, "message": "no-op"}
+    response = await client._request(
+        "DELETE",
+        "/bills",
+        api="inventory",
+        params={
+            "bill_id": ",".join(ids),
+            "bulk_delete": "true",
+        },
+    )
+    if not _is_zoho_success_response(response):
+        raise ValueError(f"Inventory bulk bill delete failed: {response}")
+    return response
 
 
 @dataclass
@@ -353,151 +405,143 @@ def _build_csv_scope(
 async def _delete_stage(
     *,
     client: ZohoClient,
-    scope: CsvScope,
     start_date: date,
     end_date: date,
     dry_run: bool,
     progress_every: int,
     debug: bool,
+    delete_bulk_size: int,
 ) -> dict[str, Any]:
-    resolver = BillIdResolver(
-        client=client,
-        start_date=start_date,
-        end_date=end_date,
-        initial_map=scope.bill_id_by_number,
-        debug=debug,
-    )
-
-    unresolved_payment_rows: list[dict[str, str]] = []
-    payment_targets: list[dict[str, str]] = []
-    for row in scope.payment_refs:
-        vendor_payment_id = _clean(row.get("vendor_payment_id"))
-        if vendor_payment_id:
-            payment_targets.append(
-                {
-                    **row,
-                    "delete_mode": "vendor_payment",
-                }
+    async def _collect_receive_ids() -> list[str]:
+        ids: set[str] = set()
+        page = 1
+        per_page = 200
+        while True:
+            rows = await client.list_purchase_receives(
+                date_start=start_date.isoformat(),
+                date_end=end_date.isoformat(),
+                page=page,
+                per_page=per_page,
             )
-            continue
-        bill_number = _clean(row.get("bill_number"))
-        bill_id = await resolver.resolve(bill_number)
-        if not bill_id:
-            unresolved_payment_rows.append(
-                {
-                    "vendor_payment_id": _clean(row.get("vendor_payment_id")),
-                    "bill_payment_id": _clean(row.get("bill_payment_id")),
-                    "bill_number": bill_number,
-                    "payment_number": _clean(row.get("payment_number")),
-                    "reason": "bill_id_not_resolved",
-                }
-            )
-            continue
-        payment_targets.append(
-            {
-                **row,
-                "delete_mode": "bill_payment",
-                "bill_id": bill_id,
-            }
-        )
-
-    payment_deleted: list[dict[str, str]] = []
-    payment_failed: list[dict[str, str]] = []
-    total_payments = len(payment_targets)
-    for idx, row in enumerate(payment_targets, start=1):
-        delete_mode = _clean(row.get("delete_mode"))
-        vendor_payment_id = _clean(row.get("vendor_payment_id"))
-        bill_id = _clean(row.get("bill_id"))
-        bill_payment_id = _clean(row.get("bill_payment_id"))
-        if dry_run:
-            payment_deleted.append(row)
-        else:
-            try:
-                if delete_mode == "vendor_payment" and vendor_payment_id:
-                    await _inventory_delete_vendor_payment(client, vendor_payment_id)
-                else:
-                    await _inventory_delete_bill_payment(client, bill_id=bill_id, bill_payment_id=bill_payment_id)
-                payment_deleted.append(row)
-            except Exception as exc:
-                if delete_mode == "bill_payment" and _is_zoho_unauthorized(exc) and vendor_payment_id:
-                    try:
-                        await _inventory_delete_vendor_payment(client, vendor_payment_id)
-                        payment_deleted.append({**row, "delete_mode": "vendor_payment_fallback"})
-                        continue
-                    except Exception as fallback_exc:
-                        exc = fallback_exc
-                payment_failed.append(
-                    {
-                        **{k: _clean(v) for k, v in row.items()},
-                        "error": str(exc),
-                    }
+            if not rows:
+                break
+            for row in rows:
+                receive_id = _clean(
+                    row.get("purchase_receive_id")
+                    or row.get("purchasereceive_id")
+                    or row.get("receive_id")
                 )
-        if progress_every > 0 and idx % progress_every == 0:
-            print(f"Stage delete/payments: {idx}/{total_payments}")
+                if receive_id:
+                    ids.add(receive_id)
+            if len(rows) < per_page:
+                break
+            page += 1
+        return sorted(ids)
 
-    bill_deleted: list[str] = []
-    bill_failed: list[dict[str, str]] = []
-    total_bills = len(scope.bill_ids)
-    for idx, bill_id in enumerate(scope.bill_ids, start=1):
-        if dry_run:
-            bill_deleted.append(bill_id)
-        else:
-            try:
-                await _inventory_delete_bill(client, bill_id)
-                bill_deleted.append(bill_id)
-            except Exception as exc:
-                bill_failed.append({"bill_id": bill_id, "error": str(exc)})
-        if progress_every > 0 and idx % progress_every == 0:
-            print(f"Stage delete/bills: {idx}/{total_bills}")
+    async def _collect_bill_ids() -> list[str]:
+        ids: set[str] = set()
+        page = 1
+        per_page = 200
+        while True:
+            rows = await _inventory_list_bills(
+                client,
+                date_start=start_date.isoformat(),
+                date_end=end_date.isoformat(),
+                page=page,
+                per_page=per_page,
+            )
+            if not rows:
+                break
+            for row in rows:
+                bill_id = _clean(row.get("bill_id") or row.get("id"))
+                if bill_id:
+                    ids.add(bill_id)
+            if len(rows) < per_page:
+                break
+            page += 1
+        return sorted(ids)
 
-    receive_deleted: list[str] = []
-    receive_failed: list[dict[str, str]] = []
-    total_receives = len(scope.receive_ids)
-    for idx, receive_id in enumerate(scope.receive_ids, start=1):
+    async def _bulk_then_fallback(
+        *,
+        label: str,
+        ids: list[str],
+        bulk_delete,
+        single_delete,
+    ) -> dict[str, Any]:
+        stats = {
+            "attempted": len(ids),
+            "deleted_count": 0,
+            "failed_count": 0,
+            "failed": [],
+            "deleted_ids": [],
+            "bulk_stats": {
+                "attempted_chunks": 0,
+                "succeeded_chunks": 0,
+                "failed_chunks": 0,
+                "chunk_size": max(delete_bulk_size, 1),
+                "bulk_ids_deleted": 0,
+            },
+        }
         if dry_run:
-            receive_deleted.append(receive_id)
-        else:
+            stats["deleted_count"] = len(ids)
+            stats["deleted_ids"] = list(ids)
+            return stats
+
+        processed = 0
+        for chunk in _chunks(ids, max(delete_bulk_size, 1)):
+            stats["bulk_stats"]["attempted_chunks"] += 1
             try:
-                await client.delete_purchase_receive(receive_id)
-                receive_deleted.append(receive_id)
-            except Exception as exc:
-                receive_failed.append({"receive_id": receive_id, "error": str(exc)})
-        if progress_every > 0 and idx % progress_every == 0:
-            print(f"Stage delete/receives: {idx}/{total_receives}")
+                await bulk_delete(client, chunk)
+                stats["bulk_stats"]["succeeded_chunks"] += 1
+                stats["bulk_stats"]["bulk_ids_deleted"] += len(chunk)
+                stats["deleted_ids"].extend(chunk)
+                stats["deleted_count"] += len(chunk)
+            except Exception as bulk_exc:
+                stats["bulk_stats"]["failed_chunks"] += 1
+                _debug(debug, f"Bulk delete {label} failed; fallback chunk_size={len(chunk)} error={bulk_exc}")
+                for item_id in chunk:
+                    try:
+                        await single_delete(client, item_id)
+                        stats["deleted_ids"].append(item_id)
+                        stats["deleted_count"] += 1
+                    except Exception as single_exc:
+                        stats["failed"].append({f"{label}_id": item_id, "error": str(single_exc)})
+            processed += len(chunk)
+            if progress_every > 0 and processed % progress_every == 0:
+                print(f"Stage delete/{label}: {processed}/{len(ids)}")
+
+        stats["failed_count"] = len(stats["failed"])
+        return stats
+
+    receive_ids = await _collect_receive_ids()
+    bill_ids = await _collect_bill_ids()
+
+    # Required order: receives first, then bills.
+    receive_result = await _bulk_then_fallback(
+        label="receives",
+        ids=receive_ids,
+        bulk_delete=_inventory_bulk_delete_receives,
+        single_delete=lambda c, rid: c.delete_purchase_receive(rid),
+    )
+    bill_result = await _bulk_then_fallback(
+        label="bills",
+        ids=bill_ids,
+        bulk_delete=_inventory_bulk_delete_bills,
+        single_delete=_inventory_delete_bill,
+    )
 
     return {
         "scope": {
-            "bill_ids": len(scope.bill_ids),
-            "receive_ids": len(scope.receive_ids),
-            "payment_rows_in_window": len(scope.payment_rows),
-            "payment_rows_with_bill_payment_id": len(scope.payment_refs),
+            "receive_ids": len(receive_ids),
+            "bill_ids": len(bill_ids),
         },
-        "unresolved_payment_rows": unresolved_payment_rows,
         "delete_results": {
-            "payments": {
-                "attempted": len(payment_targets),
-                "deleted_count": len(payment_deleted),
-                "failed_count": len(payment_failed),
-                "failed": payment_failed,
-                "deleted_labels": payment_deleted,
-            },
-            "bills": {
-                "attempted": len(scope.bill_ids),
-                "deleted_count": len(bill_deleted),
-                "failed_count": len(bill_failed),
-                "failed": bill_failed,
-                "deleted_ids": bill_deleted,
-            },
-            "receives": {
-                "attempted": len(scope.receive_ids),
-                "deleted_count": len(receive_deleted),
-                "failed_count": len(receive_failed),
-                "failed": receive_failed,
-                "deleted_ids": receive_deleted,
-            },
+            "receives": receive_result,
+            "bills": bill_result,
         },
         "notes": {
-            "order": ["payments", "bills", "receives"],
+            "order": ["receives", "bills"],
+            "payments_skipped": True,
             "dry_run": dry_run,
         },
     }
@@ -1088,6 +1132,7 @@ async def main() -> None:
     parser.add_argument("--limit", type=int, default=100, help="Batch size for sync stages")
     parser.add_argument("--offset", type=int, default=0, help="Pagination offset for sync stages")
     parser.add_argument("--progress-every", type=int, default=25)
+    parser.add_argument("--delete-bulk-size", type=int, default=200, help="Bulk-delete chunk size for receives and bills")
     parser.add_argument("--trace-api", action="store_true")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="Force dry-run mode")
@@ -1108,20 +1153,21 @@ async def main() -> None:
         raise ValueError("limit must be > 0")
     if args.offset < 0:
         raise ValueError("offset must be >= 0")
+    if args.delete_bulk_size < 1:
+        raise ValueError("delete-bulk-size must be >= 1")
 
     bill_csv = Path(args.bill_csv)
     payment_csv = Path(args.payment_csv)
     receive_csv = Path(args.receive_csv)
     report_path = Path(args.report_path)
 
-    for csv_path in (bill_csv, payment_csv, receive_csv):
-        if not csv_path.exists():
-            raise FileNotFoundError(f"CSV not found: {csv_path}")
-
-    # Validate minimum schema required by all stages.
-    _validate_csv_headers(bill_csv, {"Bill Date", "PayInvoice ID", "Bill Number", "PurchaseOrder"})
-    _validate_csv_headers(payment_csv, {"Date", "VendorPayment ID", "PIPayment ID", "Bill Number"})
-    _validate_csv_headers(receive_csv, {"Receive Date", "Purchase Receive ID", "PO Number", "Bill Number"})
+    if args.stage in {"reconcile-check", "reconcile-api"}:
+        for csv_path in (bill_csv, payment_csv, receive_csv):
+            if not csv_path.exists():
+                raise FileNotFoundError(f"CSV not found: {csv_path}")
+        _validate_csv_headers(bill_csv, {"Bill Date", "PayInvoice ID", "Bill Number", "PurchaseOrder"})
+        _validate_csv_headers(payment_csv, {"Date", "VendorPayment ID", "PIPayment ID", "Bill Number"})
+        _validate_csv_headers(receive_csv, {"Receive Date", "Purchase Receive ID", "PO Number", "Bill Number"})
 
     if args.apply and args.dry_run:
         raise ValueError("Use either --apply or --dry-run, not both")
@@ -1130,26 +1176,20 @@ async def main() -> None:
     _install_api_trace(client, enabled=bool(args.trace_api))
 
     _debug(args.debug, f"stage={args.stage} dry_run={dry_run} window={start_date}..{end_date}")
-    _debug(args.debug, f"csv bill={bill_csv} payment={payment_csv} receive={receive_csv}")
+    if args.stage in {"reconcile-check", "reconcile-api"}:
+        _debug(args.debug, f"csv bill={bill_csv} payment={payment_csv} receive={receive_csv}")
     _debug(args.debug, f"org={client.organization_id}")
 
     stage_result: dict[str, Any]
     if args.stage == "delete":
-        scope = _build_csv_scope(
-            bill_csv=bill_csv,
-            payment_csv=payment_csv,
-            receive_csv=receive_csv,
-            start_date=start_date,
-            end_date=end_date,
-        )
         stage_result = await _delete_stage(
             client=client,
-            scope=scope,
             start_date=start_date,
             end_date=end_date,
             dry_run=dry_run,
             progress_every=max(args.progress_every, 0),
             debug=bool(args.debug),
+            delete_bulk_size=args.delete_bulk_size,
         )
     elif args.stage == "sync-dry-run":
         stage_result = await _sync_dry_run_stage(
@@ -1205,6 +1245,7 @@ async def main() -> None:
             "limit": args.limit,
             "offset": args.offset,
             "progress_every": args.progress_every,
+            "delete_bulk_size": args.delete_bulk_size,
             "trace_api": bool(args.trace_api),
         },
         "paths": {
