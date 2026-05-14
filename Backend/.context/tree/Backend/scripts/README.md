@@ -18,9 +18,14 @@ One-off operational scripts for backfills, cleanup, reconciliation, and migratio
 - `zoho_po_resync_orchestrator.py` uses Zoho Inventory bill/payment endpoints (not Zoho Books), matching orgs without Books permissions.
 - `zoho_po_resync_orchestrator.py` delete stage skips payments and uses CSV IDs in the provided date window, deleting purchase receives first and bills second; it attempts bulk-delete in chunks (`--delete-bulk-size`, default 200) with single-delete fallback if bulk endpoint behavior is unavailable.
 - `zoho_po_resync_orchestrator.py` sync-apply stage now upserts each PO and then materializes receives/bills from CSV metadata (date, due_date, receive_number/bill_number, notes/reference) while building line_items from the current Zoho PO lines (CSV SKU/Product IDs are ignored); reruns are idempotent by existing receive/bill numbers.
-- `zoho_sync_q1_pos_with_receives_and_bills.py` defaults to `2026-01-01..2026-03-31`, enforces PO relink order (`zoho_id` first, then Zoho `reference_number == po_number`), syncs the PO, then creates missing receives/bills from `Backend/misc/Purchase_Receive.csv` and `Backend/misc/Bill.csv` using current Zoho PO line items.
+- `zoho_sync_q1_pos_with_receives_and_bills.py` defaults to `2026-01-01..2026-03-31`, enforces PO relink order (`zoho_id` first, then Zoho `reference_number == po_number`), syncs the PO, then materializes bill-first/receive-second dependencies from `Backend/misc/Bill.csv` and `Backend/misc/Purchase_Receive.csv`.
 - `zoho_sync_q1_pos_with_receives_and_bills.py` `--dry-run` prints per-PO planned resolver/receive/bill actions and does not write; apply mode is idempotent by existing Zoho receive/bill numbers.
 - `zoho_sync_q1_pos_with_receives_and_bills.py` supports `--limit` and `--offset` so operators can test tiny batches (for example 2 POs) before full-quarter runs.
+- `zoho_sync_q1_pos_with_receives_and_bills.py` writes a JSON failure report after every run (default: `Backend/scripts/zoho_sync_q1_pos_with_receives_and_bills_failures.json`, override with `--failure-log`) capturing PO upload, bill, and receive failures plus run summary.
+- `zoho_sync_q1_pos_with_receives_and_bills.py` now enriches bill payloads with PO-linked `line_items` from the current Zoho PO response (required by Zoho) and retries once with stripped `location_id`/`branch_id` when Zoho returns `code:27523` location-lock errors.
+- `zoho_sync_q1_pos_with_receives_and_bills.py` creates purchase receives via Inventory API with `purchaseorder_id` in query params (in addition to payload) to satisfy Zoho PO-association validation (`code:9`).
+- In bill-first mode, `zoho_sync_q1_pos_with_receives_and_bills.py` enriches receive line items with `bill_line_item_id` by mapping bill response lines (`purchaseorder_item_id` -> bill `line_item_id`), enabling receives after bill creation on Zoho-locked PO items.
+- `zoho_sync_q1_pos_with_receives_and_bills.py` prints `[bill-debug]` and `[receive-debug]` payload/response logs only when `--debug` is passed.
 
 ## Child Folders
 - (No child folders)
