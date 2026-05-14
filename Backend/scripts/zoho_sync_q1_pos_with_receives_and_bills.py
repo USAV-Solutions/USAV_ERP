@@ -113,14 +113,17 @@ def _build_bill_scope(rows: list[dict[str, str]]) -> dict[str, dict[str, dict[st
     return scope
 
 
-async def _load_local_pos(start_date: date, end_date: date) -> list[PurchaseOrder]:
+async def _load_local_pos(start_date: date, end_date: date, *, limit: int, offset: int) -> list[PurchaseOrder]:
     async with async_session_factory() as db:
         stmt = (
             select(PurchaseOrder)
             .options(noload(PurchaseOrder.vendor), noload(PurchaseOrder.items))
             .where(PurchaseOrder.order_date >= start_date, PurchaseOrder.order_date <= end_date)
             .order_by(PurchaseOrder.order_date.asc(), PurchaseOrder.id.asc())
+            .offset(offset)
         )
+        if limit > 0:
+            stmt = stmt.limit(limit)
         return (await db.execute(stmt)).scalars().all()
 
 
@@ -358,6 +361,8 @@ async def _run(
     receive_csv: Path,
     dry_run: bool,
     progress_every: int,
+    limit: int,
+    offset: int,
 ) -> int:
     _validate_csv_headers(receive_csv, {"PO Number", "Receive Number", "Receive Date", "Notes"})
     _validate_csv_headers(bill_csv, {"PurchaseOrder", "Bill Number", "Bill Date"})
@@ -365,7 +370,7 @@ async def _run(
     receive_scope = _build_receive_scope(_read_csv_rows(receive_csv))
     bill_scope = _build_bill_scope(_read_csv_rows(bill_csv))
 
-    local_pos = await _load_local_pos(start_date, end_date)
+    local_pos = await _load_local_pos(start_date, end_date, limit=limit, offset=offset)
     if not local_pos:
         print("No local purchase orders found in requested date range.")
         return 0
@@ -522,6 +527,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--receive-csv", default=str(DEFAULT_RECEIVE_CSV), help="Path to Purchase_Receive.csv")
     parser.add_argument("--dry-run", action="store_true", help="Plan only; no writes")
     parser.add_argument("--progress-every", type=int, default=25, help="Print progress every N purchase orders")
+    parser.add_argument("--limit", type=int, default=0, help="Max number of local purchase orders to process (0 = all)")
+    parser.add_argument("--offset", type=int, default=0, help="Skip first N local purchase orders in date-range ordering")
     return parser
 
 
@@ -532,6 +539,10 @@ def main() -> int:
     end_date = _parse_iso(args.end_date, "end-date")
     if end_date < start_date:
         raise ValueError("end-date must be >= start-date")
+    if int(args.limit) < 0:
+        raise ValueError("limit must be >= 0")
+    if int(args.offset) < 0:
+        raise ValueError("offset must be >= 0")
 
     return asyncio.run(
         _run(
@@ -541,6 +552,8 @@ def main() -> int:
             receive_csv=Path(args.receive_csv),
             dry_run=bool(args.dry_run),
             progress_every=int(args.progress_every),
+            limit=int(args.limit),
+            offset=int(args.offset),
         )
     )
 

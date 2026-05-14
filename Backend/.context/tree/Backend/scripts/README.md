@@ -20,6 +20,7 @@ One-off operational scripts for backfills, cleanup, reconciliation, and migratio
 - `zoho_po_resync_orchestrator.py` sync-apply stage now upserts each PO and then materializes receives/bills from CSV metadata (date, due_date, receive_number/bill_number, notes/reference) while building line_items from the current Zoho PO lines (CSV SKU/Product IDs are ignored); reruns are idempotent by existing receive/bill numbers.
 - `zoho_sync_q1_pos_with_receives_and_bills.py` defaults to `2026-01-01..2026-03-31`, enforces PO relink order (`zoho_id` first, then Zoho `reference_number == po_number`), syncs the PO, then creates missing receives/bills from `Backend/misc/Purchase_Receive.csv` and `Backend/misc/Bill.csv` using current Zoho PO line items.
 - `zoho_sync_q1_pos_with_receives_and_bills.py` `--dry-run` prints per-PO planned resolver/receive/bill actions and does not write; apply mode is idempotent by existing Zoho receive/bill numbers.
+- `zoho_sync_q1_pos_with_receives_and_bills.py` supports `--limit` and `--offset` so operators can test tiny batches (for example 2 POs) before full-quarter runs.
 
 ## Child Folders
 - (No child folders)
