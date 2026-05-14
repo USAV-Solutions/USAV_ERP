@@ -123,6 +123,22 @@ def _is_zoho_unauthorized(exc: Exception) -> bool:
     return '"code":57' in text or "not authorized" in text.lower()
 
 
+def _extract_receive_date(value: dict[str, Any]) -> Optional[date]:
+    for key in ("date", "receive_date", "received_date", "created_time"):
+        parsed = _parse_csv_date(_clean((value or {}).get(key)))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _extract_bill_date(value: dict[str, Any]) -> Optional[date]:
+    for key in ("date", "bill_date", "created_time"):
+        parsed = _parse_csv_date(_clean((value or {}).get(key)))
+        if parsed is not None:
+            return parsed
+    return None
+
+
 def _read_csv_rows(path: Path) -> list[dict[str, str]]:
     with path.open("r", encoding="utf-8-sig", newline="") as f:
         return list(csv.DictReader(f))
@@ -205,36 +221,62 @@ async def _inventory_bulk_delete_receives(client: ZohoClient, receive_ids: list[
     ids = [v for v in (_clean(x) for x in receive_ids) if v]
     if not ids:
         return {"code": 0, "message": "no-op"}
-    response = await client._request(
-        "DELETE",
-        "/purchasereceives",
-        api="inventory",
-        params={
-            "purchasereceive_id": ",".join(ids),
-            "bulk_delete": "true",
-        },
-    )
-    if not _is_zoho_success_response(response):
-        raise ValueError(f"Inventory bulk receive delete failed: {response}")
-    return response
+    joined = ",".join(ids)
+    last_exc: Optional[Exception] = None
+    attempts = [
+        {"receive_ids": joined, "bulk_delete": "true"},
+        {"receive_ids": joined},
+        {"purchase_receive_ids": joined, "bulk_delete": "true"},
+        {"purchase_receive_ids": joined},
+        {"purchasereceive_id": joined, "bulk_delete": "true"},
+        {"purchasereceive_id": joined},
+    ]
+    for params in attempts:
+        try:
+            response = await client._request(
+                "DELETE",
+                "/purchasereceives",
+                api="inventory",
+                params=params,
+            )
+            if _is_zoho_success_response(response):
+                return response
+        except Exception as exc:
+            last_exc = exc
+            continue
+    if last_exc is not None:
+        raise last_exc
+    raise ValueError("Inventory bulk receive delete failed")
 
 
 async def _inventory_bulk_delete_bills(client: ZohoClient, bill_ids: list[str]) -> dict[str, Any]:
     ids = [v for v in (_clean(x) for x in bill_ids) if v]
     if not ids:
         return {"code": 0, "message": "no-op"}
-    response = await client._request(
-        "DELETE",
-        "/bills",
-        api="inventory",
-        params={
-            "bill_id": ",".join(ids),
-            "bulk_delete": "true",
-        },
-    )
-    if not _is_zoho_success_response(response):
-        raise ValueError(f"Inventory bulk bill delete failed: {response}")
-    return response
+    joined = ",".join(ids)
+    last_exc: Optional[Exception] = None
+    attempts = [
+        {"bill_ids": joined, "bulk_delete": "true"},
+        {"bill_ids": joined},
+        {"bill_id": joined, "bulk_delete": "true"},
+        {"bill_id": joined},
+    ]
+    for params in attempts:
+        try:
+            response = await client._request(
+                "DELETE",
+                "/bills",
+                api="inventory",
+                params=params,
+            )
+            if _is_zoho_success_response(response):
+                return response
+        except Exception as exc:
+            last_exc = exc
+            continue
+    if last_exc is not None:
+        raise last_exc
+    raise ValueError("Inventory bulk bill delete failed")
 
 
 @dataclass
@@ -244,6 +286,12 @@ class CsvScope:
     receive_ids: list[str]
     payment_rows: list[dict[str, str]]
     payment_refs: list[dict[str, str]]
+
+
+@dataclass
+class DeleteCsvScope:
+    bill_ids: list[str]
+    receive_ids: list[str]
 
 
 @dataclass
@@ -402,9 +450,45 @@ def _build_csv_scope(
     )
 
 
+def _build_delete_scope_from_csv(
+    *,
+    bill_csv: Path,
+    receive_csv: Path,
+    start_date: date,
+    end_date: date,
+) -> DeleteCsvScope:
+    bill_ids: list[str] = []
+    bill_seen: set[str] = set()
+    for row in _read_csv_rows(bill_csv):
+        row_date = _parse_csv_date(row.get("Bill Date"))
+        if not _in_range(row_date, start_date, end_date):
+            continue
+        bill_id = _clean(row.get("PayInvoice ID"))
+        if bill_id and bill_id not in bill_seen:
+            bill_seen.add(bill_id)
+            bill_ids.append(bill_id)
+
+    receive_ids: list[str] = []
+    receive_seen: set[str] = set()
+    for row in _read_csv_rows(receive_csv):
+        row_date = _parse_csv_date(row.get("Receive Date"))
+        if not _in_range(row_date, start_date, end_date):
+            continue
+        receive_id = _clean(row.get("Purchase Receive ID"))
+        if receive_id and receive_id not in receive_seen:
+            receive_seen.add(receive_id)
+            receive_ids.append(receive_id)
+
+    return DeleteCsvScope(
+        bill_ids=bill_ids,
+        receive_ids=receive_ids,
+    )
+
+
 async def _delete_stage(
     *,
     client: ZohoClient,
+    scope: DeleteCsvScope,
     start_date: date,
     end_date: date,
     dry_run: bool,
@@ -412,55 +496,6 @@ async def _delete_stage(
     debug: bool,
     delete_bulk_size: int,
 ) -> dict[str, Any]:
-    async def _collect_receive_ids() -> list[str]:
-        ids: set[str] = set()
-        page = 1
-        per_page = 200
-        while True:
-            rows = await client.list_purchase_receives(
-                date_start=start_date.isoformat(),
-                date_end=end_date.isoformat(),
-                page=page,
-                per_page=per_page,
-            )
-            if not rows:
-                break
-            for row in rows:
-                receive_id = _clean(
-                    row.get("purchase_receive_id")
-                    or row.get("purchasereceive_id")
-                    or row.get("receive_id")
-                )
-                if receive_id:
-                    ids.add(receive_id)
-            if len(rows) < per_page:
-                break
-            page += 1
-        return sorted(ids)
-
-    async def _collect_bill_ids() -> list[str]:
-        ids: set[str] = set()
-        page = 1
-        per_page = 200
-        while True:
-            rows = await _inventory_list_bills(
-                client,
-                date_start=start_date.isoformat(),
-                date_end=end_date.isoformat(),
-                page=page,
-                per_page=per_page,
-            )
-            if not rows:
-                break
-            for row in rows:
-                bill_id = _clean(row.get("bill_id") or row.get("id"))
-                if bill_id:
-                    ids.add(bill_id)
-            if len(rows) < per_page:
-                break
-            page += 1
-        return sorted(ids)
-
     async def _bulk_then_fallback(
         *,
         label: str,
@@ -513,8 +548,9 @@ async def _delete_stage(
         stats["failed_count"] = len(stats["failed"])
         return stats
 
-    receive_ids = await _collect_receive_ids()
-    bill_ids = await _collect_bill_ids()
+    receive_ids = list(scope.receive_ids)
+    bill_ids = list(scope.bill_ids)
+    _debug(debug, f"CSV delete scope: receives={len(receive_ids)} bills={len(bill_ids)} window={start_date}..{end_date}")
 
     # Required order: receives first, then bills.
     receive_result = await _bulk_then_fallback(
@@ -532,6 +568,7 @@ async def _delete_stage(
 
     return {
         "scope": {
+            "source": "csv",
             "receive_ids": len(receive_ids),
             "bill_ids": len(bill_ids),
         },
@@ -1161,13 +1198,20 @@ async def main() -> None:
     receive_csv = Path(args.receive_csv)
     report_path = Path(args.report_path)
 
-    if args.stage in {"reconcile-check", "reconcile-api"}:
-        for csv_path in (bill_csv, payment_csv, receive_csv):
+    if args.stage in {"delete", "reconcile-check", "reconcile-api"}:
+        for csv_path in (bill_csv, receive_csv):
             if not csv_path.exists():
                 raise FileNotFoundError(f"CSV not found: {csv_path}")
         _validate_csv_headers(bill_csv, {"Bill Date", "PayInvoice ID", "Bill Number", "PurchaseOrder"})
-        _validate_csv_headers(payment_csv, {"Date", "VendorPayment ID", "PIPayment ID", "Bill Number"})
         _validate_csv_headers(receive_csv, {"Receive Date", "Purchase Receive ID", "PO Number", "Bill Number"})
+
+    if args.stage in {"reconcile-check", "reconcile-api"}:
+        if not payment_csv.exists():
+            raise FileNotFoundError(f"CSV not found: {payment_csv}")
+        for csv_path in (bill_csv, payment_csv, receive_csv):
+            if not csv_path.exists():
+                raise FileNotFoundError(f"CSV not found: {csv_path}")
+        _validate_csv_headers(payment_csv, {"Date", "VendorPayment ID", "PIPayment ID", "Bill Number"})
 
     if args.apply and args.dry_run:
         raise ValueError("Use either --apply or --dry-run, not both")
@@ -1176,14 +1220,21 @@ async def main() -> None:
     _install_api_trace(client, enabled=bool(args.trace_api))
 
     _debug(args.debug, f"stage={args.stage} dry_run={dry_run} window={start_date}..{end_date}")
-    if args.stage in {"reconcile-check", "reconcile-api"}:
+    if args.stage in {"delete", "reconcile-check", "reconcile-api"}:
         _debug(args.debug, f"csv bill={bill_csv} payment={payment_csv} receive={receive_csv}")
     _debug(args.debug, f"org={client.organization_id}")
 
     stage_result: dict[str, Any]
     if args.stage == "delete":
+        scope = _build_delete_scope_from_csv(
+            bill_csv=bill_csv,
+            receive_csv=receive_csv,
+            start_date=start_date,
+            end_date=end_date,
+        )
         stage_result = await _delete_stage(
             client=client,
+            scope=scope,
             start_date=start_date,
             end_date=end_date,
             dry_run=dry_run,
