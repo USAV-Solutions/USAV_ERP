@@ -18,6 +18,8 @@ One-off operational scripts for backfills, cleanup, reconciliation, and migratio
 - `zoho_po_resync_orchestrator.py` uses Zoho Inventory bill/payment endpoints (not Zoho Books), matching orgs without Books permissions.
 - `zoho_po_resync_orchestrator.py` delete stage skips payments and uses CSV IDs in the provided date window, deleting purchase receives first and bills second; it attempts bulk-delete in chunks (`--delete-bulk-size`, default 200) with single-delete fallback if bulk endpoint behavior is unavailable.
 - `zoho_po_resync_orchestrator.py` sync-apply stage now upserts each PO and then materializes receives/bills from CSV metadata (date, due_date, receive_number/bill_number, notes/reference) while building line_items from the current Zoho PO lines (CSV SKU/Product IDs are ignored); reruns are idempotent by existing receive/bill numbers.
+- `zoho_sync_q1_pos_with_receives_and_bills.py` defaults to `2026-01-01..2026-03-31`, enforces PO relink order (`zoho_id` first, then Zoho `reference_number == po_number`), syncs the PO, then creates missing receives/bills from `Backend/misc/Purchase_Receive.csv` and `Backend/misc/Bill.csv` using current Zoho PO line items.
+- `zoho_sync_q1_pos_with_receives_and_bills.py` `--dry-run` prints per-PO planned resolver/receive/bill actions and does not write; apply mode is idempotent by existing Zoho receive/bill numbers.
 
 ## Child Folders
 - (No child folders)
