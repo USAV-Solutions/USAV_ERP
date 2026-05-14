@@ -295,6 +295,12 @@ class DeleteCsvScope:
 
 
 @dataclass
+class CsvMetadataScope:
+    receive_groups_by_po: dict[str, dict[str, list[dict[str, str]]]]
+    bill_groups_by_po: dict[str, dict[str, list[dict[str, str]]]]
+
+
+@dataclass
 class CsvScoped:
     bills_by_id: dict[str, list[dict[str, str]]]
     receives_by_id: dict[str, list[dict[str, str]]]
@@ -485,6 +491,49 @@ def _build_delete_scope_from_csv(
     )
 
 
+def _build_csv_metadata_scope(
+    *,
+    bill_csv: Path,
+    receive_csv: Path,
+    start_date: date,
+    end_date: date,
+) -> CsvMetadataScope:
+    receive_groups_by_po: dict[str, dict[str, list[dict[str, str]]]] = defaultdict(lambda: defaultdict(list))
+    for row in _read_csv_rows(receive_csv):
+        row_date = _parse_csv_date(row.get("Receive Date"))
+        if not _in_range(row_date, start_date, end_date):
+            continue
+        po_number = _clean(row.get("PO Number"))
+        if not po_number:
+            continue
+        group_key = (
+            _clean(row.get("Purchase Receive ID"))
+            or _clean(row.get("Receive Number"))
+            or f"{po_number}:{_clean(row.get('Receive Date'))}"
+        )
+        receive_groups_by_po[po_number][group_key].append(row)
+
+    bill_groups_by_po: dict[str, dict[str, list[dict[str, str]]]] = defaultdict(lambda: defaultdict(list))
+    for row in _read_csv_rows(bill_csv):
+        row_date = _parse_csv_date(row.get("Bill Date"))
+        if not _in_range(row_date, start_date, end_date):
+            continue
+        po_number = _clean(row.get("PurchaseOrder") or row.get("Purchase Order Number"))
+        if not po_number:
+            continue
+        group_key = (
+            _clean(row.get("PayInvoice ID"))
+            or _clean(row.get("Bill Number"))
+            or f"{po_number}:{_clean(row.get('Bill Date'))}"
+        )
+        bill_groups_by_po[po_number][group_key].append(row)
+
+    return CsvMetadataScope(
+        receive_groups_by_po={k: dict(v) for k, v in receive_groups_by_po.items()},
+        bill_groups_by_po={k: dict(v) for k, v in bill_groups_by_po.items()},
+    )
+
+
 async def _delete_stage(
     *,
     client: ZohoClient,
@@ -652,14 +701,181 @@ async def _sync_dry_run_stage(
     }
 
 
+async def _load_local_po_state(po_id: int) -> Optional[dict[str, Any]]:
+    async with async_session_factory() as db:
+        stmt = select(PurchaseOrder).where(PurchaseOrder.id == po_id)
+        po = (await db.execute(stmt)).scalar_one_or_none()
+        if po is None:
+            return None
+        return {
+            "id": po.id,
+            "po_number": po.po_number,
+            "zoho_id": _clean(po.zoho_id),
+        }
+
+
+async def _materialize_po_dependencies_from_csv(
+    *,
+    client: ZohoClient,
+    po_state: dict[str, Any],
+    receive_groups: dict[str, list[dict[str, str]]],
+    bill_groups: dict[str, list[dict[str, str]]],
+) -> dict[str, Any]:
+    po_number = _clean(po_state.get("po_number"))
+    zoho_id = _clean(po_state.get("zoho_id"))
+
+    if not zoho_id:
+        by_number = await client.find_purchase_order_by_number(po_number)
+        zoho_id = _clean((by_number or {}).get("purchaseorder_id"))
+    if not zoho_id:
+        return {
+            "po_number": po_number,
+            "receive": {"attempted": 0, "created": 0, "skipped_existing": 0, "failed": []},
+            "bill": {"attempted": 0, "created": 0, "skipped_existing": 0, "failed": []},
+            "error": "zoho_po_not_found",
+        }
+
+    full_po = await client.get_purchase_order(zoho_id)
+
+    receive_summary = {"attempted": 0, "created": 0, "skipped_existing": 0, "failed": []}
+    bill_summary = {"attempted": 0, "created": 0, "skipped_existing": 0, "failed": []}
+
+    existing_receive_numbers: set[str] = set()
+    existing_receive_ids: set[str] = set()
+    for row in full_po.get("purchasereceives") or full_po.get("receives") or []:
+        if not isinstance(row, dict):
+            continue
+        rn = _clean(row.get("receive_number"))
+        rid = _clean(row.get("receive_id") or row.get("purchase_receive_id") or row.get("purchasereceive_id"))
+        if rn:
+            existing_receive_numbers.add(rn)
+        if rid:
+            existing_receive_ids.add(rid)
+
+    for _, rows in sorted(receive_groups.items()):
+        if not rows:
+            continue
+        receive_summary["attempted"] += 1
+        sample = rows[0]
+        target_receive_number = _clean(sample.get("Receive Number"))
+        target_receive_id = _clean(sample.get("Purchase Receive ID"))
+        if (target_receive_number and target_receive_number in existing_receive_numbers) or (
+            target_receive_id and target_receive_id in existing_receive_ids
+        ):
+            receive_summary["skipped_existing"] += 1
+            continue
+
+        payload = _build_receive_payload(rows, full_po)
+        if not payload:
+            receive_summary["failed"].append(
+                {
+                    "receive_number": target_receive_number,
+                    "receive_id": target_receive_id,
+                    "error": "could_not_build_receive_payload",
+                }
+            )
+            continue
+
+        payload["date"] = _clean(sample.get("Receive Date")) or _clean(payload.get("date"))
+        payload["receive_number"] = target_receive_number or _clean(payload.get("receive_number"))
+        payload["notes"] = _clean(sample.get("Notes")) or _clean(payload.get("notes"))
+
+        try:
+            await client.create_purchase_receive(payload)
+            receive_summary["created"] += 1
+            if target_receive_number:
+                existing_receive_numbers.add(target_receive_number)
+            if target_receive_id:
+                existing_receive_ids.add(target_receive_id)
+        except Exception as exc:
+            receive_summary["failed"].append(
+                {
+                    "receive_number": target_receive_number,
+                    "receive_id": target_receive_id,
+                    "error": str(exc),
+                }
+            )
+
+    refreshed_po = await client.get_purchase_order(zoho_id)
+    existing_bill_numbers: set[str] = set()
+    for row in refreshed_po.get("bills") or []:
+        if not isinstance(row, dict):
+            continue
+        bn = _clean(row.get("bill_number"))
+        if bn:
+            existing_bill_numbers.add(bn)
+
+    for _, rows in sorted(bill_groups.items()):
+        if not rows:
+            continue
+        bill_summary["attempted"] += 1
+        sample = rows[0]
+        target_bill_number = _clean(sample.get("Bill Number"))
+        if target_bill_number and target_bill_number in existing_bill_numbers:
+            bill_summary["skipped_existing"] += 1
+            continue
+
+        payload = _build_bill_payload(rows, refreshed_po)
+        if not payload:
+            bill_summary["failed"].append(
+                {
+                    "bill_number": target_bill_number,
+                    "error": "could_not_build_bill_payload",
+                }
+            )
+            continue
+
+        payload["date"] = _clean(sample.get("Bill Date")) or _clean(payload.get("date"))
+        payload["due_date"] = _clean(sample.get("Due Date")) or _clean(payload.get("due_date")) or _clean(payload.get("date"))
+        payload["bill_number"] = target_bill_number or _clean(payload.get("bill_number"))
+        payload["reference_number"] = _clean(
+            sample.get("Reference Number")
+            or sample.get("PurchaseOrder")
+            or sample.get("Purchase Order Number")
+            or payload.get("reference_number")
+            or payload.get("bill_number")
+        )
+        payload["notes"] = _clean(sample.get("Vendor Notes") or sample.get("Notes") or payload.get("notes"))
+
+        try:
+            await _inventory_create_bill(client, payload)
+            bill_summary["created"] += 1
+            if target_bill_number:
+                existing_bill_numbers.add(target_bill_number)
+        except Exception as exc:
+            bill_summary["failed"].append(
+                {
+                    "bill_number": target_bill_number,
+                    "error": str(exc),
+                }
+            )
+
+    return {
+        "po_number": po_number,
+        "zoho_id": zoho_id,
+        "receive": receive_summary,
+        "bill": bill_summary,
+    }
+
+
 async def _sync_apply_stage(
     *,
+    client: ZohoClient,
+    bill_csv: Path,
+    receive_csv: Path,
     start_date: date,
     end_date: date,
     limit: int,
     offset: int,
     progress_every: int,
 ) -> dict[str, Any]:
+    metadata_scope = _build_csv_metadata_scope(
+        bill_csv=bill_csv,
+        receive_csv=receive_csv,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
     pos = await _load_local_pos(
         start_date=start_date,
         end_date=end_date,
@@ -670,6 +886,7 @@ async def _sync_apply_stage(
     attempted: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
+    dependency_results: list[dict[str, Any]] = []
 
     total = len(pos)
     for idx, po in enumerate(pos, start=1):
@@ -686,6 +903,32 @@ async def _sync_apply_stage(
 
         try:
             await sync_po_outbound(po.id, False, False)
+            po_state = await _load_local_po_state(po.id)
+            if po_state is None:
+                failed.append(
+                    {
+                        "id": po.id,
+                        "po_number": po.po_number,
+                        "error": "local_po_not_found_after_sync",
+                    }
+                )
+                continue
+
+            po_number = _clean(po_state.get("po_number"))
+            receive_groups = metadata_scope.receive_groups_by_po.get(po_number, {})
+            bill_groups = metadata_scope.bill_groups_by_po.get(po_number, {})
+            dep_result = await _materialize_po_dependencies_from_csv(
+                client=client,
+                po_state=po_state,
+                receive_groups=receive_groups,
+                bill_groups=bill_groups,
+            )
+            dependency_results.append(
+                {
+                    "po_id": po.id,
+                    **dep_result,
+                }
+            )
             attempted.append(
                 {
                     "id": po.id,
@@ -710,14 +953,24 @@ async def _sync_apply_stage(
             "attempted": len(attempted),
             "failed": len(failed),
             "skipped_no_items": len(skipped),
+            "csv_receive_groups_total": sum(len(v) for v in metadata_scope.receive_groups_by_po.values()),
+            "csv_bill_groups_total": sum(len(v) for v in metadata_scope.bill_groups_by_po.values()),
+            "receive_created": sum(int((r.get("receive") or {}).get("created", 0)) for r in dependency_results),
+            "receive_skipped_existing": sum(int((r.get("receive") or {}).get("skipped_existing", 0)) for r in dependency_results),
+            "receive_failed": sum(len((r.get("receive") or {}).get("failed") or []) for r in dependency_results),
+            "bill_created": sum(int((r.get("bill") or {}).get("created", 0)) for r in dependency_results),
+            "bill_skipped_existing": sum(int((r.get("bill") or {}).get("skipped_existing", 0)) for r in dependency_results),
+            "bill_failed": sum(len((r.get("bill") or {}).get("failed") or []) for r in dependency_results),
         },
         "applied": attempted,
         "failed": failed,
         "skipped": skipped,
+        "dependency_results": dependency_results,
         "notes": {
             "sync_mode": "PO-only",
             "allow_billed_unbill_rebill": False,
             "enable_ebay_billing": False,
+            "csv_metadata_applied": True,
         },
     }
 
@@ -968,7 +1221,7 @@ def _build_bill_payload(
         return None
 
     bill_date = _clean(sample.get("Bill Date"))
-    return {
+    payload = {
         "purchaseorder_id": po_id,
         "vendor_id": vendor_id,
         "bill_number": _clean(sample.get("Bill Number")),
@@ -976,6 +1229,19 @@ def _build_bill_payload(
         "due_date": _clean(sample.get("Due Date")) or bill_date,
         "line_items": line_items,
     }
+    reference_number = _clean(
+        sample.get("Reference Number")
+        or sample.get("PurchaseOrder")
+        or sample.get("Purchase Order Number")
+        or sample.get("Bill Number")
+    )
+    if reference_number:
+        payload["reference_number"] = reference_number
+
+    notes = _clean(sample.get("Vendor Notes") or sample.get("Notes"))
+    if notes:
+        payload["notes"] = notes
+    return payload
 
 
 def _build_vendor_payment_payload(
@@ -1198,7 +1464,7 @@ async def main() -> None:
     receive_csv = Path(args.receive_csv)
     report_path = Path(args.report_path)
 
-    if args.stage in {"delete", "reconcile-check", "reconcile-api"}:
+    if args.stage in {"delete", "sync-apply", "reconcile-check", "reconcile-api"}:
         for csv_path in (bill_csv, receive_csv):
             if not csv_path.exists():
                 raise FileNotFoundError(f"CSV not found: {csv_path}")
@@ -1220,7 +1486,7 @@ async def main() -> None:
     _install_api_trace(client, enabled=bool(args.trace_api))
 
     _debug(args.debug, f"stage={args.stage} dry_run={dry_run} window={start_date}..{end_date}")
-    if args.stage in {"delete", "reconcile-check", "reconcile-api"}:
+    if args.stage in {"delete", "sync-apply", "reconcile-check", "reconcile-api"}:
         _debug(args.debug, f"csv bill={bill_csv} payment={payment_csv} receive={receive_csv}")
     _debug(args.debug, f"org={client.organization_id}")
 
@@ -1253,6 +1519,9 @@ async def main() -> None:
         if dry_run:
             raise ValueError("sync-apply requires --apply")
         stage_result = await _sync_apply_stage(
+            client=client,
+            bill_csv=bill_csv,
+            receive_csv=receive_csv,
             start_date=start_date,
             end_date=end_date,
             limit=args.limit,
