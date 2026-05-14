@@ -17,6 +17,7 @@ One-off operational scripts for backfills, cleanup, reconciliation, and migratio
 - In orchestrator stages, write operations require `--apply`; dry-run remains default even for delete/reconcile flows.
 - `zoho_po_resync_orchestrator.py` uses Zoho Inventory bill/payment endpoints (not Zoho Books), matching orgs without Books permissions.
 - `zoho_po_resync_orchestrator.py` delete stage skips payments and uses CSV IDs in the provided date window, deleting purchase receives first and bills second; it attempts bulk-delete in chunks (`--delete-bulk-size`, default 200) with single-delete fallback if bulk endpoint behavior is unavailable.
+- `zoho_po_resync_orchestrator.py` sync-apply stage now upserts each PO and then materializes receives/bills from CSV metadata (date, due_date, receive_number/bill_number, notes/reference) using current Zoho line-item mapping; reruns are idempotent by existing receive/bill numbers.
 
 ## Child Folders
 - (No child folders)
