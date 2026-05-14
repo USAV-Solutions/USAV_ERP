@@ -5,6 +5,7 @@ Implements the BasePlatformClient interface for eBay stores.
 """
 import asyncio
 from datetime import datetime, date, timedelta, timezone
+from pathlib import Path
 from typing import Any, List, Optional
 import logging
 import socket
@@ -112,7 +113,8 @@ class EbayClient(BasePlatformClient):
             "scope": (
                 "https://api.ebay.com/oauth/api_scope "
                 "https://api.ebay.com/oauth/api_scope/sell.fulfillment "
-                "https://api.ebay.com/oauth/api_scope/sell.inventory"
+                "https://api.ebay.com/oauth/api_scope/sell.inventory "
+                "https://api.ebay.com/oauth/api_scope/commerce.media"
             ),
         }
 
@@ -965,9 +967,21 @@ class EbayClient(BasePlatformClient):
         return response.json()
 
     async def get_default_category_tree_id(self, marketplace_id: str) -> str:
+        logger.debug(
+            "[DEBUG.EXTERNAL_API] eBay %s taxonomy call method=GET url=%s params=%s headers=%s",
+            self.store_name,
+            f"{self.base_url}/commerce/taxonomy/v1/get_default_category_tree_id",
+            {"marketplace_id": marketplace_id},
+            {"Accept": "application/json", "Authorization": "Bearer <redacted>"},
+        )
         payload = await self._rest_get(
             "/commerce/taxonomy/v1/get_default_category_tree_id",
             params={"marketplace_id": marketplace_id},
+        )
+        logger.debug(
+            "[DEBUG.EXTERNAL_API] eBay %s taxonomy response get_default_category_tree_id=%s",
+            self.store_name,
+            payload,
         )
         category_tree_id = payload.get("categoryTreeId")
         if not category_tree_id:
@@ -975,9 +989,21 @@ class EbayClient(BasePlatformClient):
         return str(category_tree_id)
 
     async def get_category_suggestions(self, category_tree_id: str, query_text: str) -> list[dict[str, Any]]:
+        logger.debug(
+            "[DEBUG.EXTERNAL_API] eBay %s taxonomy call method=GET url=%s params=%s headers=%s",
+            self.store_name,
+            f"{self.base_url}/commerce/taxonomy/v1/category_tree/{category_tree_id}/get_category_suggestions",
+            {"q": query_text},
+            {"Accept": "application/json", "Authorization": "Bearer <redacted>"},
+        )
         payload = await self._rest_get(
             f"/commerce/taxonomy/v1/category_tree/{category_tree_id}/get_category_suggestions",
             params={"q": query_text},
+        )
+        logger.debug(
+            "[DEBUG.EXTERNAL_API] eBay %s taxonomy response get_category_suggestions=%s",
+            self.store_name,
+            payload,
         )
         return payload.get("categorySuggestions", [])
 
@@ -987,6 +1013,71 @@ class EbayClient(BasePlatformClient):
             params={"marketplace_id": marketplace_id},
         )
         return payload.get("fulfillmentPolicies", [])
+
+    async def create_media_image_from_file(self, file_path: Path) -> str:
+        if not file_path.is_file():
+            raise FileNotFoundError(f"Image file not found: {file_path}")
+        access_token = await self._get_access_token()
+        if not access_token:
+            raise RuntimeError(f"eBay {self.store_name} unable to obtain access token")
+
+        content_type = "application/octet-stream"
+        ext = file_path.suffix.lower()
+        if ext in {".jpg", ".jpeg"}:
+            content_type = "image/jpeg"
+        elif ext == ".png":
+            content_type = "image/png"
+        elif ext == ".webp":
+            content_type = "image/webp"
+        elif ext == ".gif":
+            content_type = "image/gif"
+        elif ext == ".bmp":
+            content_type = "image/bmp"
+        elif ext == ".tiff":
+            content_type = "image/tiff"
+        elif ext == ".avif":
+            content_type = "image/avif"
+        elif ext == ".heic":
+            content_type = "image/heic"
+
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/json",
+        }
+        url = f"{self.base_url}/commerce/media/v1_beta/image/create_image_from_file"
+        logger.debug(
+            "[DEBUG.EXTERNAL_API] eBay %s media upload call method=POST url=%s filename=%s content_type=%s headers=%s",
+            self.store_name,
+            url,
+            file_path.name,
+            content_type,
+            {"Accept": "application/json", "Authorization": "Bearer <redacted>"},
+        )
+        transport = httpx.AsyncHTTPTransport(retries=_TRANSPORT_RETRIES)
+        async with httpx.AsyncClient(transport=transport, timeout=60.0) as client:
+            with file_path.open("rb") as image_file:
+                files = {
+                    "image": (file_path.name, image_file, content_type),
+                }
+                response = await client.post(url, headers=headers, files=files)
+        if response.status_code >= 400:
+            logger.debug(
+                "[DEBUG.EXTERNAL_API] eBay %s media upload failure status=%s body=%s",
+                self.store_name,
+                response.status_code,
+                response.text,
+            )
+            response.raise_for_status()
+        payload = response.json()
+        logger.debug(
+            "[DEBUG.EXTERNAL_API] eBay %s media upload response=%s",
+            self.store_name,
+            payload,
+        )
+        image_url = payload.get("imageUrl")
+        if not image_url:
+            raise RuntimeError("eBay Media API response missing imageUrl")
+        return str(image_url)
 
     async def _post_trading_xml(self, call_name: str, request_xml: str) -> ET.Element:
         access_token = await self._get_access_token()

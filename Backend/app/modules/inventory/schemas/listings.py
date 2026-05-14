@@ -155,6 +155,40 @@ class EbayPublishResponse(BaseModel):
     sync_status: PlatformSyncStatus
 
 
+class EbayAvailableImage(BaseModel):
+    image_id: str
+    filename: str
+    listing: str
+    relative_path: str
+    preview_url: str
+
+
+class EbayAvailableImagesResponse(BaseModel):
+    variant_id: int
+    sku: str
+    available_images: list[EbayAvailableImage] = Field(default_factory=list)
+
+
+class EbaySendImagesRequest(BaseModel):
+    platform: Platform
+    variant_id: int
+    image_ids: list[str] = Field(..., min_length=1, max_length=24)
+
+
+class EbaySendImageResult(BaseModel):
+    image_id: str
+    success: bool
+    image_url: str | None = None
+    error: str | None = None
+
+
+class EbaySendImagesResponse(BaseModel):
+    platform: Platform
+    variant_id: int
+    eps_image_urls: list[str] = Field(default_factory=list)
+    results: list[EbaySendImageResult] = Field(default_factory=list)
+
+
 class ListingCreatePlatformCapability(BaseModel):
     platform: Platform
     enabled: bool

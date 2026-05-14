@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { ChangeEvent, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Alert,
@@ -12,6 +12,7 @@ import {
   Divider,
   FormControlLabel,
   Grid,
+  MenuItem,
   Paper,
   Stack,
   Tab,
@@ -76,6 +77,34 @@ interface EbayPublishResponse {
   sync_status: string
 }
 
+interface EbayAvailableImage {
+  image_id: string
+  filename: string
+  listing: string
+  relative_path: string
+  preview_url: string
+}
+
+interface EbayAvailableImagesResponse {
+  variant_id: number
+  sku: string
+  available_images: EbayAvailableImage[]
+}
+
+interface EbaySendImageResult {
+  image_id: string
+  success: boolean
+  image_url: string | null
+  error: string | null
+}
+
+interface EbaySendImagesResponse {
+  platform: Platform
+  variant_id: number
+  eps_image_urls: string[]
+  results: EbaySendImageResult[]
+}
+
 interface EbaySpecific {
   condition_text: string
   shipping_policy_id: string
@@ -87,6 +116,11 @@ interface EbaySpecific {
   category_id: string
   suggested_categories: EbayCategorySuggestion[]
   picture_urls: string[]
+  available_images: EbayAvailableImage[]
+  listing_images: EbayAvailableImage[]
+  eps_image_urls: string[]
+  sent_image_signature: string
+  send_results: EbaySendImageResult[]
   upc: string
   brand: string
   color: string
@@ -138,6 +172,11 @@ const INITIAL_STATE: WizardState = {
     category_id: '',
     suggested_categories: [],
     picture_urls: [],
+    available_images: [],
+    listing_images: [],
+    eps_image_urls: [],
+    sent_image_signature: '',
+    send_results: [],
     upc: '',
     brand: '',
     color: '',
@@ -156,6 +195,14 @@ function parseNumber(value: string): number | undefined {
 function formatCategoryLabel(s: EbayCategorySuggestion): string {
   const path = s.category_tree_tokens?.join(' > ').trim()
   return path || s.category_name
+}
+
+function getCategoryTreeLabelById(
+  suggestions: EbayCategorySuggestion[],
+  categoryId: string,
+): string {
+  const match = suggestions.find((s) => s.category_id === categoryId)
+  return match ? formatCategoryLabel(match) : categoryId
 }
 
 export default function CreateProductListing() {
@@ -261,6 +308,108 @@ export default function CreateProductListing() {
     },
   })
 
+  const availableImagesQuery = useQuery({
+    queryKey: ['ebay-available-images', state.variant_id],
+    queryFn: async () => {
+      if (!state.variant_id) throw new Error('Variant is required')
+      const response = await axiosClient.get<EbayAvailableImagesResponse>(
+        LISTINGS.EBAY_IMAGES_AVAILABLE(state.variant_id),
+      )
+      return response.data
+    },
+    enabled: Boolean(state.variant_id),
+  })
+
+  useEffect(() => {
+    if (!availableImagesQuery.data) return
+    setState((prev) => {
+      const available = availableImagesQuery.data.available_images
+      const availableIds = new Set(available.map((img) => img.image_id))
+      return {
+        ...prev,
+        ebay: {
+          ...prev.ebay,
+          available_images: available,
+          listing_images: prev.ebay.listing_images.filter((img) => availableIds.has(img.image_id)),
+        },
+      }
+    })
+  }, [availableImagesQuery.data])
+
+  const uploadImageMutation = useMutation({
+    mutationFn: async (files: File[]) => {
+      if (!state.variant_id) throw new Error('Variant is required')
+      const form = new FormData()
+      form.append('variant_id', String(state.variant_id))
+      form.append('listing_index', '0')
+      files.forEach((file) => form.append('files', file))
+      const response = await axiosClient.post<EbayAvailableImagesResponse>(
+        LISTINGS.EBAY_IMAGES_UPLOAD,
+        form,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      )
+      return response.data
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(['ebay-available-images', state.variant_id], data)
+      setState((prev) => {
+        const previousListingIds = new Set(prev.ebay.listing_images.map((img) => img.image_id))
+        const nextListing = [...prev.ebay.listing_images]
+        data.available_images.forEach((img) => {
+          if (!previousListingIds.has(img.image_id) && img.listing === 'listing-0') {
+            nextListing.push(img)
+          }
+        })
+        return {
+          ...prev,
+          ebay: {
+            ...prev.ebay,
+            available_images: data.available_images,
+            listing_images: nextListing,
+            eps_image_urls: [],
+            sent_image_signature: '',
+            send_results: [],
+            picture_urls: [],
+          },
+        }
+      })
+    },
+    onError: (err: any) => {
+      const detail = err?.response?.data?.detail
+      setUiError(typeof detail === 'string' ? detail : 'Failed to upload images')
+    },
+  })
+
+  const sendImagesMutation = useMutation({
+    mutationFn: async () => {
+      if (!state.variant_id || !selectedEbayPlatform) throw new Error('Variant/platform is required')
+      const imageIds = state.ebay.listing_images.map((img) => img.image_id)
+      const response = await axiosClient.post<EbaySendImagesResponse>(LISTINGS.EBAY_IMAGES_SEND, {
+        platform: selectedEbayPlatform,
+        variant_id: state.variant_id,
+        image_ids: imageIds,
+      })
+      return response.data
+    },
+    onSuccess: (data) => {
+      const signature = state.ebay.listing_images.map((img) => img.image_id).join('|')
+      setState((prev) => ({
+        ...prev,
+        ebay: {
+          ...prev.ebay,
+          eps_image_urls: data.eps_image_urls,
+          picture_urls: data.eps_image_urls,
+          sent_image_signature: signature,
+          send_results: data.results,
+        },
+      }))
+    },
+    onError: (err: any) => {
+      const detail = err?.response?.data?.detail
+      setUiError(typeof detail === 'string' ? detail : 'Failed to send images to eBay')
+    },
+  })
+
   const publishMutation = useMutation({
     mutationFn: async (payload: Record<string, unknown>) => {
       const response = await axiosClient.post<EbayPublishResponse>(LISTINGS.EBAY_PUBLISH, payload)
@@ -305,7 +454,6 @@ export default function CreateProductListing() {
           height: prev.ebay.height || String(draft.dimensions.height ?? ''),
           weight: prev.ebay.weight || String(draft.dimensions.weight ?? ''),
           category_id: prev.ebay.category_id || draft.category_id || '',
-          picture_urls: prev.ebay.picture_urls.length > 0 ? prev.ebay.picture_urls : draft.picture_urls,
           upc: prev.ebay.upc || draft.upc || '',
           brand: prev.ebay.brand || draft.brand || '',
           color: prev.ebay.color || draft.color || '',
@@ -367,10 +515,13 @@ export default function CreateProductListing() {
     }
     if (step === 2) {
       if (!selectedEbayPlatform) return true
+      const currentSignature = state.ebay.listing_images.map((img) => img.image_id).join('|')
       return (
         state.ebay.condition_text.trim().length > 0 &&
         state.ebay.category_id.trim().length > 0 &&
-        state.ebay.picture_urls.length > 0
+        state.ebay.listing_images.length > 0 &&
+        state.ebay.eps_image_urls.length > 0 &&
+        state.ebay.sent_image_signature === currentSignature
       )
     }
     return true
@@ -413,6 +564,11 @@ export default function CreateProductListing() {
       setUiError('Price and quantity are required.')
       return
     }
+    const currentSignature = state.ebay.listing_images.map((img) => img.image_id).join('|')
+    if (state.ebay.eps_image_urls.length === 0 || state.ebay.sent_image_signature !== currentSignature) {
+      setUiError('Send images to eBay first, then list.')
+      return
+    }
 
     const payload = {
       platform: selectedEbayPlatform,
@@ -422,7 +578,7 @@ export default function CreateProductListing() {
       category_id: state.ebay.category_id,
       price,
       quantity: qty,
-      picture_urls: state.ebay.picture_urls,
+      picture_urls: state.ebay.eps_image_urls,
       condition_text: state.ebay.condition_text,
       upc: state.ebay.upc || undefined,
       brand: state.ebay.brand || undefined,
@@ -437,6 +593,44 @@ export default function CreateProductListing() {
     }
 
     await publishMutation.mutateAsync(payload)
+  }
+
+  const handleSelectListingImage = (image: EbayAvailableImage) => {
+    setState((prev) => {
+      if (prev.ebay.listing_images.some((img) => img.image_id === image.image_id)) return prev
+      return {
+        ...prev,
+        ebay: {
+          ...prev.ebay,
+          listing_images: [...prev.ebay.listing_images, image],
+          eps_image_urls: [],
+          sent_image_signature: '',
+          send_results: [],
+          picture_urls: [],
+        },
+      }
+    })
+  }
+
+  const handleRemoveListingImage = (imageId: string) => {
+    setState((prev) => ({
+      ...prev,
+      ebay: {
+        ...prev.ebay,
+        listing_images: prev.ebay.listing_images.filter((img) => img.image_id !== imageId),
+        eps_image_urls: [],
+        sent_image_signature: '',
+        send_results: [],
+        picture_urls: [],
+      },
+    }))
+  }
+
+  const handleUploadFiles = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || [])
+    event.target.value = ''
+    if (files.length === 0) return
+    await uploadImageMutation.mutateAsync(files)
   }
 
   const renderDestinationStep = () => (
@@ -511,6 +705,15 @@ export default function CreateProductListing() {
                       ...prev,
                       variant_id: variant.id,
                       master_sku: variant.full_sku || prev.master_sku,
+                      ebay: {
+                        ...prev.ebay,
+                        available_images: [],
+                        listing_images: [],
+                        eps_image_urls: [],
+                        sent_image_signature: '',
+                        send_results: [],
+                        picture_urls: [],
+                      },
                     }))
                     setDraftLoadedForPlatform(null)
                     setVariantSearchInput(variant.full_sku)
@@ -690,32 +893,76 @@ export default function CreateProductListing() {
             label="Primary Category *"
             value={state.ebay.category_id}
             onChange={(e) => setState((prev) => ({ ...prev, ebay: { ...prev.ebay, category_id: e.target.value } }))}
+            SelectProps={{
+              renderValue: (value) =>
+                getCategoryTreeLabelById(state.ebay.suggested_categories, String(value)),
+            }}
           >
             {state.ebay.suggested_categories.map((s) => (
-              <MenuItem key={s.category_id} value={s.category_id}>
-                {formatCategoryLabel(s)}
+              <MenuItem key={s.category_id} value={s.category_id} sx={{ whiteSpace: 'normal' }}>
+                {formatCategoryLabel(s)} ({s.category_id})
               </MenuItem>
             ))}
           </TextField>
           {categorySuggestionMutation.isPending ? (
             <Alert severity="info">Loading category suggestions...</Alert>
           ) : null}
-          <TextField
-            label="Picture URLs (comma separated) *"
-            value={state.ebay.picture_urls.join(', ')}
-            onChange={(e) =>
-              setState((prev) => ({
-                ...prev,
-                ebay: {
-                  ...prev.ebay,
-                  picture_urls: e.target.value
-                    .split(',')
-                    .map((x) => x.trim())
-                    .filter(Boolean),
-                },
-              }))
-            }
-          />
+          <Divider />
+          <Typography variant="subtitle2">Available Images</Typography>
+          {availableImagesQuery.isLoading ? (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <CircularProgress size={16} />
+              <Typography variant="body2">Loading available images...</Typography>
+            </Box>
+          ) : null}
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+            {state.ebay.available_images.map((image) => (
+              <Button
+                key={image.image_id}
+                size="small"
+                variant={state.ebay.listing_images.some((x) => x.image_id === image.image_id) ? 'contained' : 'outlined'}
+                onClick={() => handleSelectListingImage(image)}
+              >
+                {image.filename}
+              </Button>
+            ))}
+            {!availableImagesQuery.isLoading && state.ebay.available_images.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">No available images for this SKU.</Typography>
+            ) : null}
+          </Box>
+          <Button variant="outlined" component="label" disabled={!state.variant_id || uploadImageMutation.isPending}>
+            {uploadImageMutation.isPending ? 'Uploading...' : 'Upload Files'}
+            <input type="file" hidden multiple accept=".jpg,.jpeg,.png,.webp,.gif,.bmp,.tiff,.avif,.heic" onChange={handleUploadFiles} />
+          </Button>
+          <Typography variant="subtitle2">Listing Images</Typography>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+            {state.ebay.listing_images.map((image) => (
+              <Chip
+                key={image.image_id}
+                label={image.filename}
+                onDelete={() => handleRemoveListingImage(image.image_id)}
+              />
+            ))}
+            {state.ebay.listing_images.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">Select images from Available Images.</Typography>
+            ) : null}
+          </Box>
+          <Button
+            variant="contained"
+            onClick={() => sendImagesMutation.mutate()}
+            disabled={sendImagesMutation.isPending || state.ebay.listing_images.length === 0 || !selectedEbayPlatform}
+          >
+            {sendImagesMutation.isPending ? 'Sending image...' : 'Send image'}
+          </Button>
+          {state.ebay.send_results.length > 0 ? (
+            <Box sx={{ display: 'grid', gap: 0.5 }}>
+              {state.ebay.send_results.map((result) => (
+                <Typography key={result.image_id} variant="caption" color={result.success ? 'success.main' : 'error.main'}>
+                  {result.success ? `Uploaded ${result.image_id}` : `Failed ${result.image_id}: ${result.error || 'unknown error'}`}
+                </Typography>
+              ))}
+            </Box>
+          ) : null}
         </Stack>
       ) : (
         <Alert severity="info">{activePlatformTab} overrides are scaffolded in state for a follow-up iteration.</Alert>
@@ -725,6 +972,11 @@ export default function CreateProductListing() {
 
   const renderReviewStep = () => {
     const effectivePrice = parseNumber(state.ebay.price_override) ?? parseNumber(state.base_price)
+    const currentSignature = state.ebay.listing_images.map((img) => img.image_id).join('|')
+    const canList =
+      state.ebay.eps_image_urls.length > 0 &&
+      state.ebay.sent_image_signature === currentSignature &&
+      !publishMutation.isPending
     return (
       <Stack spacing={2}>
         <Typography variant="h6">Step 4: Validate & Publish</Typography>
@@ -741,14 +993,14 @@ export default function CreateProductListing() {
             <Typography variant="body2">Qty: {state.global_quantity}</Typography>
             <Typography variant="body2">Category: {state.ebay.category_id || 'N/A'}</Typography>
             <Typography variant="body2">Condition: {state.ebay.condition_text || 'N/A'}</Typography>
-            <Typography variant="body2">Pictures: {state.ebay.picture_urls.length}</Typography>
+            <Typography variant="body2">Pictures: {state.ebay.eps_image_urls.length}</Typography>
           </CardContent>
         </Card>
 
         <Button
           variant="contained"
           onClick={handlePublish}
-          disabled={publishMutation.isPending}
+          disabled={!canList}
         >
           {publishMutation.isPending ? 'Uploading...' : 'Validate & Upload'}
         </Button>
