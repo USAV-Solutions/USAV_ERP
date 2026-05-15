@@ -130,6 +130,9 @@ class Settings(BaseSettings):
     walmart_client_secret: str = ""
     walmart_api_base_url: str = "https://marketplace.walmartapis.com"
     
+    # Google AISTUDIO
+    gemini_model_name: str = "gemini-2.5-flash-lite"
+
     # Product Images
     product_images_path: str = "/mnt/product_images"
 
