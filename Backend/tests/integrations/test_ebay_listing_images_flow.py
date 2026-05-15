@@ -1,8 +1,10 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi import HTTPException
 
 from app.modules.inventory.routes import listings
+from app.models import Platform
 
 
 def test_collect_available_sku_images_includes_listing_and_flat(tmp_path):
@@ -89,3 +91,113 @@ def test_to_inventory_aspects_merges_duplicate_names():
         "Brand": ["Acme", "USAV"],
         "Color": ["Black"],
     }
+
+
+def test_resolve_listing_defaults_prefers_variant_name_and_ecwid_max_price():
+    variant = SimpleNamespace(
+        variant_name="Variant Preferred Title",
+        full_sku="SKU-123",
+        thumbnail_url=None,
+        color_code="Black",
+        condition_code=SimpleNamespace(value="USED"),
+        identity=SimpleNamespace(
+            identity_name="Identity Name",
+            family=SimpleNamespace(
+                base_name="Family Base Name",
+                description="Family Description",
+                brand=SimpleNamespace(name="Brand Name"),
+            ),
+            dimension_length=None,
+            dimension_width=None,
+            dimension_height=None,
+            weight=None,
+        ),
+        listings=[
+            SimpleNamespace(
+                platform=Platform.EBAY_USAV,
+                listed_name="Old eBay Title",
+                listed_description="Old eBay Description",
+                listing_price=12.5,
+                listing_quantity=3,
+                upc="123",
+                listing_condition="USED",
+                platform_metadata={},
+            ),
+            SimpleNamespace(
+                platform=Platform.ECWID,
+                listed_name="Ecwid 1",
+                listed_description="Ecwid Desc 1",
+                listing_price=22.0,
+                listing_quantity=1,
+                upc=None,
+                listing_condition=None,
+                platform_metadata={},
+            ),
+            SimpleNamespace(
+                platform=Platform.ECWID,
+                listed_name="Ecwid 2",
+                listed_description="Ecwid Desc 2",
+                listing_price=31.0,
+                listing_quantity=1,
+                upc=None,
+                listing_condition=None,
+                platform_metadata={},
+            ),
+        ],
+    )
+
+    defaults = listings._resolve_listing_defaults(variant, Platform.EBAY_USAV)
+    assert defaults["title"] == "Variant Preferred Title"
+    assert defaults["price"] == 31.0
+
+
+def test_build_gemini_prompt_templates_match_expected_patterns():
+    description_prompt = listings._build_gemini_description_prompt(
+        title="My Product",
+        description="Original text",
+        condition_name="Used",
+    )
+    package_prompt = listings._build_gemini_package_prompt(title="My Product")
+
+    assert "You are an AI assistant for creating eBay listings." in description_prompt
+    assert "Return ONLY the formatted HTML." in description_prompt
+    assert "Based on 'My Product', estimate weight (lb, oz)" in package_prompt
+    assert "Return JSON:" in package_prompt
+
+
+def test_resolve_offer_policy_ids_supports_threshold_free_and_no_returns():
+    store_defaults = {
+        "payment_profile_id": "pay-1",
+        "return_profile_id": "ret-1",
+        "return_policy_id_no_returns": "ret-none",
+        "fulfillment_policy_id_light": "ful-light",
+        "fulfillment_policy_id_heavy": "ful-heavy",
+        "fulfillment_policy_id_free": "ful-free",
+        "heavy_item_threshold_lbs": 2.0,
+    }
+
+    light = listings._resolve_offer_policy_ids(
+        store_defaults=store_defaults,
+        weight_lbs=1.5,
+        is_free_shipping=False,
+        use_no_returns_policy=False,
+    )
+    assert light["fulfillment_policy_id"] == "ful-light"
+    assert light["return_policy_id"] == "ret-1"
+
+    heavy = listings._resolve_offer_policy_ids(
+        store_defaults=store_defaults,
+        weight_lbs=2.5,
+        is_free_shipping=False,
+        use_no_returns_policy=False,
+    )
+    assert heavy["fulfillment_policy_id"] == "ful-heavy"
+
+    free_no_returns = listings._resolve_offer_policy_ids(
+        store_defaults=store_defaults,
+        weight_lbs=3.0,
+        is_free_shipping=True,
+        use_no_returns_policy=True,
+    )
+    assert free_no_returns["fulfillment_policy_id"] == "ful-free"
+    assert free_no_returns["return_policy_id"] == "ret-none"

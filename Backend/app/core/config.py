@@ -82,46 +82,81 @@ class Settings(BaseSettings):
     amazon_marketplace_id: str = "ATVPDKIKX0DER"  # US marketplace
     
     # eBay Integration (shared credentials for all stores)
-    ebay_app_id: str = ""
-    ebay_cert_id: str = ""
-    ebay_ru_name: str = ""
     ebay_sandbox: bool = False
     
     # eBay OAuth Refresh Tokens (per store)
+    ebay_app_id: str = ""
+    ebay_cert_id: str = ""
+    ebay_ru_name: str = ""
     ebay_refresh_token_mekong: str = ""
     ebay_refresh_token_purchasing: str = ""
     ebay_refresh_token_usav: str = ""
     ebay_refresh_token_dragon: str = ""
-    ebay_marketplace_id_mekong: str = "EBAY_US"
-    ebay_marketplace_id_usav: str = "EBAY_US"
-    ebay_marketplace_id_dragon: str = "EBAY_US"
-    ebay_country_mekong: str = "US"
-    ebay_country_usav: str = "US"
+
     ebay_country_dragon: str = "US"
-    ebay_currency_mekong: str = "USD"
     ebay_currency_usav: str = "USD"
     ebay_currency_dragon: str = "USD"
-    ebay_location_mekong: str = "16161 Gothard St, Ste A, Huntington Beach, CA"
     ebay_location_usav: str = "16161 Gothard St, Ste A, Huntington Beach, CA"
     ebay_location_dragon: str = "16161 Gothard St, Ste A, Huntington Beach, CA"
-    ebay_postal_code_mekong: str = "92647"
     ebay_postal_code_usav: str = "92647"
     ebay_postal_code_dragon: str = "92647"
-    ebay_dispatch_time_max_mekong: int = 1
     ebay_dispatch_time_max_usav: int = 1
     ebay_dispatch_time_max_dragon: int = 1
-    ebay_payment_profile_id_mekong: str = ""
-    ebay_payment_profile_id_usav: str = ""
-    ebay_payment_profile_id_dragon: str = ""
-    ebay_return_profile_id_mekong: str = ""
-    ebay_return_profile_id_usav: str = ""
-    ebay_return_profile_id_dragon: str = ""
-    ebay_shipping_profile_id_mekong: str = ""
-    ebay_shipping_profile_id_usav: str = ""
-    ebay_shipping_profile_id_dragon: str = ""
-    ebay_merchant_location_key_mekong: str = ""
-    ebay_merchant_location_key_usav: str = ""
-    ebay_merchant_location_key_dragon: str = ""
+
+
+    ebay_marketplace_id_mekong: str = "EBAY_US"
+    ebay_currency_mekong: str = "USD"
+    ebay_dispatch_time_max_mekong: int = 1
+    ebay_merchant_location_key_mekong: str = "USAV-WAREHOUSE-MK"
+    ebay_warehouse_address1_mekong: str = "16161 Gothard St"
+    ebay_warehouse_address2_mekong: str = "Unit A"
+    ebay_warehouse_city_mekong: str = "Huntington Beach"
+    ebay_warehouse_state_mekong: str = "CA"
+    ebay_warehouse_country_mekong: str = "US"
+    ebay_postal_code_mekong: str = "92647"
+    ebay_payment_policy_id_mekong: str = "258875123012"
+    ebay_return_policy_id_mekong: str = "258875577012"
+    ebay_return_policy_id_no_returns_mekong: str = "258875121012"
+    ebay_fulfillment_policy_id_light_mekong: str = "258875552012"
+    ebay_fulfillment_policy_id_heavy_mekong: str = "258875382012"
+    ebay_fulfillment_policy_id_free_mekong: str = "258875122012"
+    ebay_heavy_item_threshold_lbs_mekong: float = 2.0
+    
+    ebay_marketplace_id_usav: str = "EBAY_US"
+    ebay_currency_usav: str = "USD"
+    ebay_dispatch_time_max_usav: int = 1
+    ebay_merchant_location_key_usav: str = "USAV-WAREHOUSE-HB"
+    ebay_warehouse_address1_usav: str = "16161 Gothard St"
+    ebay_warehouse_address2_usav: str = "Unit A"
+    ebay_warehouse_city_usav: str = "Huntington Beach"
+    ebay_warehouse_state_usav: str = "CA"
+    ebay_warehouse_postal_code_usav: str = "92647"
+    ebay_warehouse_country_usav: str = "US"
+    ebay_payment_policy_id_usav: str = "277608353015"
+    ebay_return_policy_id_usav: str = "278034901015"
+    ebay_return_policy_id_no_returns_usav: str = "277427933015"
+    ebay_fulfillment_policy_id_light_usav: str = "277893807015"
+    ebay_fulfillment_policy_id_heavy_usav: str = "277702903015"
+    ebay_fulfillment_policy_id_free_usav: str = "277893807015"
+    ebay_heavy_item_threshold_lbs_usav: float = 2.0
+    
+    ebay_marketplace_id_dragon: str = "EBAY_US"
+    ebay_currency_dragon: str = "USD"
+    ebay_dispatch_time_max_dragon: int = 1
+    ebay_merchant_location_key_dragon: str = "USAV-WAREHOUSE"
+    ebay_warehouse_address1_dragon: str = "16161 Gothard St"
+    ebay_warehouse_address2_dragon: str = "Unit A"
+    ebay_warehouse_city_dragon: str = "Huntington Beach"
+    ebay_warehouse_state_dragon: str = "CA"
+    ebay_warehouse_postal_code_dragon: str = "92647"
+    ebay_warehouse_country_dragon: str = "US"
+    ebay_payment_policy_id_dragon: str = "39594638017"
+    ebay_return_policy_id_dragon: str = "236354342017"
+    ebay_return_policy_id_no_returns_dragon: str = "39594637017"
+    ebay_fulfillment_policy_id_light_dragon: str = "59129340017"
+    ebay_fulfillment_policy_id_heavy_dragon: str = "57336855017"
+    ebay_fulfillment_policy_id_free_dragon: str = "58364269017"
+    ebay_heavy_item_threshold_lbs_dragon: float = 2.0
 
     # Ecwid Integration
     ecwid_store_id: str = ""

@@ -30,6 +30,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.core.database import async_session_factory
 from app.integrations.zoho.client import ZohoClient
 from app.integrations.zoho.sync_engine import PAYMENT_TERMS_DUE_ON_RECEIPT, sync_po_outbound
+from app.models.entities import ZohoSyncStatus
 from app.models.purchasing import PurchaseOrder
 
 
@@ -197,7 +198,11 @@ async def _load_local_pos(start_date: date, end_date: date, *, limit: int, offse
         stmt = (
             select(PurchaseOrder)
             .options(noload(PurchaseOrder.vendor), noload(PurchaseOrder.items))
-            .where(PurchaseOrder.order_date >= start_date, PurchaseOrder.order_date <= end_date)
+            .where(
+                PurchaseOrder.order_date >= start_date,
+                PurchaseOrder.order_date <= end_date,
+                PurchaseOrder.zoho_sync_status == ZohoSyncStatus.DIRTY,
+            )
             .order_by(PurchaseOrder.order_date.asc(), PurchaseOrder.id.asc())
             .offset(offset)
         )
@@ -580,8 +585,8 @@ async def _run(
         return 0
 
     print(
-        f"Selected {len(local_pos)} local purchase orders in range {start_date.isoformat()}..{end_date.isoformat()} "
-        f"(dry_run={dry_run})"
+        f"Selected {len(local_pos)} local purchase orders with zoho_sync_status=DIRTY "
+        f"in range {start_date.isoformat()}..{end_date.isoformat()} (dry_run={dry_run})"
     )
 
     summary = {
