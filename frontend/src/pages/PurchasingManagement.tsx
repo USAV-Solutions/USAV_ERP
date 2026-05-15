@@ -1139,10 +1139,10 @@ export default function PurchasingManagement() {
                     <TableRow>
                       <TableCell sx={{ width: 44 }} />
                       <TableCell>PO #</TableCell>
+                      <TableCell>Vendor</TableCell>
                       <TableCell>Date</TableCell>
                       <TableCell>Tracking #</TableCell>
                       <TableCell>Expected Delivery</TableCell>
-                      <TableCell>Status</TableCell>
                       <TableCell align="center">Unmatched</TableCell>
                       <TableCell align="right">Total</TableCell>
                       <TableCell align="center">Zoho Sync Status</TableCell>
@@ -1169,12 +1169,10 @@ export default function PurchasingManagement() {
                               </IconButton>
                             </TableCell>
                             <TableCell>{po.po_number}</TableCell>
+                            <TableCell>{po.vendor?.name || po.vendor_id}</TableCell>
                             <TableCell>{po.order_date}</TableCell>
                             <TableCell>{po.tracking_number || '-'}</TableCell>
                             <TableCell>{po.expected_delivery_date || '-'}</TableCell>
-                            <TableCell>
-                              <Chip size="small" color={statusColor[po.deliver_status]} label={po.deliver_status} />
-                            </TableCell>
                             <TableCell align="center">
                               <Chip
                                 size="small"
@@ -1204,18 +1202,6 @@ export default function PurchasingManagement() {
                                     alignItems="center"
                                     sx={{ mb: 1.25, flexWrap: 'nowrap', overflow: 'hidden' }}
                                   >
-                                    <Box sx={{ minWidth: 110, maxWidth: 170, flexShrink: 1, overflow: 'hidden' }}>
-                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                                        Vendor
-                                      </Typography>
-                                      <Typography
-                                        variant="body2"
-                                        sx={{ fontSize: '0.82rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
-                                      >
-                                        {po.vendor?.name || po.vendor_id}
-                                      </Typography>
-                                    </Box>
-
                                     <Box sx={{ minWidth: 150, maxWidth: 200, flexShrink: 1, overflow: 'hidden' }}>
                                       <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
                                         Zoho ID
@@ -1238,6 +1224,13 @@ export default function PurchasingManagement() {
                                       >
                                         {po.source || '-'}
                                       </Typography>
+                                    </Box>
+
+                                    <Box sx={{ minWidth: 105, maxWidth: 150, flexShrink: 0, overflow: 'hidden' }}>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                        Status
+                                      </Typography>
+                                      <Chip size="small" color={statusColor[po.deliver_status]} label={po.deliver_status} />
                                     </Box>
 
                                     <Box sx={{ minWidth: 100, maxWidth: 120, flexShrink: 0, overflow: 'hidden' }}>
