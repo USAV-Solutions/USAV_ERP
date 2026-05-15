@@ -3,12 +3,15 @@ Platform Listing API endpoints.
 Manages listings for external platforms (Zoho, Amazon, eBay, etc.).
 """
 import logging
+import json
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -21,6 +24,9 @@ from app.models import Platform, PlatformSyncStatus
 from app.models.entities import ProductVariant, ProductIdentity, ProductFamily
 from app.repositories import PlatformListingRepository, ProductVariantRepository
 from app.modules.inventory.schemas import (
+    EbayAiEnrichRequest,
+    EbayAiEnrichResponse,
+    EbayAspectSuggestion,
     EbayAvailableImage,
     EbayAvailableImagesResponse,
     EbayCreateStartResponse,
@@ -38,6 +44,7 @@ from app.modules.inventory.schemas import (
     EbaySendImageResult,
     EbaySendImagesRequest,
     EbaySendImagesResponse,
+    EbayValidCondition,
     PaginatedResponse,
     PlatformListingCreate,
     PlatformListingResponse,
@@ -169,6 +176,146 @@ def _parse_float_or_none(value: object | None) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _normalize_public_picture_urls(raw_urls: list[str]) -> list[str]:
+    base_url = str(getattr(settings, "listing_public_base_url", "") or "").strip().rstrip("/")
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_urls:
+        value = str(raw or "").strip()
+        if not value:
+            continue
+        if value.startswith("/product-images/"):
+            if not base_url:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Relative /product-images URLs require LISTING_PUBLIC_BASE_URL "
+                        "to be configured"
+                    ),
+                )
+            value = f"{base_url}{value}"
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Picture URL must be absolute HTTP/HTTPS URL: {value}",
+            )
+        if value in seen:
+            continue
+        seen.add(value)
+        normalized.append(value)
+    return normalized
+
+
+def _to_inventory_aspects(item_specifics: list[dict[str, list[str]]]) -> dict[str, list[str]]:
+    aspects: dict[str, list[str]] = {}
+    for entry in item_specifics:
+        raw_name = str(entry.get("Name") or "").strip()
+        if not raw_name:
+            continue
+        raw_values = entry.get("Value") or []
+        values: list[str] = []
+        for raw_value in raw_values:
+            value = str(raw_value or "").strip()
+            if value and value not in values:
+                values.append(value)
+        if not values:
+            continue
+        existing = aspects.get(raw_name) or []
+        for value in values:
+            if value not in existing:
+                existing.append(value)
+        aspects[raw_name] = existing
+    return aspects
+
+
+def _extract_required_aspect_names(aspects: list[dict[str, Any]]) -> set[str]:
+    required_names: set[str] = set()
+    for aspect in aspects:
+        if not isinstance(aspect, dict):
+            continue
+        constraint = aspect.get("aspectConstraint") or {}
+        if not isinstance(constraint, dict):
+            continue
+        if not constraint.get("aspectRequired"):
+            continue
+        name = str(aspect.get("localizedAspectName") or "").strip()
+        if name:
+            required_names.add(name)
+    return required_names
+
+
+def _coerce_json_object(text: str) -> dict[str, Any]:
+    candidate = str(text or "").strip()
+    if not candidate:
+        return {}
+    if candidate.startswith("```"):
+        lines = candidate.splitlines()
+        if len(lines) >= 3 and lines[0].startswith("```") and lines[-1].startswith("```"):
+            candidate = "\n".join(lines[1:-1]).strip()
+    try:
+        payload = json.loads(candidate)
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return payload
+
+
+async def _gemini_enrich_listing(
+    *,
+    title: str,
+    description: str,
+    category_id: str | None,
+) -> dict[str, Any]:
+    api_key = str(getattr(settings, "gemini_api_key", "") or "").strip()
+    model_name = str(getattr(settings, "gemini_model_name", "") or "").strip()
+    if not api_key:
+        raise RuntimeError("Gemini API key is not configured")
+    if not model_name:
+        raise RuntimeError("Gemini model name is not configured")
+
+    prompt = (
+        "You help enrich eBay listing drafts. "
+        "Return strict JSON with keys: title, description, dimensions. "
+        "dimensions must include numeric length,width,height,weight in inches/pounds when inferable, else null. "
+        "Do not include markdown.\n"
+        f"Category ID: {category_id or 'unknown'}\n"
+        f"Current title: {title}\n"
+        f"Current description: {description}\n"
+    )
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+    payload = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": prompt}],
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.2,
+            "responseMimeType": "application/json",
+        },
+    }
+    transport = httpx.AsyncHTTPTransport(retries=2)
+    async with httpx.AsyncClient(transport=transport, timeout=30.0) as client:
+        response = await client.post(url, json=payload)
+        response.raise_for_status()
+        data = response.json()
+
+    candidates = data.get("candidates") or []
+    if not candidates:
+        raise RuntimeError("Gemini returned no candidates")
+    parts = (((candidates[0] or {}).get("content") or {}).get("parts") or [])
+    text = ""
+    if parts and isinstance(parts[0], dict):
+        text = str(parts[0].get("text") or "").strip()
+    parsed = _coerce_json_object(text)
+    if not parsed:
+        raise RuntimeError("Gemini response did not contain valid JSON")
+    return parsed
 
 
 def _resolve_business_policy_ids(
@@ -480,6 +627,175 @@ async def get_ebay_category_suggestions(
     )
 
 
+@router.post("/ebay/ai-enrich", response_model=EbayAiEnrichResponse)
+async def enrich_ebay_listing(
+    data: EbayAiEnrichRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    client = _build_ebay_client_for_platform(data.platform)
+    variant = await _load_variant_context(db, data.variant_id)
+    defaults = _resolve_listing_defaults(variant, data.platform)
+    store_defaults = client.get_store_listing_defaults()
+    marketplace_id = str(store_defaults.get("marketplace_id") or "EBAY_US")
+
+    warnings: list[str] = []
+    category_id: str | None = None
+    category_tree_id: str | None = None
+    required_aspect_names: set[str] = set()
+    valid_conditions: list[EbayValidCondition] = []
+
+    draft_title = str(data.title or defaults["title"] or "").strip()
+    draft_description = str(data.description or defaults["description"] or "").strip()
+    graph_title: str | None = None
+    graph_description: str | None = None
+    graph_aspects: list[EbayAspectSuggestion] = []
+
+    query_text = _build_category_query(
+        title=draft_title,
+        brand=defaults["brand_name"],
+        color=defaults["color"],
+        condition_text=defaults["condition_text"],
+        fallback_sku=variant.full_sku,
+    )
+    if query_text:
+        try:
+            category_tree_id = await client.get_default_category_tree_id(marketplace_id)
+            suggestions = await client.get_category_suggestions(category_tree_id, query_text)
+            if suggestions:
+                top = suggestions[0].get("category") or {}
+                if top.get("categoryId"):
+                    category_id = str(top.get("categoryId"))
+        except Exception as exc:
+            warnings.append(f"Category suggestion unavailable: {exc}")
+
+    if category_id and category_tree_id:
+        try:
+            aspects = await client.get_item_aspects_for_category(
+                category_tree_id=category_tree_id,
+                category_id=category_id,
+            )
+            required_aspect_names = _extract_required_aspect_names(aspects)
+        except Exception as exc:
+            warnings.append(f"Required aspects unavailable: {exc}")
+        try:
+            conditions = await client.get_valid_conditions_for_category(
+                marketplace_id=marketplace_id,
+                category_id=category_id,
+            )
+            for condition in conditions:
+                condition_id = str(condition.get("conditionId") or "").strip()
+                if not condition_id:
+                    continue
+                description = str(
+                    condition.get("conditionDescription")
+                    or condition.get("conditionHelpText")
+                    or condition_id
+                ).strip()
+                valid_conditions.append(
+                    EbayValidCondition(
+                        condition_id=condition_id,
+                        condition_description=description,
+                    )
+                )
+        except Exception as exc:
+            warnings.append(f"Valid conditions unavailable: {exc}")
+
+    graphql_image = str(data.image_url or "").strip()
+    graphql_images = [graphql_image] if graphql_image else []
+    try:
+        task_id = await client.start_listing_previews_creation(
+            {
+                "title": draft_title,
+                "description": draft_description,
+                "sku": variant.full_sku,
+                "images": graphql_images,
+                "categoryName": "",
+                "aspects": [],
+            }
+        )
+        task_result = await client.poll_listing_previews_task_by_id(task_id)
+        previews = task_result.get("listingPreviews") or []
+        if previews and isinstance(previews[0], dict):
+            preview = previews[0]
+            preview_category = preview.get("category") or {}
+            preview_category_id = (
+                preview_category.get("id")
+                or preview_category.get("categoryId")
+            )
+            if preview_category_id:
+                category_id = str(preview_category_id)
+            graph_title = str(preview.get("title") or "").strip() or None
+            graph_description = str(preview.get("description") or "").strip() or None
+            for raw_aspect in preview.get("aspects") or []:
+                if not isinstance(raw_aspect, dict):
+                    continue
+                name = str(raw_aspect.get("name") or "").strip()
+                if not name:
+                    continue
+                values = raw_aspect.get("aspectValues")
+                if values is None:
+                    values = raw_aspect.get("values")
+                normalized_values = [
+                    str(v or "").strip()
+                    for v in (values or [])
+                    if str(v or "").strip()
+                ]
+                graph_aspects.append(
+                    EbayAspectSuggestion(
+                        name=name,
+                        values=normalized_values,
+                        required=name in required_aspect_names,
+                    )
+                )
+    except Exception as exc:
+        warnings.append(f"GraphQL enrichment unavailable: {exc}")
+
+    aspect_names = {entry.name for entry in graph_aspects}
+    for required_name in sorted(required_aspect_names):
+        if required_name in aspect_names:
+            continue
+        graph_aspects.append(
+            EbayAspectSuggestion(name=required_name, values=[], required=True)
+        )
+
+    dimensions = {
+        "length": _parse_float_or_none(getattr(variant.identity, "dimension_length", None)),
+        "width": _parse_float_or_none(getattr(variant.identity, "dimension_width", None)),
+        "height": _parse_float_or_none(getattr(variant.identity, "dimension_height", None)),
+        "weight": _parse_float_or_none(getattr(variant.identity, "weight", None)),
+    }
+    gemini_title: str | None = None
+    gemini_description: str | None = None
+    try:
+        gemini_result = await _gemini_enrich_listing(
+            title=graph_title or draft_title,
+            description=graph_description or draft_description,
+            category_id=category_id,
+        )
+        gemini_title = str(gemini_result.get("title") or "").strip() or None
+        gemini_description = str(gemini_result.get("description") or "").strip() or None
+        parsed_dimensions = gemini_result.get("dimensions") or {}
+        if isinstance(parsed_dimensions, dict):
+            for key in ("length", "width", "height", "weight"):
+                value = _parse_float_or_none(parsed_dimensions.get(key))
+                if value is not None:
+                    dimensions[key] = value
+    except Exception as exc:
+        warnings.append(f"Gemini enrichment unavailable: {exc}")
+
+    return EbayAiEnrichResponse(
+        platform=data.platform,
+        variant_id=variant.id,
+        category_id=category_id,
+        title=graph_title or gemini_title or draft_title,
+        description=graph_description or gemini_description or draft_description,
+        aspects=graph_aspects,
+        dimensions=dimensions,
+        valid_conditions=valid_conditions,
+        warnings=warnings,
+    )
+
+
 @router.get("/ebay/images/available/{variant_id}", response_model=EbayAvailableImagesResponse)
 async def get_ebay_available_images(
     variant_id: int,
@@ -614,18 +930,36 @@ async def publish_ebay_listing(
     identity = variant.identity
     listing_repo = PlatformListingRepository(db)
     existing = await listing_repo.get_by_variant_platform(variant.id, data.platform)
-    if existing and existing.external_ref_id:
+    existing_metadata = existing.platform_metadata if existing and isinstance(existing.platform_metadata, dict) else {}
+    if existing and existing.external_ref_id and not existing_metadata.get("offer_id"):
         raise HTTPException(
             status_code=409,
-            detail=f"Variant {variant.id} already has an eBay listing on {data.platform.value}",
+            detail=(
+                f"Variant {variant.id} already has eBay external_ref_id for {data.platform.value}. "
+                "Listing without offer_id cannot be migrated automatically."
+            ),
         )
 
-    picture_urls = [url.strip() for url in data.picture_urls if url and url.strip()]
+    picture_urls = _normalize_public_picture_urls(data.picture_urls)
     if not picture_urls:
         raise HTTPException(status_code=400, detail="At least one picture URL is required")
 
     store_defaults = client.get_store_listing_defaults()
     seller_profiles = _resolve_business_policy_ids(store_defaults, data.platform)
+    if not seller_profiles:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"eBay business policy IDs are required for Inventory API publish on {data.platform.value} "
+                "(payment/return/shipping)"
+            ),
+        )
+    merchant_location_key = str(store_defaults.get("merchant_location_key") or "").strip()
+    if not merchant_location_key:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Missing merchant location key for {data.platform.value}",
+        )
 
     country = str(store_defaults["country"]).strip()
     currency = str(store_defaults["currency"]).strip()
@@ -639,7 +973,8 @@ async def publish_ebay_listing(
         raise HTTPException(status_code=400, detail="DispatchTimeMax must be zero or greater")
 
     condition_id = client.to_condition_id(data.condition_text)
-    if condition_id is None:
+    condition_enum = client.to_inventory_condition(data.condition_text)
+    if condition_id is None or condition_enum is None:
         raise HTTPException(status_code=400, detail=f"Unsupported condition '{data.condition_text}'")
 
     length = _parse_float_or_none(data.dimensions.get("length"))
@@ -668,16 +1003,15 @@ async def publish_ebay_listing(
     width = width if width is not None else _parse_float_or_none(getattr(identity, "dimension_width", None))
     height = height if height is not None else _parse_float_or_none(getattr(identity, "dimension_height", None))
     weight = weight if weight is not None else _parse_float_or_none(getattr(identity, "weight", None))
-    shipping_package_details = client.to_shipping_package_details(
-        weight_lbs=weight,
-        length_in=length,
-        width_in=width,
-        height_in=height,
-    )
-    if shipping_package_details is None:
+    if (
+        weight is None
+        or length is None
+        or width is None
+        or height is None
+    ):
         raise HTTPException(
             status_code=400,
-            detail="Dimensions and weight are required to build ShippingPackageDetails",
+            detail="Dimensions and weight are required for eBay Inventory publish",
         )
 
     specifics = client.to_item_specifics(
@@ -690,41 +1024,123 @@ async def publish_ebay_listing(
     if not specifics:
         raise HTTPException(status_code=400, detail="At least one item specific is required")
 
-    payload = {
-        "title": data.title,
-        "description": data.description,
-        "category_id": data.category_id,
-        "price": data.price,
-        "quantity": data.quantity,
-        "condition_id": condition_id,
-        "country": country,
-        "currency": currency,
-        "dispatch_time_max": dispatch_time_max,
-        "location": location or postal_code,
-        "postal_code": postal_code or location,
+    inventory_aspects = _to_inventory_aspects(specifics)
+    inventory_payload = {
+        "availability": {
+            "shipToLocationAvailability": {
+                "quantity": int(data.quantity),
+            }
+        },
+        "condition": condition_enum,
+        "conditionId": str(condition_id),
+        "packageWeightAndSize": {
+            "dimensions": {
+                "length": round(length, 2),
+                "width": round(width, 2),
+                "height": round(height, 2),
+                "unit": "INCH",
+            },
+            "weight": {
+                "value": round(weight, 2),
+                "unit": "POUND",
+            },
+        },
+        "product": {
+            "title": data.title,
+            "description": data.description,
+            "imageUrls": picture_urls,
+            "aspects": inventory_aspects,
+        },
+    }
+    await client.put_inventory_item(variant.full_sku, inventory_payload)
+
+    offer_payload = {
         "sku": variant.full_sku,
-        "picture_urls": picture_urls,
-        "item_specifics": specifics,
-        "shipping_package_details": shipping_package_details,
+        "marketplaceId": str(store_defaults["marketplace_id"]),
+        "format": "FIXED_PRICE",
+        "availableQuantity": int(data.quantity),
+        "categoryId": data.category_id,
+        "listingDescription": data.description,
+        "listingPolicies": {
+            "paymentPolicyId": seller_profiles["payment_profile_id"],
+            "returnPolicyId": seller_profiles["return_profile_id"],
+            "fulfillmentPolicyId": seller_profiles["shipping_profile_id"],
+        },
+        "merchantLocationKey": merchant_location_key,
+        "pricingSummary": {
+            "price": {
+                "value": str(data.price),
+                "currency": currency,
+            }
+        },
+        "categoryMappingAllowed": True,
     }
-    if seller_profiles:
-        payload.update(seller_profiles)
-    publish_result = await client.add_fixed_price_item(payload)
-    item_id = str(publish_result["item_id"])
+
+    existing_offer_id = str(existing_metadata.get("offer_id") or "").strip() or None
+    if existing_offer_id:
+        offer_id = existing_offer_id
+        await client.update_offer(offer_id, offer_payload)
+    else:
+        matched_offer = await client.get_offer_by_sku(
+            variant.full_sku,
+            str(store_defaults["marketplace_id"]),
+        )
+        if matched_offer and matched_offer.get("offerId"):
+            offer_id = str(matched_offer["offerId"])
+            await client.update_offer(offer_id, offer_payload)
+        else:
+            try:
+                created_offer = await client.create_offer(offer_payload)
+                offer_id = str(created_offer.get("offerId") or "").strip()
+            except Exception as exc:
+                if "already exists" not in str(exc).lower():
+                    raise
+                matched_offer = await client.get_offer_by_sku(
+                    variant.full_sku,
+                    str(store_defaults["marketplace_id"]),
+                )
+                if not matched_offer or not matched_offer.get("offerId"):
+                    raise
+                offer_id = str(matched_offer["offerId"])
+                await client.update_offer(offer_id, offer_payload)
+            if not offer_id:
+                matched_offer = await client.get_offer_by_sku(
+                    variant.full_sku,
+                    str(store_defaults["marketplace_id"]),
+                )
+                if not matched_offer or not matched_offer.get("offerId"):
+                    raise HTTPException(status_code=502, detail="eBay create offer returned without offerId")
+                offer_id = str(matched_offer["offerId"])
+
+    publish_result = await client.publish_offer(offer_id)
+    listing_ref_id = str(publish_result.get("listingId") or "").strip()
+    if not listing_ref_id:
+        raise HTTPException(status_code=502, detail="eBay publish offer returned without listingId")
+
     platform_metadata = {
+        "publish_engine": "inventory_api_v1",
+        "offer_id": offer_id,
         "category_id": data.category_id,
         "picture_urls": picture_urls,
         "item_specifics": specifics,
+        "inventory_aspects": inventory_aspects,
+        "merchant_location_key": merchant_location_key,
         "dispatch_time_max": dispatch_time_max,
-        "shipping_package_details": shipping_package_details,
+        "shipping_package_details": {
+            "length": round(length, 2),
+            "width": round(width, 2),
+            "height": round(height, 2),
+            "weight": round(weight, 2),
+            "dimension_unit": "INCH",
+            "weight_unit": "POUND",
+        },
+        "seller_profiles": seller_profiles,
     }
-    if seller_profiles:
-        platform_metadata["seller_profiles"] = seller_profiles
 
     listing_data = {
         "variant_id": variant.id,
         "platform": data.platform,
-        "external_ref_id": item_id,
+        "external_ref_id": listing_ref_id,
         "merchant_sku": variant.full_sku,
         "listed_name": data.title,
         "listed_description": data.description,
@@ -746,7 +1162,8 @@ async def publish_ebay_listing(
         listing_id=listing.id,
         platform=data.platform,
         variant_id=variant.id,
-        item_id=item_id,
+        external_ref_id=listing_ref_id,
+        offer_id=offer_id,
         sync_status=listing.sync_status,
     )
 

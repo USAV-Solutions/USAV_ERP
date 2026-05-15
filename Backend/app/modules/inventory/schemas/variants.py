@@ -6,7 +6,7 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models import ConditionCode, ZohoSyncStatus
+from app.models import BundleRole, ConditionCode, ZohoSyncStatus
 
 
 class ProductVariantBase(BaseModel):
@@ -48,3 +48,33 @@ class ProductVariantResponse(ProductVariantBase):
 class ProductVariantWithListings(ProductVariantResponse):
     """Product variant with listing count."""
     listings_count: int = Field(default=0, description="Number of platform listings")
+
+
+class ProductVariantConvertToKitChild(BaseModel):
+    """One child line used when converting a Product SKU into a Kit SKU."""
+
+    child_variant_id: int = Field(..., gt=0, description="Existing active child variant ID")
+    quantity_required: int = Field(default=1, ge=1, description="How many units of this child are required")
+    role: BundleRole = Field(default=BundleRole.PRIMARY, description="Child role in the kit BOM")
+
+
+class ProductVariantConvertToKitRequest(BaseModel):
+    """Payload for Product -> Kit conversion."""
+
+    children: list[ProductVariantConvertToKitChild] = Field(
+        ...,
+        min_length=1,
+        description="Child variant lines (Product or Part only, no duplicates by identity).",
+    )
+
+
+class ProductVariantConvertToKitResponse(BaseModel):
+    """Result of Product -> Kit conversion."""
+
+    source_variant_id: int
+    source_sku: str
+    new_identity_id: int
+    new_variant_id: int
+    new_sku: str
+    bundle_components_created: int
+    migrated_counts: dict[str, int]

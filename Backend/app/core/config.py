@@ -119,7 +119,10 @@ class Settings(BaseSettings):
     ebay_shipping_profile_id_mekong: str = ""
     ebay_shipping_profile_id_usav: str = ""
     ebay_shipping_profile_id_dragon: str = ""
-    
+    ebay_merchant_location_key_mekong: str = ""
+    ebay_merchant_location_key_usav: str = ""
+    ebay_merchant_location_key_dragon: str = ""
+
     # Ecwid Integration
     ecwid_store_id: str = ""
     ecwid_secret: str = ""
@@ -130,8 +133,13 @@ class Settings(BaseSettings):
     walmart_client_secret: str = ""
     walmart_api_base_url: str = "https://marketplace.walmartapis.com"
     
+    # Google AISTUDIO
+    gemini_api_key: str = ""
+    gemini_model_name: str = "gemini-2.5-flash-lite"
+
     # Product Images
     product_images_path: str = "/mnt/product_images"
+    listing_public_base_url: str = ""
 
     @model_validator(mode="after")
     def _apply_dev_overrides(self) -> "Settings":

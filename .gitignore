@@ -114,3 +114,5 @@ mnt/
 .agents/
 
 misc/tmux-logs.txt
+misc/Ebay_Listing/*
+

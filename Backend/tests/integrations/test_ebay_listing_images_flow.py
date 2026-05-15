@@ -47,3 +47,45 @@ def test_resolve_image_file_path_blocks_traversal(tmp_path):
             raise AssertionError("Expected HTTPException for traversal image_id")
     finally:
         listings.settings.product_images_path = old_path
+
+
+def test_normalize_public_picture_urls_supports_absolute_and_relative_product_images():
+    old_base = listings.settings.listing_public_base_url
+    listings.settings.listing_public_base_url = "https://cdn.example.com"
+    try:
+        urls = listings._normalize_public_picture_urls(
+            [
+                "https://img.example.com/a.jpg",
+                "/product-images/sku/SKU-1/listing-0/img-0.jpg",
+            ]
+        )
+    finally:
+        listings.settings.listing_public_base_url = old_base
+
+    assert urls == [
+        "https://img.example.com/a.jpg",
+        "https://cdn.example.com/product-images/sku/SKU-1/listing-0/img-0.jpg",
+    ]
+
+
+def test_normalize_public_picture_urls_rejects_non_http_url():
+    try:
+        listings._normalize_public_picture_urls(["file:///tmp/a.jpg"])
+    except HTTPException as exc:
+        assert exc.status_code == 400
+    else:
+        raise AssertionError("Expected HTTPException for non-http picture URL")
+
+
+def test_to_inventory_aspects_merges_duplicate_names():
+    aspects = listings._to_inventory_aspects(
+        [
+            {"Name": "Brand", "Value": ["Acme"]},
+            {"Name": "Brand", "Value": ["Acme", "USAV"]},
+            {"Name": "Color", "Value": ["Black"]},
+        ]
+    )
+    assert aspects == {
+        "Brand": ["Acme", "USAV"],
+        "Color": ["Black"],
+    }

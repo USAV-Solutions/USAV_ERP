@@ -11,9 +11,19 @@ def _client() -> EbayClient:
 def test_condition_id_mapping():
     client = _client()
     assert client.to_condition_id("NEW") == 1000
+    assert client.to_condition_id("1000") == 1000
     assert client.to_condition_id("U") == 3000
     assert client.to_condition_id("for parts") == 7000
     assert client.to_condition_id("mystery") is None
+
+
+def test_inventory_condition_mapping():
+    client = _client()
+    assert client.to_inventory_condition("NEW") == "NEW"
+    assert client.to_inventory_condition("1000") == "NEW"
+    assert client.to_inventory_condition("U") == "USED_GOOD"
+    assert client.to_inventory_condition("for parts") == "FOR_PARTS_OR_NOT_WORKING"
+    assert client.to_inventory_condition("mystery") is None
 
 
 def test_item_specifics_mapping():
