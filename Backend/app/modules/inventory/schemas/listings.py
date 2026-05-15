@@ -151,7 +151,8 @@ class EbayPublishResponse(BaseModel):
     listing_id: int
     platform: Platform
     variant_id: int
-    item_id: str
+    external_ref_id: str
+    offer_id: str
     sync_status: PlatformSyncStatus
 
 
@@ -187,6 +188,37 @@ class EbaySendImagesResponse(BaseModel):
     variant_id: int
     eps_image_urls: list[str] = Field(default_factory=list)
     results: list[EbaySendImageResult] = Field(default_factory=list)
+
+
+class EbayAspectSuggestion(BaseModel):
+    name: str
+    values: list[str] = Field(default_factory=list)
+    required: bool = False
+
+
+class EbayValidCondition(BaseModel):
+    condition_id: str
+    condition_description: str
+
+
+class EbayAiEnrichRequest(BaseModel):
+    platform: Platform
+    variant_id: int
+    title: str | None = None
+    description: str | None = None
+    image_url: str | None = None
+
+
+class EbayAiEnrichResponse(BaseModel):
+    platform: Platform
+    variant_id: int
+    category_id: str | None = None
+    title: str | None = None
+    description: str | None = None
+    aspects: list[EbayAspectSuggestion] = Field(default_factory=list)
+    dimensions: dict[str, float | None] = Field(default_factory=dict)
+    valid_conditions: list[EbayValidCondition] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class ListingCreatePlatformCapability(BaseModel):

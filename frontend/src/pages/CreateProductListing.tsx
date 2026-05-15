@@ -73,8 +73,37 @@ interface EbayCategorySuggestionsResponse {
 
 interface EbayPublishResponse {
   listing_id: number
-  item_id: string
+  external_ref_id: string
+  offer_id: string
   sync_status: string
+}
+
+interface EbayAspectSuggestion {
+  name: string
+  values: string[]
+  required: boolean
+}
+
+interface EbayValidCondition {
+  condition_id: string
+  condition_description: string
+}
+
+interface EbayAiEnrichResponse {
+  platform: Platform
+  variant_id: number
+  category_id: string | null
+  title: string | null
+  description: string | null
+  aspects: EbayAspectSuggestion[]
+  dimensions: {
+    length: number | null
+    width: number | null
+    height: number | null
+    weight: number | null
+  }
+  valid_conditions: EbayValidCondition[]
+  warnings: string[]
 }
 
 interface EbayAvailableImage {
@@ -123,7 +152,11 @@ interface EbaySpecific {
   send_results: EbaySendImageResult[]
   upc: string
   brand: string
+  mpn: string
   color: string
+  aspects: EbayAspectSuggestion[]
+  valid_conditions: EbayValidCondition[]
+  enrich_warnings: string[]
 }
 
 interface WizardState {
@@ -179,7 +212,11 @@ const INITIAL_STATE: WizardState = {
     send_results: [],
     upc: '',
     brand: '',
+    mpn: '',
     color: '',
+    aspects: [],
+    valid_conditions: [],
+    enrich_warnings: [],
   },
 }
 
@@ -425,6 +462,46 @@ export default function CreateProductListing() {
     },
   })
 
+  const enrichMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedEbayPlatform || !state.variant_id) throw new Error('Variant/platform is required')
+      const response = await axiosClient.post<EbayAiEnrichResponse>(LISTINGS.EBAY_AI_ENRICH, {
+        platform: selectedEbayPlatform,
+        variant_id: state.variant_id,
+        title: state.master_title,
+        description: state.description,
+        image_url: state.ebay.listing_images[0]?.preview_url || undefined,
+      })
+      return response.data
+    },
+    onSuccess: (data) => {
+      const validConditionIds = new Set(data.valid_conditions.map((entry) => entry.condition_id))
+      setState((prev) => ({
+        ...prev,
+        master_title: data.title || prev.master_title,
+        description: data.description || prev.description,
+        ebay: {
+          ...prev.ebay,
+          condition_text: validConditionIds.has(prev.ebay.condition_text)
+            ? prev.ebay.condition_text
+            : (data.valid_conditions[0]?.condition_id || prev.ebay.condition_text),
+          category_id: data.category_id || prev.ebay.category_id,
+          length: data.dimensions.length != null ? String(data.dimensions.length) : prev.ebay.length,
+          width: data.dimensions.width != null ? String(data.dimensions.width) : prev.ebay.width,
+          height: data.dimensions.height != null ? String(data.dimensions.height) : prev.ebay.height,
+          weight: data.dimensions.weight != null ? String(data.dimensions.weight) : prev.ebay.weight,
+          aspects: data.aspects,
+          valid_conditions: data.valid_conditions,
+          enrich_warnings: data.warnings,
+        },
+      }))
+    },
+    onError: (err: any) => {
+      const detail = err?.response?.data?.detail
+      setUiError(typeof detail === 'string' ? detail : 'AI enrichment failed. Manual flow still available.')
+    },
+  })
+
   async function loadDraftIfNeeded(): Promise<boolean> {
     if (!selectedEbayPlatform) return true
     if (!state.variant_id) {
@@ -456,6 +533,7 @@ export default function CreateProductListing() {
           category_id: prev.ebay.category_id || draft.category_id || '',
           upc: prev.ebay.upc || draft.upc || '',
           brand: prev.ebay.brand || draft.brand || '',
+          mpn: prev.ebay.mpn || prev.master_sku || draft.sku || '',
           color: prev.ebay.color || draft.color || '',
         },
       }))
@@ -515,13 +593,15 @@ export default function CreateProductListing() {
     }
     if (step === 2) {
       if (!selectedEbayPlatform) return true
-      const currentSignature = state.ebay.listing_images.map((img) => img.image_id).join('|')
+      const requiredAspects = state.ebay.aspects.filter((a) => a.required)
+      const requiredAspectsComplete = requiredAspects.every((a) =>
+        a.values.some((v) => v.trim().length > 0),
+      )
       return (
         state.ebay.condition_text.trim().length > 0 &&
         state.ebay.category_id.trim().length > 0 &&
         state.ebay.listing_images.length > 0 &&
-        state.ebay.eps_image_urls.length > 0 &&
-        state.ebay.sent_image_signature === currentSignature
+        requiredAspectsComplete
       )
     }
     return true
@@ -564,9 +644,17 @@ export default function CreateProductListing() {
       setUiError('Price and quantity are required.')
       return
     }
-    const currentSignature = state.ebay.listing_images.map((img) => img.image_id).join('|')
-    if (state.ebay.eps_image_urls.length === 0 || state.ebay.sent_image_signature !== currentSignature) {
-      setUiError('Send images to eBay first, then list.')
+    const pictureUrls = state.ebay.listing_images
+      .map((img) => img.preview_url.trim())
+      .filter((url) => url.length > 0)
+    if (pictureUrls.length === 0) {
+      setUiError('Select at least one listing image before publish.')
+      return
+    }
+    const requiredAspects = state.ebay.aspects.filter((a) => a.required)
+    const missingRequired = requiredAspects.find((a) => !a.values.some((v) => v.trim().length > 0))
+    if (missingRequired) {
+      setUiError(`Required aspect missing value: ${missingRequired.name}`)
       return
     }
 
@@ -578,10 +666,11 @@ export default function CreateProductListing() {
       category_id: state.ebay.category_id,
       price,
       quantity: qty,
-      picture_urls: state.ebay.eps_image_urls,
+      picture_urls: pictureUrls,
       condition_text: state.ebay.condition_text,
       upc: state.ebay.upc || undefined,
       brand: state.ebay.brand || undefined,
+      mpn: state.ebay.mpn || undefined,
       color: state.ebay.color || undefined,
       dimensions: {
         length: parseNumber(state.ebay.length),
@@ -589,7 +678,12 @@ export default function CreateProductListing() {
         height: parseNumber(state.ebay.height),
         weight: parseNumber(state.ebay.weight),
       },
-      extra_specifics: [],
+      extra_specifics: state.ebay.aspects
+        .map((aspect) => ({
+          name: aspect.name.trim(),
+          value: aspect.values.find((v) => v.trim().length > 0)?.trim() || '',
+        }))
+        .filter((aspect) => aspect.name.length > 0 && aspect.value.length > 0),
     }
 
     await publishMutation.mutateAsync(payload)
@@ -713,6 +807,9 @@ export default function CreateProductListing() {
                         sent_image_signature: '',
                         send_results: [],
                         picture_urls: [],
+                        aspects: [],
+                        valid_conditions: [],
+                        enrich_warnings: [],
                       },
                     }))
                     setDraftLoadedForPlatform(null)
@@ -819,8 +916,21 @@ export default function CreateProductListing() {
 
       {EBAY_KEYS.includes(activePlatformTab) ? (
         <Stack spacing={2}>
+          <Button
+            variant="outlined"
+            onClick={() => enrichMutation.mutate()}
+            disabled={!selectedEbayPlatform || !state.variant_id || enrichMutation.isPending}
+          >
+            {enrichMutation.isPending ? 'Enriching...' : 'Enrich Listing'}
+          </Button>
+          {state.ebay.enrich_warnings.length > 0 ? (
+            <Alert severity="warning">
+              {state.ebay.enrich_warnings.join(' | ')}
+            </Alert>
+          ) : null}
           <TextField
             label="Item Condition *"
+            select={state.ebay.valid_conditions.length > 0}
             value={state.ebay.condition_text}
             onChange={(e) =>
               setState((prev) => ({
@@ -828,7 +938,13 @@ export default function CreateProductListing() {
                 ebay: { ...prev.ebay, condition_text: e.target.value },
               }))
             }
-          />
+          >
+            {state.ebay.valid_conditions.map((entry) => (
+              <MenuItem key={entry.condition_id} value={entry.condition_id}>
+                {entry.condition_description} ({entry.condition_id})
+              </MenuItem>
+            ))}
+          </TextField>
           <TextField
             label="Shipping Policy ID"
             value={state.ebay.shipping_policy_id}
@@ -888,6 +1004,40 @@ export default function CreateProductListing() {
             onChange={(e) => setState((prev) => ({ ...prev, ebay: { ...prev.ebay, price_override: e.target.value } }))}
             helperText="If empty, Base Price from step 2 is used"
           />
+          <Grid container spacing={2}>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                label="Brand"
+                value={state.ebay.brand}
+                onChange={(e) => setState((prev) => ({ ...prev, ebay: { ...prev.ebay, brand: e.target.value } }))}
+                fullWidth
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                label="MPN"
+                value={state.ebay.mpn}
+                onChange={(e) => setState((prev) => ({ ...prev, ebay: { ...prev.ebay, mpn: e.target.value } }))}
+                fullWidth
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                label="UPC"
+                value={state.ebay.upc}
+                onChange={(e) => setState((prev) => ({ ...prev, ebay: { ...prev.ebay, upc: e.target.value } }))}
+                fullWidth
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                label="Color"
+                value={state.ebay.color}
+                onChange={(e) => setState((prev) => ({ ...prev, ebay: { ...prev.ebay, color: e.target.value } }))}
+                fullWidth
+              />
+            </Grid>
+          </Grid>
           <TextField
             select
             label="Primary Category *"
@@ -907,6 +1057,89 @@ export default function CreateProductListing() {
           {categorySuggestionMutation.isPending ? (
             <Alert severity="info">Loading category suggestions...</Alert>
           ) : null}
+          <Stack spacing={1}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center">
+              <Typography variant="subtitle2">Item Specifics</Typography>
+              <Button
+                size="small"
+                onClick={() =>
+                  setState((prev) => ({
+                    ...prev,
+                    ebay: {
+                      ...prev.ebay,
+                      aspects: [...prev.ebay.aspects, { name: '', values: [], required: false }],
+                    },
+                  }))
+                }
+              >
+                Add Aspect
+              </Button>
+            </Stack>
+            {state.ebay.aspects.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">
+                No aspects yet. Add manually or use Enrich Listing.
+              </Typography>
+            ) : null}
+            {state.ebay.aspects.map((aspect, idx) => (
+              <Grid container spacing={1} key={`${aspect.name}-${idx}`}>
+                <Grid item xs={12} sm={5}>
+                  <TextField
+                    label={aspect.required ? 'Aspect Name *' : 'Aspect Name'}
+                    value={aspect.name}
+                    onChange={(e) => {
+                      const name = e.target.value
+                      setState((prev) => ({
+                        ...prev,
+                        ebay: {
+                          ...prev.ebay,
+                          aspects: prev.ebay.aspects.map((entry, entryIdx) =>
+                            entryIdx === idx ? { ...entry, name } : entry,
+                          ),
+                        },
+                      }))
+                    }}
+                    fullWidth
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    label={aspect.required ? 'Aspect Value *' : 'Aspect Value'}
+                    value={aspect.values[0] || ''}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      setState((prev) => ({
+                        ...prev,
+                        ebay: {
+                          ...prev.ebay,
+                          aspects: prev.ebay.aspects.map((entry, entryIdx) =>
+                            entryIdx === idx ? { ...entry, values: value ? [value] : [] } : entry,
+                          ),
+                        },
+                      }))
+                    }}
+                    fullWidth
+                  />
+                </Grid>
+                <Grid item xs={12} sm={1}>
+                  <Button
+                    color="error"
+                    onClick={() =>
+                      setState((prev) => ({
+                        ...prev,
+                        ebay: {
+                          ...prev.ebay,
+                          aspects: prev.ebay.aspects.filter((_entry, entryIdx) => entryIdx !== idx),
+                        },
+                      }))
+                    }
+                    disabled={aspect.required}
+                  >
+                    X
+                  </Button>
+                </Grid>
+              </Grid>
+            ))}
+          </Stack>
           <Divider />
           <Typography variant="subtitle2">Available Images</Typography>
           {availableImagesQuery.isLoading ? (
@@ -952,7 +1185,7 @@ export default function CreateProductListing() {
             onClick={() => sendImagesMutation.mutate()}
             disabled={sendImagesMutation.isPending || state.ebay.listing_images.length === 0 || !selectedEbayPlatform}
           >
-            {sendImagesMutation.isPending ? 'Sending image...' : 'Send image'}
+            {sendImagesMutation.isPending ? 'Sending image...' : 'Send image (optional)'}
           </Button>
           {state.ebay.send_results.length > 0 ? (
             <Box sx={{ display: 'grid', gap: 0.5 }}>
@@ -972,10 +1205,10 @@ export default function CreateProductListing() {
 
   const renderReviewStep = () => {
     const effectivePrice = parseNumber(state.ebay.price_override) ?? parseNumber(state.base_price)
-    const currentSignature = state.ebay.listing_images.map((img) => img.image_id).join('|')
+    const requiredAspects = state.ebay.aspects.filter((a) => a.required)
     const canList =
-      state.ebay.eps_image_urls.length > 0 &&
-      state.ebay.sent_image_signature === currentSignature &&
+      state.ebay.listing_images.length > 0 &&
+      requiredAspects.every((a) => a.values.some((v) => v.trim().length > 0)) &&
       !publishMutation.isPending
     return (
       <Stack spacing={2}>
@@ -993,7 +1226,7 @@ export default function CreateProductListing() {
             <Typography variant="body2">Qty: {state.global_quantity}</Typography>
             <Typography variant="body2">Category: {state.ebay.category_id || 'N/A'}</Typography>
             <Typography variant="body2">Condition: {state.ebay.condition_text || 'N/A'}</Typography>
-            <Typography variant="body2">Pictures: {state.ebay.eps_image_urls.length}</Typography>
+            <Typography variant="body2">Pictures: {state.ebay.listing_images.length}</Typography>
           </CardContent>
         </Card>
 

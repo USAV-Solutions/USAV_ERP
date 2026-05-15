@@ -10,7 +10,7 @@ from typing import Any, List, Optional
 import logging
 import socket
 from html import escape
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 import xml.etree.ElementTree as ET
 import httpx
 
@@ -114,6 +114,8 @@ class EbayClient(BasePlatformClient):
                 "https://api.ebay.com/oauth/api_scope "
                 "https://api.ebay.com/oauth/api_scope/sell.fulfillment "
                 "https://api.ebay.com/oauth/api_scope/sell.inventory "
+                "https://api.ebay.com/oauth/api_scope/sell.inventory.mapping "
+                "https://api.ebay.com/oauth/api_scope/commerce.media "
             ),
         }
 
@@ -792,6 +794,7 @@ class EbayClient(BasePlatformClient):
             "payment_profile_id": getattr(settings, f"ebay_payment_profile_id_{store}", ""),
             "return_profile_id": getattr(settings, f"ebay_return_profile_id_{store}", ""),
             "shipping_profile_id": getattr(settings, f"ebay_shipping_profile_id_{store}", ""),
+            "merchant_location_key": getattr(settings, f"ebay_merchant_location_key_{store}", ""),
         }
 
     @staticmethod
@@ -802,15 +805,19 @@ class EbayClient(BasePlatformClient):
         mapping = {
             "N": 1000,
             "NEW": 1000,
+            "1000": 1000,
             "U": 3000,
             "USED": 3000,
+            "3000": 3000,
             "R": 2000,
             "REFURBISHED": 2000,
+            "2000": 2000,
             "FOR_PARTS": 7000,
             "FOR PARTS": 7000,
             "PARTS": 7000,
             "NOT_WORKING": 7000,
             "NOT WORKING": 7000,
+            "7000": 7000,
         }
         return mapping.get(text)
 
@@ -870,6 +877,30 @@ class EbayClient(BasePlatformClient):
     @staticmethod
     def _to_cdata(text: str) -> str:
         return "<![CDATA[" + text.replace("]]>", "]]]]><![CDATA[>") + "]]>"
+
+    @staticmethod
+    def to_inventory_condition(raw_condition: str | None) -> str | None:
+        text = (raw_condition or "").strip().upper()
+        if not text:
+            return None
+        mapping = {
+            "N": "NEW",
+            "NEW": "NEW",
+            "1000": "NEW",
+            "U": "USED_GOOD",
+            "USED": "USED_GOOD",
+            "3000": "USED_GOOD",
+            "R": "SELLER_REFURBISHED",
+            "REFURBISHED": "SELLER_REFURBISHED",
+            "2000": "SELLER_REFURBISHED",
+            "FOR_PARTS": "FOR_PARTS_OR_NOT_WORKING",
+            "FOR PARTS": "FOR_PARTS_OR_NOT_WORKING",
+            "PARTS": "FOR_PARTS_OR_NOT_WORKING",
+            "NOT_WORKING": "FOR_PARTS_OR_NOT_WORKING",
+            "NOT WORKING": "FOR_PARTS_OR_NOT_WORKING",
+            "7000": "FOR_PARTS_OR_NOT_WORKING",
+        }
+        return mapping.get(text)
 
     def build_add_fixed_price_item_xml(self, payload: dict[str, Any]) -> str:
         def text(value: Any) -> str:
@@ -950,20 +981,62 @@ class EbayClient(BasePlatformClient):
   </Item>
 </AddFixedPriceItemRequest>"""
 
-    async def _rest_get(self, path: str, *, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def _rest_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_body: dict[str, Any] | None = None,
+        accept: str = "application/json",
+    ) -> dict[str, Any]:
         access_token = await self._get_access_token()
         if not access_token:
             raise RuntimeError(f"eBay {self.store_name} unable to obtain access token")
         headers = {
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json",
-            "Accept": "application/json",
+            "Accept": accept,
         }
         transport = httpx.AsyncHTTPTransport(retries=_TRANSPORT_RETRIES)
         async with httpx.AsyncClient(transport=transport, timeout=30.0) as client:
-            response = await client.get(f"{self.base_url}{path}", headers=headers, params=params or {})
+            response = await client.request(
+                method.upper(),
+                f"{self.base_url}{path}",
+                headers=headers,
+                params=params or {},
+                json=json_body,
+            )
             response.raise_for_status()
-        return response.json()
+        if not response.content:
+            return {}
+        try:
+            return response.json()
+        except Exception:
+            return {}
+
+    async def _rest_get(self, path: str, *, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        return await self._rest_request("GET", path, params=params)
+
+    async def _rest_post(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        body: dict[str, Any] | None = None,
+        accept: str = "application/json",
+    ) -> dict[str, Any]:
+        return await self._rest_request("POST", path, params=params, json_body=body, accept=accept)
+
+    async def _rest_put(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        body: dict[str, Any] | None = None,
+        accept: str = "application/json",
+    ) -> dict[str, Any]:
+        return await self._rest_request("PUT", path, params=params, json_body=body, accept=accept)
 
     async def get_default_category_tree_id(self, marketplace_id: str) -> str:
         logger.debug(
@@ -1012,6 +1085,138 @@ class EbayClient(BasePlatformClient):
             params={"marketplace_id": marketplace_id},
         )
         return payload.get("fulfillmentPolicies", [])
+
+    async def put_inventory_item(self, sku: str, payload: dict[str, Any]) -> dict[str, Any]:
+        encoded_sku = quote(sku, safe="")
+        return await self._rest_put(
+            f"/sell/inventory/v1/inventory_item/{encoded_sku}",
+            body=payload,
+        )
+
+    async def get_offer_by_sku(self, sku: str, marketplace_id: str) -> dict[str, Any] | None:
+        payload = await self._rest_get(
+            "/sell/inventory/v1/offer",
+            params={"sku": sku, "marketplace_id": marketplace_id},
+        )
+        offers = payload.get("offers") or []
+        if not offers:
+            return None
+        first = offers[0] if isinstance(offers[0], dict) else None
+        if not first:
+            return None
+        return first
+
+    async def create_offer(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._rest_post("/sell/inventory/v1/offer", body=payload)
+
+    async def update_offer(self, offer_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._rest_put(f"/sell/inventory/v1/offer/{offer_id}", body=payload)
+
+    async def publish_offer(self, offer_id: str) -> dict[str, Any]:
+        return await self._rest_post(f"/sell/inventory/v1/offer/{offer_id}/publish")
+
+    async def get_item_aspects_for_category(
+        self,
+        *,
+        category_tree_id: str,
+        category_id: str,
+    ) -> list[dict[str, Any]]:
+        payload = await self._rest_get(
+            f"/commerce/taxonomy/v1/category_tree/{category_tree_id}/get_item_aspects_for_category",
+            params={"category_id": category_id},
+        )
+        return payload.get("aspects", [])
+
+    async def get_valid_conditions_for_category(
+        self,
+        *,
+        marketplace_id: str,
+        category_id: str,
+    ) -> list[dict[str, Any]]:
+        payload = await self._rest_get(
+            f"/sell/metadata/v1/marketplace/{marketplace_id}/get_item_condition_policies",
+            params={"filter": f"category_ids:{{{category_id}}}"},
+        )
+        policies = payload.get("itemConditionPolicies") or []
+        if not policies:
+            return []
+        first = policies[0] if isinstance(policies[0], dict) else {}
+        conditions = first.get("itemConditions") or []
+        return [entry for entry in conditions if isinstance(entry, dict)]
+
+    async def start_listing_previews_creation(self, external_product: dict[str, Any]) -> str:
+        mutation = (
+            "mutation StartListingPreviewsCreation($input: StartListingPreviewsCreationInput!) { "
+            "startListingPreviewsCreation(input: $input) { "
+            "listingPreviewsCreationTask { id } "
+            "errors { errorDescription } "
+            "} "
+            "}"
+        )
+        payload = await self._rest_post(
+            "/commerce/inventory_mapping/v1/graphql",
+            body={
+                "query": mutation,
+                "variables": {"input": {"externalProducts": [external_product]}},
+            },
+        )
+        result = (payload.get("data") or {}).get("startListingPreviewsCreation") or {}
+        task = result.get("listingPreviewsCreationTask") or {}
+        task_id = task.get("id")
+        if task_id:
+            return str(task_id)
+        errors = result.get("errors") or payload.get("errors") or []
+        if errors:
+            message = ", ".join(
+                str(err.get("errorDescription") or err.get("message") or "").strip()
+                for err in errors
+                if isinstance(err, dict)
+            ).strip()
+            if message:
+                raise RuntimeError(message)
+        raise RuntimeError("eBay GraphQL did not return listing preview task ID")
+
+    async def poll_listing_previews_task_by_id(
+        self,
+        task_id: str,
+        *,
+        max_attempts: int = 10,
+        delay_seconds: float = 2.0,
+    ) -> dict[str, Any]:
+        query = (
+            "query($input: ListingPreviewsCreationTaskByIdInput!) { "
+            "listingPreviewsCreationTaskById(input: $input) { "
+            "listingPreviewsCreationTask { "
+            "id "
+            "result { "
+            "completionStatus "
+            "listingPreviews { title description category { id categoryId categoryName } aspects { name aspectValues values } } "
+            "invalidProducts { clientProvidedProductDetails { title sku } } "
+            "} "
+            "} "
+            "} "
+            "}"
+        )
+        for _ in range(max_attempts):
+            payload = await self._rest_post(
+                "/commerce/inventory_mapping/v1/graphql",
+                body={
+                    "query": query,
+                    "variables": {"input": {"id": task_id}},
+                },
+            )
+            task = (
+                ((payload.get("data") or {}).get("listingPreviewsCreationTaskById") or {}).get(
+                    "listingPreviewsCreationTask"
+                )
+                or {}
+            )
+            result = task.get("result") or {}
+            status = str(result.get("completionStatus") or "").strip().upper()
+            if status in {"COMPLETED", "COMPLETED_WITH_ERROR"}:
+                return result
+            await asyncio.sleep(delay_seconds)
+        raise RuntimeError("eBay listing preview task timed out")
 
     async def create_media_image_from_file(self, file_path: Path) -> str:
         if not file_path.is_file():

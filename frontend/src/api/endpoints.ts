@@ -47,6 +47,7 @@ export const LISTINGS = {
   CREATE_EBAY_START: '/listings/create/ebay/start',
   EBAY_DRAFT: '/listings/ebay/draft',
   EBAY_CATEGORY_SUGGESTIONS: '/listings/ebay/category-suggestions',
+  EBAY_AI_ENRICH: '/listings/ebay/ai-enrich',
   EBAY_IMAGES_AVAILABLE: (variantId: number) => `/listings/ebay/images/available/${variantId}`,
   EBAY_IMAGES_UPLOAD: '/listings/ebay/images/upload',
   EBAY_IMAGES_SEND: '/listings/ebay/images/send',
