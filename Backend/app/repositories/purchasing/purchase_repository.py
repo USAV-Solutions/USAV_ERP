@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models import (
+    ProductVariant,
     PurchaseOrder,
     PurchaseDeliverStatus,
     PurchaseOrderItem,
@@ -73,10 +74,22 @@ class PurchaseOrderRepository(BaseRepository[PurchaseOrder]):
         po_query = str(po_number or "").strip()
         if po_query:
             like_term = f"%{po_query.lower()}%"
+            sku_match_exists = exists(
+                select(1)
+                .select_from(PurchaseOrderItem)
+                .join(ProductVariant, ProductVariant.id == PurchaseOrderItem.variant_id)
+                .where(
+                    and_(
+                        PurchaseOrderItem.purchase_order_id == PurchaseOrder.id,
+                        func.lower(ProductVariant.full_sku).like(like_term),
+                    )
+                )
+            )
             stmt = stmt.where(
                 or_(
                     func.lower(PurchaseOrder.po_number).like(like_term),
                     func.lower(Vendor.name).like(like_term),
+                    sku_match_exists,
                 )
             )
 
