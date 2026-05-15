@@ -10,16 +10,32 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.responses import StreamingResponse
 
+from app.api.deps import AdminOrSalesUser
 from app.core.database import get_db
 from app.models import IdentityType, ZohoSyncStatus
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy import inspect
 from sqlalchemy.orm import selectinload
 
-from app.models.entities import Brand, PlatformListing, ProductFamily, ProductIdentity, ProductVariant
-from app.repositories import ProductIdentityRepository, ProductVariantRepository
+from app.models.entities import (
+    Brand,
+    InventoryItem,
+    PlatformListing,
+    ProductFamily,
+    ProductIdentity,
+    ProductVariant,
+)
+from app.models.purchasing import PurchaseOrderItem
+from app.modules.orders.models import OrderItem
+from app.repositories import (
+    BundleComponentRepository,
+    ProductIdentityRepository,
+    ProductVariantRepository,
+)
 from app.modules.inventory.schemas import (
     PaginatedResponse,
+    ProductVariantConvertToKitRequest,
+    ProductVariantConvertToKitResponse,
     ProductVariantCreate,
     ProductVariantResponse,
     ProductVariantUpdate,
@@ -110,6 +126,118 @@ async def _build_unique_deleted_sku(
 
     # Final fallback to keep moving even in edge-collision scenarios.
     return f"{base}-{variant_id}-{datetime.utcnow().microsecond}"
+
+
+def _condition_code_value(condition_code: object) -> str | None:
+    if condition_code is None:
+        return None
+    return condition_code.value if hasattr(condition_code, "value") else str(condition_code)
+
+
+def _validate_convert_to_kit_children(
+    *,
+    source_variant_id: int,
+    source_identity_id: int,
+    children: list,
+    child_variants_by_id: dict[int, ProductVariant],
+) -> list[tuple[ProductVariant, int, object]]:
+    """
+    Validate requested kit child lines and resolve them to loaded variants.
+
+    Returns tuples of (child_variant, quantity_required, role) in request order.
+    """
+    if not children:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one child item is required.",
+        )
+
+    seen_child_identity_ids: set[int] = set()
+    resolved_rows: list[tuple[ProductVariant, int, object]] = []
+
+    for index, child in enumerate(children, start=1):
+        child_variant = child_variants_by_id.get(child.child_variant_id)
+        if child_variant is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Child variant {child.child_variant_id} not found or inactive (line {index}).",
+            )
+
+        child_identity = child_variant.identity
+        if child_identity is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Child variant {child_variant.id} has no linked identity (line {index}).",
+            )
+
+        if child_variant.id == source_variant_id or child_variant.identity_id == source_identity_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Child variant {child_variant.id} cannot reference the source product itself (line {index}).",
+            )
+
+        if child_identity.type in {IdentityType.B, IdentityType.K}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Child variant {child_variant.id} uses identity type '{child_identity.type.value}' "
+                    f"which is not allowed for kit children (line {index})."
+                ),
+            )
+
+        if child_identity.id in seen_child_identity_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Duplicate child identity {child_identity.generated_upis_h} is not allowed "
+                    f"(line {index})."
+                ),
+            )
+
+        seen_child_identity_ids.add(child_identity.id)
+        resolved_rows.append((child_variant, int(child.quantity_required), child.role))
+
+    return resolved_rows
+
+
+async def _migrate_variant_links(
+    db: AsyncSession,
+    *,
+    source_variant_id: int,
+    target_variant_id: int,
+) -> dict[str, int]:
+    """Move FK links from one variant to another and return per-table moved counts."""
+    migrated_counts: dict[str, int] = {}
+
+    platform_result = await db.execute(
+        update(PlatformListing)
+        .where(PlatformListing.variant_id == source_variant_id)
+        .values(variant_id=target_variant_id)
+    )
+    migrated_counts["platform_listing"] = int(platform_result.rowcount or 0)
+
+    inventory_result = await db.execute(
+        update(InventoryItem)
+        .where(InventoryItem.variant_id == source_variant_id)
+        .values(variant_id=target_variant_id)
+    )
+    migrated_counts["inventory_item"] = int(inventory_result.rowcount or 0)
+
+    order_item_result = await db.execute(
+        update(OrderItem)
+        .where(OrderItem.variant_id == source_variant_id)
+        .values(variant_id=target_variant_id)
+    )
+    migrated_counts["order_item"] = int(order_item_result.rowcount or 0)
+
+    purchase_item_result = await db.execute(
+        update(PurchaseOrderItem)
+        .where(PurchaseOrderItem.variant_id == source_variant_id)
+        .values(variant_id=target_variant_id)
+    )
+    migrated_counts["purchase_order_item"] = int(purchase_item_result.rowcount or 0)
+
+    return migrated_counts
 
 
 @router.get("/search", summary="Search variants by product name or SKU")
@@ -272,7 +400,7 @@ async def create_variant(
 @router.get("/export/zoho-import.csv")
 async def export_variants_for_zoho_import_csv(
     include_inactive: Annotated[bool, Query(description="Include inactive variants")] = True,
-    exclude_bundles: Annotated[bool, Query(description="Exclude bundle identities (type B)")] = True,
+    exclude_bundles: Annotated[bool, Query(description="Exclude bundle/kit identities (type B/K)")] = True,
     db: AsyncSession = Depends(get_db),
 ):
     """Export variants to Zoho item-import CSV format."""
@@ -327,7 +455,7 @@ async def export_variants_for_zoho_import_csv(
     )
 
     if exclude_bundles:
-        stmt = stmt.where(ProductIdentity.type != IdentityType.B)
+        stmt = stmt.where(~ProductIdentity.type.in_([IdentityType.B, IdentityType.K]))
     if not include_inactive:
         stmt = stmt.where(ProductVariant.is_active == True)
 
@@ -499,6 +627,173 @@ async def update_variant(
         variant = await repo.update(variant, update_data)
     
     return ProductVariantResponse.model_validate(variant)
+
+
+@router.post("/{variant_id}/convert-to-kit", response_model=ProductVariantConvertToKitResponse)
+async def convert_variant_to_kit(
+    variant_id: int,
+    data: ProductVariantConvertToKitRequest,
+    _editor: AdminOrSalesUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Convert one Product variant into a Kit variant.
+
+    Conversion is transactional:
+    - Create a new Kit identity + variant
+    - Add bundle-component rows from provided child variants
+    - Move dependent FK links to the new variant
+    - Retire (deactivate) the source variant
+
+    Zoho sync is not triggered here; the new kit variant remains pending.
+    """
+    variant_repo = ProductVariantRepository(db)
+    identity_repo = ProductIdentityRepository(db)
+    bundle_repo = BundleComponentRepository(db)
+
+    source_variant_stmt = (
+        select(ProductVariant)
+        .options(
+            selectinload(ProductVariant.identity).selectinload(ProductIdentity.family),
+        )
+        .where(ProductVariant.id == variant_id)
+        .limit(1)
+    )
+    source_variant = (await db.execute(source_variant_stmt)).scalar_one_or_none()
+    if source_variant is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Product variant {variant_id} not found",
+        )
+    if not source_variant.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Product variant {variant_id} is inactive and cannot be converted to kit.",
+        )
+
+    source_identity = source_variant.identity
+    if source_identity is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Product variant {variant_id} has no linked identity.",
+        )
+    if source_identity.type != IdentityType.PRODUCT:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Only Product variants can be converted to kit. "
+                f"Current type is '{source_identity.type.value}'."
+            ),
+        )
+
+    child_variant_ids = [child.child_variant_id for child in data.children]
+    child_variants_stmt = (
+        select(ProductVariant)
+        .options(selectinload(ProductVariant.identity))
+        .where(ProductVariant.id.in_(child_variant_ids))
+        .where(ProductVariant.is_active == True)
+    )
+    child_variants = (await db.execute(child_variants_stmt)).scalars().all()
+    child_variants_by_id = {child_variant.id: child_variant for child_variant in child_variants}
+
+    resolved_children = _validate_convert_to_kit_children(
+        source_variant_id=source_variant.id,
+        source_identity_id=source_identity.id,
+        children=data.children,
+        child_variants_by_id=child_variants_by_id,
+    )
+
+    kit_upis_h = identity_repo.generate_upis_h(source_identity.product_id, IdentityType.K, None)
+    existing_kit_identity = await identity_repo.get_by_upis_h(kit_upis_h)
+    if existing_kit_identity is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Kit identity '{kit_upis_h}' already exists for product family "
+                f"{source_identity.product_id}."
+            ),
+        )
+
+    target_kit_sku = variant_repo.generate_full_sku(
+        kit_upis_h,
+        source_variant.color_code,
+        _condition_code_value(source_variant.condition_code),
+    )
+    existing_target_sku = await variant_repo.get_by_sku(target_kit_sku)
+    if existing_target_sku is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Target kit SKU '{target_kit_sku}' already exists.",
+        )
+
+    kit_identity = await identity_repo.create_identity(
+        {
+            "product_id": source_identity.product_id,
+            "type": IdentityType.K,
+            "identity_name": source_identity.identity_name,
+            "physical_class": source_identity.physical_class,
+            "dimension_length": source_identity.dimension_length,
+            "dimension_width": source_identity.dimension_width,
+            "dimension_height": source_identity.dimension_height,
+            "weight": source_identity.weight,
+            "is_stationery": False,
+        }
+    )
+
+    kit_variant = await variant_repo.create_variant(
+        {
+            "identity_id": kit_identity.id,
+            "variant_name": source_variant.variant_name,
+            "color_code": source_variant.color_code,
+            "condition_code": source_variant.condition_code,
+            "is_active": True,
+            # New composite identity should be manually synced later.
+            "zoho_sync_status": ZohoSyncStatus.PENDING,
+            "zoho_item_id": None,
+            "zoho_sync_error": None,
+            # Source thumbnail path is SKU-scoped; clear until kit SKU images are prepared.
+            "thumbnail_url": None,
+        },
+        kit_identity,
+    )
+
+    for child_variant, quantity_required, role in resolved_children:
+        await bundle_repo.create(
+            {
+                "parent_identity_id": kit_identity.id,
+                "child_identity_id": child_variant.identity_id,
+                "quantity_required": quantity_required,
+                "role": role,
+            }
+        )
+
+    migrated_counts = await _migrate_variant_links(
+        db,
+        source_variant_id=source_variant.id,
+        target_variant_id=kit_variant.id,
+    )
+
+    source_variant.is_active = False
+    source_variant.zoho_sync_error = None
+    if not (
+        source_variant.zoho_sync_status == ZohoSyncStatus.PENDING
+        and not source_variant.zoho_item_id
+    ):
+        source_variant.zoho_sync_status = ZohoSyncStatus.DIRTY
+
+    kit_variant.zoho_sync_status = ZohoSyncStatus.PENDING
+    kit_variant.zoho_item_id = None
+    kit_variant.zoho_sync_error = None
+
+    return ProductVariantConvertToKitResponse(
+        source_variant_id=source_variant.id,
+        source_sku=source_variant.full_sku,
+        new_identity_id=kit_identity.id,
+        new_variant_id=kit_variant.id,
+        new_sku=kit_variant.full_sku,
+        bundle_components_created=len(resolved_children),
+        migrated_counts=migrated_counts,
+    )
 
 
 @router.delete("/{variant_id}", status_code=status.HTTP_204_NO_CONTENT)

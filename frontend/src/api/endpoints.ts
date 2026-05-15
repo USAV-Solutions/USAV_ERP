@@ -22,6 +22,7 @@ export const CATALOG = {
   VARIANTS: '/variants',
   EXPORT_ZOHO_ITEMS_CSV: '/variants/export/zoho-import.csv',
   VARIANT: (id: number) => `/variants/${id}`,
+  CONVERT_VARIANT_TO_KIT: (id: number) => `/variants/${id}/convert-to-kit`,
   VARIANT_SEARCH: '/variants/search',
   BUNDLES: '/bundles',
   BUNDLE: (id: number) => `/bundles/${id}`,

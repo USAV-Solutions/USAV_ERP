@@ -47,12 +47,14 @@ import { AxiosError } from 'axios'
 import axiosClient from '../api/axiosClient'
 import { CATALOG, ZOHO } from '../api/endpoints'
 import { Variant, ProductIdentity, ProductFamily, ProductType } from '../types/inventory'
+import { VariantSearchResult } from '../types/orders'
 import { useAuth } from '../hooks/useAuth'
 import CreateProductDialog from '../components/inventory/CreateProductDialog'
 import CreateCatalogItemDialog from '../components/inventory/CreateCatalogItemDialog'
 import ProductThumbnail from '../components/inventory/ProductThumbnail'
 import ImageGalleryModal from '../components/inventory/ImageGalleryModal'
 import VariantImageDialog from '../components/inventory/VariantImageDialog'
+import VariantSearchAutocomplete from '../components/common/VariantSearchAutocomplete'
 import SearchField from '../components/common/SearchField'
 import HoldActionPromptDialog from '../components/common/HoldActionPromptDialog'
 import LongPressTableRow from '../components/common/LongPressTableRow'
@@ -74,9 +76,11 @@ interface ExpandedRowProps {
   syncDisabled: boolean
   imagesEnabled: boolean
   onManageImages: (sku: string) => void
-  canAdmin: boolean
+  canEditVariant: boolean
   onOpenHoldPrompt: (variant: EnhancedVariant) => void
 }
+
+type BundleRole = 'Primary' | 'Accessory' | 'Satellite'
 
 interface EnhancedVariant extends Variant {
   identity?: ProductIdentity & { family?: ProductFamily }
@@ -112,6 +116,23 @@ interface ZohoRelinkBySkuResponse {
   total_not_found: number
   total_skipped: number
   dry_run: boolean
+}
+
+interface ConvertKitLine {
+  key: string
+  variant: VariantSearchResult | null
+  quantity_required: number
+  role: BundleRole
+}
+
+interface VariantConvertToKitResponse {
+  source_variant_id: number
+  source_sku: string
+  new_identity_id: number
+  new_variant_id: number
+  new_sku: string
+  bundle_components_created: number
+  migrated_counts: Record<string, number>
 }
 
 const getTypeLabel = (type: ProductType): string => {
@@ -153,7 +174,7 @@ function ExpandedRow({
   syncDisabled,
   imagesEnabled,
   onManageImages,
-  canAdmin,
+  canEditVariant,
   onOpenHoldPrompt,
 }: ExpandedRowProps) {
   const [gallerySku, setGallerySku] = useState<string | null>(null)
@@ -221,8 +242,8 @@ function ExpandedRow({
                   hover
                   payload={variant}
                   onLongPress={onOpenHoldPrompt}
-                  enableLongPress={canAdmin}
-                  rowSx={canAdmin ? { cursor: 'pointer' } : undefined}
+                  enableLongPress={canEditVariant}
+                  rowSx={canEditVariant ? { cursor: 'pointer' } : undefined}
                 >
                   <TableCell>
                     <ProductThumbnail
@@ -334,13 +355,18 @@ export default function InventoryManagement() {
   const [editColorCode, setEditColorCode] = useState('')
   const [editConditionCode, setEditConditionCode] = useState('')
   const [editIsActive, setEditIsActive] = useState(true)
+  const [convertKitDialogOpen, setConvertKitDialogOpen] = useState(false)
+  const [convertKitLines, setConvertKitLines] = useState<ConvertKitLine[]>([
+    { key: 'line-1', variant: null, quantity_required: 1, role: 'Primary' },
+  ])
   const { hasRole } = useAuth()
   const queryClient = useQueryClient()
 
   const canAdmin = hasRole(['ADMIN'])
+  const canEditVariant = hasRole(['ADMIN', 'SALES_REP'])
 
   const openHoldPrompt = (variant: EnhancedVariant) => {
-    if (!canAdmin) {
+    if (!canEditVariant) {
       return
     }
 
@@ -359,8 +385,26 @@ export default function InventoryManagement() {
   }
 
   const closeHoldPrompt = () => {
+    setConvertKitDialogOpen(false)
     setHoldPromptOpen(false)
     setSelectedVariant(null)
+  }
+
+  const resetConvertKitLines = () => {
+    setConvertKitLines([{ key: `line-${Date.now()}`, variant: null, quantity_required: 1, role: 'Primary' }])
+  }
+
+  const openConvertKitDialog = () => {
+    if (!selectedVariant || selectedVariant.identity?.type !== 'Product') {
+      return
+    }
+    resetConvertKitLines()
+    setConvertKitDialogOpen(true)
+  }
+
+  const closeConvertKitDialog = () => {
+    setConvertKitDialogOpen(false)
+    resetConvertKitLines()
   }
 
   const updateVariantMutation = useMutation({
@@ -445,6 +489,52 @@ export default function InventoryManagement() {
     },
     onError: (error: AxiosError<{ detail?: string }>) => {
       const detail = error.response?.data?.detail || 'Failed to delete variant.'
+      setSnackbarSeverity('error')
+      setSnackbarMessage(detail)
+      setSnackbarOpen(true)
+    },
+  })
+
+  const convertVariantToKitMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedVariant) throw new Error('No variant selected')
+
+      const validLines = convertKitLines.filter((line) => line.variant && line.quantity_required > 0)
+      if (validLines.length === 0) {
+        throw new Error('Please add at least one valid child item.')
+      }
+
+      if (validLines.some((line) => line.variant?.id === selectedVariant.id)) {
+        throw new Error('Child item cannot be the source variant itself.')
+      }
+
+      const response = await axiosClient.post<VariantConvertToKitResponse>(
+        CATALOG.CONVERT_VARIANT_TO_KIT(selectedVariant.id),
+        {
+          children: validLines.map((line) => ({
+            child_variant_id: line.variant!.id,
+            quantity_required: line.quantity_required,
+            role: line.role,
+          })),
+        },
+      )
+      return response.data
+    },
+    onSuccess: async (data) => {
+      setSnackbarSeverity('success')
+      setSnackbarMessage(`Converted ${data.source_sku} to kit ${data.new_sku}.`)
+      setSnackbarOpen(true)
+      closeConvertKitDialog()
+      closeHoldPrompt()
+      await queryClient.invalidateQueries({ queryKey: ['variants'] })
+      await queryClient.invalidateQueries({ queryKey: ['identities'] })
+      await queryClient.invalidateQueries({ queryKey: ['families'] })
+    },
+    onError: (error: AxiosError<{ detail?: string }> | Error) => {
+      const detail =
+        (error as AxiosError<{ detail?: string }>)?.response?.data?.detail ||
+        error.message ||
+        'Failed to convert product to kit.'
       setSnackbarSeverity('error')
       setSnackbarMessage(detail)
       setSnackbarOpen(true)
@@ -537,7 +627,23 @@ export default function InventoryManagement() {
     await zohoSingleSyncMutation.mutateAsync(variant)
   }
 
+  const addConvertKitLine = () => {
+    setConvertKitLines((prev) => [
+      ...prev,
+      { key: `line-${Date.now()}-${prev.length}`, variant: null, quantity_required: 1, role: 'Accessory' },
+    ])
+  }
+
+  const updateConvertKitLine = (key: string, updater: (line: ConvertKitLine) => ConvertKitLine) => {
+    setConvertKitLines((prev) => prev.map((line) => (line.key === key ? updater(line) : line)))
+  }
+
+  const removeConvertKitLine = (key: string) => {
+    setConvertKitLines((prev) => prev.filter((line) => line.key !== key))
+  }
+
   const isZohoSyncRunning = zohoBulkSyncMutation.isPending
+  const canConvertSelectedToKit = selectedVariant?.identity?.type === 'Product'
 
   const handleExportZohoImportCsv = async () => {
     try {
@@ -815,7 +921,7 @@ export default function InventoryManagement() {
       {/* Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4">Inventory Management</Typography>
-        {hasRole(['ADMIN']) && (
+        {canAdmin && (
           <Box sx={{ display: 'flex', gap: 1 }}>
             <Button
               variant="outlined"
@@ -1146,8 +1252,8 @@ export default function InventoryManagement() {
                       hover
                       payload={variant}
                       onLongPress={openHoldPrompt}
-                      enableLongPress={canAdmin}
-                      rowSx={canAdmin ? { cursor: 'pointer' } : undefined}
+                      enableLongPress={canEditVariant}
+                      rowSx={canEditVariant ? { cursor: 'pointer' } : undefined}
                     >
                       <TableCell>
                         <ProductThumbnail
@@ -1267,7 +1373,7 @@ export default function InventoryManagement() {
                           syncDisabled={isZohoSyncRunning || zohoSingleSyncMutation.isPending}
                           imagesEnabled={!disableProductImages}
                           onManageImages={(sku) => setManageImagesSku(sku)}
-                          canAdmin={canAdmin}
+                          canEditVariant={canEditVariant}
                           onOpenHoldPrompt={openHoldPrompt}
                         />
                       )}
@@ -1341,8 +1447,8 @@ export default function InventoryManagement() {
         title="Edit Variant"
         onSave={() => updateVariantMutation.mutate()}
         onDelete={() => deleteVariantMutation.mutate()}
-        saveDisabled={!selectedVariant}
-        deleteDisabled={!selectedVariant}
+        saveDisabled={!selectedVariant || !canEditVariant}
+        deleteDisabled={!selectedVariant || !canEditVariant}
         saveLoading={updateVariantMutation.isPending}
         deleteLoading={deleteVariantMutation.isPending}
         deleteConfirmTitle="Delete Variant"
@@ -1453,8 +1559,104 @@ export default function InventoryManagement() {
             }
             label={editIsActive ? 'Active' : 'Inactive'}
           />
+          {canConvertSelectedToKit && (
+            <Button
+              variant="outlined"
+              onClick={openConvertKitDialog}
+              disabled={convertVariantToKitMutation.isPending}
+            >
+              Make Kit from Product
+            </Button>
+          )}
         </Box>
       </HoldActionPromptDialog>
+
+      <Dialog open={convertKitDialogOpen} onClose={closeConvertKitDialog} fullWidth maxWidth="md">
+        <DialogTitle>Make Kit from Product</DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+            <Typography variant="body2" color="text.secondary">
+              Source SKU: <strong>{selectedVariant?.full_sku || '-'}</strong>
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Add child item lines (Product or Part only). Bundle and Kit children are blocked.
+            </Typography>
+
+            {convertKitLines.map((line) => (
+              <Grid key={line.key} container spacing={1} alignItems="center">
+                <Grid item xs={12} md={6}>
+                  <VariantSearchAutocomplete
+                    value={line.variant}
+                    onChange={(value) => updateConvertKitLine(line.key, (current) => ({ ...current, variant: value }))}
+                    includeIdentityTypes={['Product', 'P']}
+                    excludeIdentityTypes={['B', 'K']}
+                    width="100%"
+                    label="Child Variant"
+                    placeholder="Search Product/Part SKU..."
+                  />
+                </Grid>
+                <Grid item xs={4} md={2}>
+                  <TextField
+                    label="Qty"
+                    type="number"
+                    value={line.quantity_required}
+                    onChange={(e) =>
+                      updateConvertKitLine(line.key, (current) => ({
+                        ...current,
+                        quantity_required: Math.max(1, Number(e.target.value) || 1),
+                      }))
+                    }
+                    fullWidth
+                  />
+                </Grid>
+                <Grid item xs={5} md={3}>
+                  <TextField
+                    select
+                    label="Role"
+                    value={line.role}
+                    onChange={(e) =>
+                      updateConvertKitLine(line.key, (current) => ({
+                        ...current,
+                        role: e.target.value as BundleRole,
+                      }))
+                    }
+                    fullWidth
+                  >
+                    <MenuItem value="Primary">Primary</MenuItem>
+                    <MenuItem value="Accessory">Accessory</MenuItem>
+                    <MenuItem value="Satellite">Satellite</MenuItem>
+                  </TextField>
+                </Grid>
+                <Grid item xs={3} md={1}>
+                  <Button
+                    color="error"
+                    onClick={() => removeConvertKitLine(line.key)}
+                    disabled={convertKitLines.length <= 1}
+                  >
+                    Remove
+                  </Button>
+                </Grid>
+              </Grid>
+            ))}
+
+            <Box>
+              <Button variant="outlined" onClick={addConvertKitLine}>
+                Add Line
+              </Button>
+            </Box>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeConvertKitDialog}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={() => convertVariantToKitMutation.mutate()}
+            disabled={convertVariantToKitMutation.isPending}
+          >
+            {convertVariantToKitMutation.isPending ? 'Converting...' : 'Convert to Kit'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }

@@ -73,6 +73,8 @@ from app.modules.inventory.schemas.lookups import (
 )
 from app.modules.inventory.schemas.pagination import PaginatedResponse
 from app.modules.inventory.schemas.variants import (
+    ProductVariantConvertToKitRequest,
+    ProductVariantConvertToKitResponse,
     ProductVariantCreate,
     ProductVariantResponse,
     ProductVariantUpdate,
@@ -158,6 +160,8 @@ __all__ = [
     # Pagination
     "PaginatedResponse",
     # Variants
+    "ProductVariantConvertToKitRequest",
+    "ProductVariantConvertToKitResponse",
     "ProductVariantCreate",
     "ProductVariantResponse",
     "ProductVariantUpdate",

@@ -208,8 +208,8 @@ async def create_identity(
     
     identity = await identity_repo.create_identity(data.model_dump())
 
-    # Ensure newly created Product/Part/Bundle identities are immediately sellable/searchable.
-    if identity.type in {IdentityType.PRODUCT, IdentityType.P, IdentityType.B}:
+    # Ensure newly created Product/Part/Bundle/Kit identities are immediately sellable/searchable.
+    if identity.type in {IdentityType.PRODUCT, IdentityType.P, IdentityType.B, IdentityType.K}:
         variant_repo = ProductVariantRepository(db)
         await variant_repo.create_variant(
             {
