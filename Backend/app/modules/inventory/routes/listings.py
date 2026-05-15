@@ -109,12 +109,12 @@ def _resolve_listing_defaults(
     else:
         listings = [raw_listings]
     existing_listing = next((l for l in listings if l and l.platform == platform), None)
+    ecwid_listings = [l for l in listings if l and l.platform == Platform.ECWID]
     identity = variant.identity
     family = identity.family if identity else None
     brand_name = family.brand.name if family and family.brand else None
     title = (
-        (existing_listing.listed_name if existing_listing else None)
-        or variant.variant_name
+        variant.variant_name
         or (identity.identity_name if identity else None)
         or (family.base_name if family else None)
         or variant.full_sku
@@ -124,7 +124,17 @@ def _resolve_listing_defaults(
         or (family.description if family and family.description else None)
         or title
     )
-    price = float(existing_listing.listing_price) if existing_listing and existing_listing.listing_price is not None else 0.0
+    ecwid_prices = [
+        float(listing.listing_price)
+        for listing in ecwid_listings
+        if getattr(listing, "listing_price", None) is not None
+    ]
+    if ecwid_prices:
+        price = max(ecwid_prices)
+    elif existing_listing and existing_listing.listing_price is not None:
+        price = float(existing_listing.listing_price)
+    else:
+        price = 0.0
     quantity = existing_listing.listing_quantity if existing_listing and existing_listing.listing_quantity is not None else 1
     picture_urls: list[str] = []
     if variant.thumbnail_url:
@@ -264,12 +274,50 @@ def _coerce_json_object(text: str) -> dict[str, Any]:
     return payload
 
 
-async def _gemini_enrich_listing(
+def _build_gemini_description_prompt(
     *,
     title: str,
     description: str,
-    category_id: str | None,
-) -> dict[str, Any]:
+    condition_name: str,
+) -> str:
+    stock_photo_disclaimer = (
+        "<em>The images provided are stock photos meant to illustrate the product type you will receive. "
+        "They may not directly reflect the specific condition of the item you are considering. "
+        "If you require actual photos of the product, please contact us prior to making a purchase.</em>"
+    )
+    return f"""You are an AI assistant for creating eBay listings.
+Generate a product description based on the title and condition.
+The new description MUST follow this exact HTML format:
+
+<b>{title}</b><br><br>
+<b>Condition:</b> {condition_name}<br>
+[Brief condition description]<br><br>
+<b>What's in the box:</b><br>
+[List included items or state "Only the main unit is included as pictured."]<br><br>
+<b>Item condition:</b><br>
+[Elaborate on condition]<br><br>
+<b>compatibility:</b><br>
+[Describe compatibility]<br><br>
+{stock_photo_disclaimer}
+
+Original Description (if any): "{description}"
+Product Title: "{title}"
+
+Return ONLY the formatted HTML."""
+
+
+def _build_gemini_package_prompt(*, title: str) -> str:
+    return (
+        f"Based on '{title}', estimate weight (lb, oz) and dimensions (L,W,H in). "
+        'Return JSON: {"weightPounds": 2, "weightOunces": 8, "packageLength": 12, "packageWidth": 10, "packageHeight": 6}'
+    )
+
+
+async def _gemini_generate_content(
+    *,
+    prompt: str,
+    response_mime_type: str | None = None,
+) -> str:
     api_key = str(getattr(settings, "gemini_api_key", "") or "").strip()
     model_name = str(getattr(settings, "gemini_model_name", "") or "").strip()
     if not api_key:
@@ -277,27 +325,20 @@ async def _gemini_enrich_listing(
     if not model_name:
         raise RuntimeError("Gemini model name is not configured")
 
-    prompt = (
-        "You help enrich eBay listing drafts. "
-        "Return strict JSON with keys: title, description, dimensions. "
-        "dimensions must include numeric length,width,height,weight in inches/pounds when inferable, else null. "
-        "Do not include markdown.\n"
-        f"Category ID: {category_id or 'unknown'}\n"
-        f"Current title: {title}\n"
-        f"Current description: {description}\n"
-    )
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
-    payload = {
+    generation_config: dict[str, Any] = {
+        "temperature": 0.2,
+    }
+    if response_mime_type:
+        generation_config["responseMimeType"] = response_mime_type
+    payload: dict[str, Any] = {
         "contents": [
             {
                 "role": "user",
                 "parts": [{"text": prompt}],
             }
         ],
-        "generationConfig": {
-            "temperature": 0.2,
-            "responseMimeType": "application/json",
-        },
+        "generationConfig": generation_config,
     }
     transport = httpx.AsyncHTTPTransport(retries=2)
     async with httpx.AsyncClient(transport=transport, timeout=30.0) as client:
@@ -312,19 +353,101 @@ async def _gemini_enrich_listing(
     text = ""
     if parts and isinstance(parts[0], dict):
         text = str(parts[0].get("text") or "").strip()
-    parsed = _coerce_json_object(text)
-    if not parsed:
-        raise RuntimeError("Gemini response did not contain valid JSON")
-    return parsed
+    if not text:
+        raise RuntimeError("Gemini response text was empty")
+    return text
+
+
+def _resolve_offer_policy_ids(
+    *,
+    store_defaults: dict[str, Any],
+    weight_lbs: float,
+    is_free_shipping: bool,
+    use_no_returns_policy: bool,
+) -> dict[str, str]:
+    payment_policy_id = str(
+        store_defaults.get("payment_policy_id")
+        or store_defaults.get("payment_profile_id")
+        or ""
+    ).strip()
+    return_policy_id = str(
+        store_defaults.get("return_policy_id")
+        or store_defaults.get("return_profile_id")
+        or ""
+    ).strip()
+    return_policy_id_no_returns = str(
+        store_defaults.get("return_policy_id_no_returns")
+        or ""
+    ).strip()
+    fulfillment_policy_id_light = str(
+        store_defaults.get("fulfillment_policy_id_light")
+        or store_defaults.get("fulfillment_policy_id")
+        or store_defaults.get("shipping_profile_id")
+        or ""
+    ).strip()
+    fulfillment_policy_id_heavy = str(
+        store_defaults.get("fulfillment_policy_id_heavy")
+        or fulfillment_policy_id_light
+        or ""
+    ).strip()
+    fulfillment_policy_id_free = str(
+        store_defaults.get("fulfillment_policy_id_free")
+        or fulfillment_policy_id_light
+        or ""
+    ).strip()
+    try:
+        heavy_threshold_lbs = float(store_defaults.get("heavy_item_threshold_lbs") or 2.0)
+    except (TypeError, ValueError):
+        heavy_threshold_lbs = 2.0
+
+    if is_free_shipping:
+        fulfillment_policy_id = fulfillment_policy_id_free
+    elif weight_lbs >= heavy_threshold_lbs:
+        fulfillment_policy_id = fulfillment_policy_id_heavy
+    else:
+        fulfillment_policy_id = fulfillment_policy_id_light
+
+    selected_return_policy_id = (
+        return_policy_id_no_returns
+        if use_no_returns_policy and return_policy_id_no_returns
+        else return_policy_id
+    )
+
+    if not payment_policy_id:
+        raise HTTPException(status_code=400, detail="Missing eBay payment policy ID")
+    if not selected_return_policy_id:
+        raise HTTPException(status_code=400, detail="Missing eBay return policy ID")
+    if not fulfillment_policy_id:
+        raise HTTPException(status_code=400, detail="Missing eBay fulfillment policy ID")
+
+    return {
+        "payment_policy_id": payment_policy_id,
+        "return_policy_id": selected_return_policy_id,
+        "fulfillment_policy_id": fulfillment_policy_id,
+    }
 
 
 def _resolve_business_policy_ids(
     store_defaults: dict[str, object],
     platform: Platform,
 ) -> dict[str, str] | None:
-    payment_profile_id = str(store_defaults.get("payment_profile_id") or "").strip()
-    return_profile_id = str(store_defaults.get("return_profile_id") or "").strip()
-    shipping_profile_id = str(store_defaults.get("shipping_profile_id") or "").strip()
+    payment_profile_id = str(
+        store_defaults.get("payment_policy_id")
+        or store_defaults.get("payment_profile_id")
+        or ""
+    ).strip()
+    return_profile_id = str(
+        store_defaults.get("return_policy_id")
+        or store_defaults.get("return_profile_id")
+        or ""
+    ).strip()
+    shipping_profile_id = str(
+        store_defaults.get("fulfillment_policy_id")
+        or store_defaults.get("shipping_policy_id")
+        or store_defaults.get("shipping_profile_id")
+        or store_defaults.get("fulfillment_policy_id_light")
+        or ""
+    ).strip()
     profile_values = (payment_profile_id, return_profile_id, shipping_profile_id)
     present_count = sum(1 for value in profile_values if value)
     if present_count == 0:
@@ -764,30 +887,58 @@ async def enrich_ebay_listing(
         "height": _parse_float_or_none(getattr(variant.identity, "dimension_height", None)),
         "weight": _parse_float_or_none(getattr(variant.identity, "weight", None)),
     }
-    gemini_title: str | None = None
     gemini_description: str | None = None
+    gemini_weight_lbs: float | None = None
+    gemini_length: float | None = None
+    gemini_width: float | None = None
+    gemini_height: float | None = None
     try:
-        gemini_result = await _gemini_enrich_listing(
+        description_prompt = _build_gemini_description_prompt(
             title=graph_title or draft_title,
             description=graph_description or draft_description,
-            category_id=category_id,
+            condition_name=str(defaults.get("condition_text") or "Used"),
         )
-        gemini_title = str(gemini_result.get("title") or "").strip() or None
-        gemini_description = str(gemini_result.get("description") or "").strip() or None
-        parsed_dimensions = gemini_result.get("dimensions") or {}
-        if isinstance(parsed_dimensions, dict):
-            for key in ("length", "width", "height", "weight"):
-                value = _parse_float_or_none(parsed_dimensions.get(key))
-                if value is not None:
-                    dimensions[key] = value
+        gemini_description = await _gemini_generate_content(
+            prompt=description_prompt,
+            response_mime_type="text/plain",
+        )
     except Exception as exc:
-        warnings.append(f"Gemini enrichment unavailable: {exc}")
+        warnings.append(f"Gemini description unavailable: {exc}")
+
+    try:
+        package_prompt = _build_gemini_package_prompt(title=graph_title or draft_title)
+        package_json_text = await _gemini_generate_content(
+            prompt=package_prompt,
+            response_mime_type="application/json",
+        )
+        package_payload = _coerce_json_object(package_json_text)
+        if not package_payload:
+            raise RuntimeError("Gemini package output was not valid JSON")
+
+        weight_pounds = _parse_float_or_none(package_payload.get("weightPounds"))
+        weight_ounces = _parse_float_or_none(package_payload.get("weightOunces"))
+        if weight_pounds is not None or weight_ounces is not None:
+            gemini_weight_lbs = float(weight_pounds or 0.0) + (float(weight_ounces or 0.0) / 16.0)
+        gemini_length = _parse_float_or_none(package_payload.get("packageLength"))
+        gemini_width = _parse_float_or_none(package_payload.get("packageWidth"))
+        gemini_height = _parse_float_or_none(package_payload.get("packageHeight"))
+    except Exception as exc:
+        warnings.append(f"Gemini package estimate unavailable: {exc}")
+
+    if dimensions["weight"] is None and gemini_weight_lbs is not None:
+        dimensions["weight"] = round(gemini_weight_lbs, 2)
+    if dimensions["length"] is None and gemini_length is not None:
+        dimensions["length"] = gemini_length
+    if dimensions["width"] is None and gemini_width is not None:
+        dimensions["width"] = gemini_width
+    if dimensions["height"] is None and gemini_height is not None:
+        dimensions["height"] = gemini_height
 
     return EbayAiEnrichResponse(
         platform=data.platform,
         variant_id=variant.id,
         category_id=category_id,
-        title=graph_title or gemini_title or draft_title,
+        title=graph_title or draft_title,
         description=graph_description or gemini_description or draft_description,
         aspects=graph_aspects,
         dimensions=dimensions,
@@ -945,15 +1096,6 @@ async def publish_ebay_listing(
         raise HTTPException(status_code=400, detail="At least one picture URL is required")
 
     store_defaults = client.get_store_listing_defaults()
-    seller_profiles = _resolve_business_policy_ids(store_defaults, data.platform)
-    if not seller_profiles:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"eBay business policy IDs are required for Inventory API publish on {data.platform.value} "
-                "(payment/return/shipping)"
-            ),
-        )
     merchant_location_key = str(store_defaults.get("merchant_location_key") or "").strip()
     if not merchant_location_key:
         raise HTTPException(
@@ -1025,6 +1167,12 @@ async def publish_ebay_listing(
         raise HTTPException(status_code=400, detail="At least one item specific is required")
 
     inventory_aspects = _to_inventory_aspects(specifics)
+    offer_policy_ids = _resolve_offer_policy_ids(
+        store_defaults=store_defaults,
+        weight_lbs=weight,
+        is_free_shipping=bool(data.is_free_shipping),
+        use_no_returns_policy=bool(data.use_no_returns_policy),
+    )
     inventory_payload = {
         "availability": {
             "shipToLocationAvailability": {
@@ -1062,9 +1210,9 @@ async def publish_ebay_listing(
         "categoryId": data.category_id,
         "listingDescription": data.description,
         "listingPolicies": {
-            "paymentPolicyId": seller_profiles["payment_profile_id"],
-            "returnPolicyId": seller_profiles["return_profile_id"],
-            "fulfillmentPolicyId": seller_profiles["shipping_profile_id"],
+            "paymentPolicyId": offer_policy_ids["payment_policy_id"],
+            "returnPolicyId": offer_policy_ids["return_policy_id"],
+            "fulfillmentPolicyId": offer_policy_ids["fulfillment_policy_id"],
         },
         "merchantLocationKey": merchant_location_key,
         "pricingSummary": {
@@ -1125,6 +1273,14 @@ async def publish_ebay_listing(
         "item_specifics": specifics,
         "inventory_aspects": inventory_aspects,
         "merchant_location_key": merchant_location_key,
+        "warehouse": {
+            "address1": str(store_defaults.get("warehouse_address1") or ""),
+            "address2": str(store_defaults.get("warehouse_address2") or ""),
+            "city": str(store_defaults.get("warehouse_city") or ""),
+            "state": str(store_defaults.get("warehouse_state") or ""),
+            "postal_code": str(store_defaults.get("warehouse_postal_code") or ""),
+            "country": str(store_defaults.get("warehouse_country") or ""),
+        },
         "dispatch_time_max": dispatch_time_max,
         "shipping_package_details": {
             "length": round(length, 2),
@@ -1134,7 +1290,13 @@ async def publish_ebay_listing(
             "dimension_unit": "INCH",
             "weight_unit": "POUND",
         },
-        "seller_profiles": seller_profiles,
+        "seller_profiles": {
+            "payment_profile_id": offer_policy_ids["payment_policy_id"],
+            "return_profile_id": offer_policy_ids["return_policy_id"],
+            "shipping_profile_id": offer_policy_ids["fulfillment_policy_id"],
+        },
+        "is_free_shipping": bool(data.is_free_shipping),
+        "use_no_returns_policy": bool(data.use_no_returns_policy),
     }
 
     listing_data = {

@@ -791,10 +791,44 @@ class EbayClient(BasePlatformClient):
             "location": getattr(settings, f"ebay_location_{store}", ""),
             "postal_code": getattr(settings, f"ebay_postal_code_{store}", ""),
             "dispatch_time_max": getattr(settings, f"ebay_dispatch_time_max_{store}", 1),
-            "payment_profile_id": getattr(settings, f"ebay_payment_profile_id_{store}", ""),
-            "return_profile_id": getattr(settings, f"ebay_return_profile_id_{store}", ""),
-            "shipping_profile_id": getattr(settings, f"ebay_shipping_profile_id_{store}", ""),
+            "payment_profile_id": (
+                getattr(settings, f"ebay_payment_policy_id_{store}", "")
+                or getattr(settings, f"ebay_payment_profile_id_{store}", "")
+            ),
+            "return_profile_id": (
+                getattr(settings, f"ebay_return_policy_id_{store}", "")
+                or getattr(settings, f"ebay_return_profile_id_{store}", "")
+            ),
+            "shipping_profile_id": (
+                getattr(settings, f"ebay_fulfillment_policy_id_light_{store}", "")
+                or getattr(settings, f"ebay_shipping_policy_id_{store}", "")
+                or getattr(settings, f"ebay_shipping_profile_id_{store}", "")
+            ),
+            "payment_policy_id": (
+                getattr(settings, f"ebay_payment_policy_id_{store}", "")
+                or getattr(settings, f"ebay_payment_profile_id_{store}", "")
+            ),
+            "return_policy_id": (
+                getattr(settings, f"ebay_return_policy_id_{store}", "")
+                or getattr(settings, f"ebay_return_profile_id_{store}", "")
+            ),
+            "fulfillment_policy_id": (
+                getattr(settings, f"ebay_fulfillment_policy_id_light_{store}", "")
+                or getattr(settings, f"ebay_shipping_policy_id_{store}", "")
+                or getattr(settings, f"ebay_shipping_profile_id_{store}", "")
+            ),
             "merchant_location_key": getattr(settings, f"ebay_merchant_location_key_{store}", ""),
+            "warehouse_address1": getattr(settings, f"ebay_warehouse_address1_{store}", ""),
+            "warehouse_address2": getattr(settings, f"ebay_warehouse_address2_{store}", ""),
+            "warehouse_city": getattr(settings, f"ebay_warehouse_city_{store}", ""),
+            "warehouse_state": getattr(settings, f"ebay_warehouse_state_{store}", ""),
+            "warehouse_postal_code": getattr(settings, f"ebay_warehouse_postal_code_{store}", ""),
+            "warehouse_country": getattr(settings, f"ebay_warehouse_country_{store}", "US"),
+            "return_policy_id_no_returns": getattr(settings, f"ebay_return_policy_id_no_returns_{store}", ""),
+            "fulfillment_policy_id_light": getattr(settings, f"ebay_fulfillment_policy_id_light_{store}", ""),
+            "fulfillment_policy_id_heavy": getattr(settings, f"ebay_fulfillment_policy_id_heavy_{store}", ""),
+            "fulfillment_policy_id_free": getattr(settings, f"ebay_fulfillment_policy_id_free_{store}", ""),
+            "heavy_item_threshold_lbs": getattr(settings, f"ebay_heavy_item_threshold_lbs_{store}", 2.0),
         }
 
     @staticmethod

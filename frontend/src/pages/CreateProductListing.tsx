@@ -587,8 +587,7 @@ export default function CreateProductListing() {
         state.master_title.trim().length > 0 &&
         state.master_sku.trim().length > 0 &&
         state.base_price.trim().length > 0 &&
-        state.global_quantity.trim().length > 0 &&
-        state.description.trim().length > 0
+        state.global_quantity.trim().length > 0
       )
     }
     if (step === 2) {
@@ -600,6 +599,7 @@ export default function CreateProductListing() {
       return (
         state.ebay.condition_text.trim().length > 0 &&
         state.ebay.category_id.trim().length > 0 &&
+        state.description.trim().length > 0 &&
         state.ebay.listing_images.length > 0 &&
         requiredAspectsComplete
       )
@@ -642,6 +642,10 @@ export default function CreateProductListing() {
     const price = override ?? basePrice
     if (!price || !qty) {
       setUiError('Price and quantity are required.')
+      return
+    }
+    if (!state.description.trim()) {
+      setUiError('Description is required before publish.')
       return
     }
     const pictureUrls = state.ebay.listing_images
@@ -795,10 +799,20 @@ export default function CreateProductListing() {
                   key={variant.id}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
+                    const nextTitle =
+                      variant.variant_name ||
+                      variant.identity?.identity_name ||
+                      variant.identity?.family?.base_name ||
+                      variant.full_sku ||
+                      ''
                     setState((prev) => ({
                       ...prev,
                       variant_id: variant.id,
+                      master_title: nextTitle,
                       master_sku: variant.full_sku || prev.master_sku,
+                      base_price: '',
+                      global_quantity: '1',
+                      description: '',
                       ebay: {
                         ...prev.ebay,
                         available_images: [],
@@ -886,13 +900,6 @@ export default function CreateProductListing() {
           />
         </Grid>
       </Grid>
-      <TextField
-        label="Description *"
-        multiline
-        minRows={4}
-        value={state.description}
-        onChange={(e) => setState((prev) => ({ ...prev, description: e.target.value }))}
-      />
       {draftMutation.isPending ? <Alert severity="info">Loading eBay draft defaults...</Alert> : null}
       {draftLoadedForPlatform ? (
         <Alert severity="success">Draft defaults loaded for {draftLoadedForPlatform}.</Alert>
@@ -928,6 +935,13 @@ export default function CreateProductListing() {
               {state.ebay.enrich_warnings.join(' | ')}
             </Alert>
           ) : null}
+          <TextField
+            label="Description *"
+            multiline
+            minRows={4}
+            value={state.description}
+            onChange={(e) => setState((prev) => ({ ...prev, description: e.target.value }))}
+          />
           <TextField
             label="Item Condition *"
             select={state.ebay.valid_conditions.length > 0}

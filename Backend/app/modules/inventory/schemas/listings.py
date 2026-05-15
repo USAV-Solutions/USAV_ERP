@@ -143,6 +143,8 @@ class EbayPublishRequest(BaseModel):
     brand: str | None = Field(None, max_length=255)
     mpn: str | None = Field(None, max_length=255)
     color: str | None = Field(None, max_length=100)
+    is_free_shipping: bool = False
+    use_no_returns_policy: bool = False
     dimensions: dict[str, float | None] = Field(default_factory=dict)
     extra_specifics: list[EbaySpecificInput] = Field(default_factory=list)
 

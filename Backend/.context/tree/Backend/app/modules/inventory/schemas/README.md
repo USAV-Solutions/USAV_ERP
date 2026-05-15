@@ -16,6 +16,7 @@ Inventory domain request/response schema contracts.
 - eBay publish response contract now returns `external_ref_id` (remote listing ID) and `offer_id`; frontend should not rely on legacy `item_id` from Trading API publish.
 - New `ebay/ai-enrich` schemas carry optional suggestion payloads (`category_id`, `aspects`, `valid_conditions`, `dimensions`, `warnings`); warnings are first-class response fields because enrich is best-effort.
 - eBay publish request still requires explicit `category_id` + `picture_urls` + `condition_text`, but `picture_urls` now represent public URLs used directly for Inventory API `product.imageUrls` (not EPS-only URLs).
+- eBay publish request now includes optional shipping-policy hooks (`is_free_shipping`, `use_no_returns_policy`) so publish can select configured fulfillment/return policies without changing endpoint shape for existing callers.
 - Category suggestions continue returning normalized `category_id` + breadcrumb tokens; preserve this shape so frontend selection can be injected directly into publish payload.
 
 ## Child Folders
