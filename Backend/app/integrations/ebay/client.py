@@ -115,7 +115,6 @@ class EbayClient(BasePlatformClient):
                 "https://api.ebay.com/oauth/api_scope/sell.fulfillment "
                 "https://api.ebay.com/oauth/api_scope/sell.inventory "
                 "https://api.ebay.com/oauth/api_scope/sell.inventory.mapping "
-                "https://api.ebay.com/oauth/api_scope/commerce.media "
             ),
         }
 
