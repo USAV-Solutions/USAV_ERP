@@ -88,6 +88,17 @@ class OrderItemConfirmRequest(BaseModel):
     notes: Optional[str] = Field(default=None, max_length=500)
 
 
+class OrderItemCreateRequest(BaseModel):
+    """Payload for POST /orders/{order_id}/items."""
+    external_item_id: Optional[str] = Field(default=None, max_length=100)
+    external_sku: Optional[str] = Field(default=None, max_length=100)
+    item_name: str = Field(..., max_length=500)
+    quantity: int = Field(..., gt=0)
+    unit_price: Decimal = Field(..., ge=0)
+    total_price: Decimal = Field(..., ge=0)
+    variant_id: Optional[int] = None
+
+
 # ============================================================================
 # ORDER HEADER SCHEMAS
 # ============================================================================

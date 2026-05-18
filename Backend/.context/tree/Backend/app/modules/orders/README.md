@@ -27,6 +27,7 @@ Sales orders domain: ingestion/import, listing-centric matching, filtering, cust
 - When CSV rows omit subtotal/order-line totals, import derives subtotal from summed item row totals; if order total is missing, fallback total is calculated as `line_total + tax + shipping + handling`.
 - Order list/detail responses now include `platform_total_amount` and `zoho_total_amount`; `zoho_total_amount` excludes tax for marketplace platforms (`AMAZON`, `WALMART`, and all eBay stores) and includes tax for other platforms.
 - `order_item.variant_id` is denormalized once `platform_listing_id` is introduced; code paths that update listing assignments must keep `order_item.variant_id` in sync.
+- Sales-order line items can now be added manually via `POST /orders/{order_id}/items`; new rows mark order `zoho_sync_status=DIRTY`, set item status from `variant_id` (`MATCHED` vs `UNMATCHED`), and recalculate order subtotal/total from line totals while preserving any previously inferred handling delta.
 
 ## Child Folders
 - `schemas/`

@@ -102,6 +102,16 @@ export interface OrderItemConfirmRequest {
   notes?: string
 }
 
+export interface OrderItemCreateRequest {
+  external_item_id?: string
+  external_sku?: string
+  item_name: string
+  quantity: number
+  unit_price: number
+  total_price: number
+  variant_id?: number
+}
+
 // ── Order Header Schemas ─────────────────────────────────────────────
 
 export interface OrderBrief {

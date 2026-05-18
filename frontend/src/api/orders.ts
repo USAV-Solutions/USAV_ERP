@@ -12,6 +12,7 @@ import type {
   OrderStatusUpdate,
   ShippingStatusUpdate,
   OrderItemDetail,
+  OrderItemCreateRequest,
   OrderItemMatchRequest,
   OrderItemConfirmRequest,
   SyncRequest,
@@ -155,6 +156,14 @@ export async function confirmItem(
 
 export async function rejectItem(itemId: number): Promise<OrderItemDetail> {
   const { data } = await axiosClient.post<OrderItemDetail>(ORDERS.REJECT_ITEM(itemId))
+  return data
+}
+
+export async function addOrderItem(
+  orderId: number,
+  body: OrderItemCreateRequest,
+): Promise<OrderItemDetail> {
+  const { data } = await axiosClient.post<OrderItemDetail>(ORDERS.ORDER_ITEMS(orderId), body)
   return data
 }
 
