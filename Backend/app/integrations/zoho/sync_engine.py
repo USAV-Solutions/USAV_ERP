@@ -930,67 +930,7 @@ async def _create_bill_with_inventory_fallback(
     return result.get("bill", {}) or {}
 
 
-async def _list_bill_payments_with_inventory_fallback(
-    zoho: ZohoClient,
-    bill_id: str,
-) -> list[dict[str, Any]]:
-    result = await zoho._request(
-        "GET",
-        "/vendorpayments",
-        api="inventory",
-        params={
-            "bill_id": bill_id,
-            "page": 1,
-            "per_page": 200,
-        },
-    )
-    return result.get("vendorpayments", []) or result.get("vendor_payments", []) or []
-
-
-def _resolve_bill_amount(po: PurchaseOrder, bill: dict[str, Any]) -> float:
-    bill_total = _to_float_money(bill.get("total"))
-    if bill_total > 0:
-        return bill_total
-
-    po_total = _to_float_money(po.total_amount)
-    if po_total > 0:
-        return po_total
-
-    line_total = sum(
-        _to_float_money(getattr(item, "unit_price", 0)) * int(getattr(item, "quantity", 0) or 0)
-        for item in (po.items or [])
-    )
-    if line_total > 0:
-        return line_total
-
-    return 0.0
-
-
-def _build_ebay_payment_payload(po: PurchaseOrder, bill_id: str, amount: float) -> dict[str, Any]:
-    if not po.vendor or not po.vendor.zoho_id:
-        raise ValueError("vendor is missing zoho_id")
-    if amount <= 0:
-        raise ValueError("payment amount must be > 0")
-
-    payment_date = po.order_date.isoformat()
-    return {
-        "vendor_id": str(po.vendor.zoho_id),
-        "date": payment_date,
-        "payment_mode": "Credit Card",
-        "paid_through_account_id": str(settings.zoho_po_ebay_paid_through_account_id),
-        "amount": amount,
-        "reference_number": po.po_number,
-        "description": "Auto-created from eBay purchase-order sync",
-        "bills": [
-            {
-                "bill_id": bill_id,
-                "amount_applied": amount,
-            }
-        ],
-    }
-
-
-async def _sync_ebay_bill_and_payment_for_purchase_order(
+async def _sync_ebay_bill_for_purchase_order(
     *,
     po: PurchaseOrder,
     zoho: ZohoClient,
@@ -999,11 +939,11 @@ async def _sync_ebay_bill_and_payment_for_purchase_order(
     if not _is_ebay_purchase_source(getattr(po, "source", None)):
         return
 
-    if po.zoho_bill_created and po.zoho_payment_created:
+    if po.zoho_bill_created:
         return
 
     if not po.zoho_id:
-        raise ValueError("Cannot sync EBAY bill/payment without purchase_order.zoho_id")
+        raise ValueError("Cannot sync EBAY bill without purchase_order.zoho_id")
 
     po.zoho_billing_error = None
 
@@ -1049,41 +989,6 @@ async def _sync_ebay_bill_and_payment_for_purchase_order(
     bill_id = str(po.zoho_bill_id or "").strip()
     if not bill_id:
         return
-
-    if po.zoho_payment_created:
-        return
-
-    existing_payments = await _list_bill_payments_with_inventory_fallback(zoho, bill_id)
-    if existing_payments:
-        po.zoho_payment_created = True
-        first_payment = existing_payments[0] if isinstance(existing_payments[0], dict) else {}
-        payment_id = str(
-            first_payment.get("payment_id")
-            or first_payment.get("vendorpayment_id")
-            or first_payment.get("vendor_payment_id")
-            or ""
-        ).strip()
-        if payment_id:
-            po.zoho_payment_id = payment_id
-        return
-
-    bill_payload_for_total = await zoho.get_bill(bill_id)
-    amount = _resolve_bill_amount(po, bill_payload_for_total or {})
-    if amount <= 0:
-        raise ValueError("payment amount must be > 0")
-
-    payment_payload = _build_ebay_payment_payload(po, bill_id, amount)
-    created_payment = await zoho.create_vendor_payment(payment_payload)
-
-    po.zoho_payment_created = True
-    payment_id = str(
-        (created_payment or {}).get("payment_id")
-        or (created_payment or {}).get("vendorpayment_id")
-        or (created_payment or {}).get("vendor_payment_id")
-        or ""
-    ).strip()
-    if payment_id:
-        po.zoho_payment_id = payment_id
 
 
 def _build_bill_recreate_payload(bill: dict[str, Any], *, purchaseorder_id: str) -> dict[str, Any]:
@@ -1539,10 +1444,8 @@ async def sync_po_outbound(
                 selectinload(PurchaseOrder.vendor),
                 selectinload(PurchaseOrder.items).selectinload(PurchaseOrderItem.variant),
                 undefer(PurchaseOrder.zoho_bill_created),
-                undefer(PurchaseOrder.zoho_payment_created),
                 undefer(PurchaseOrder.zoho_billed_checked_at),
                 undefer(PurchaseOrder.zoho_bill_id),
-                undefer(PurchaseOrder.zoho_payment_id),
                 undefer(PurchaseOrder.zoho_billing_error),
             )
             .where(PurchaseOrder.id == po_id)
@@ -1637,7 +1540,7 @@ async def sync_po_outbound(
                 logger.debug("sync_po_outbound: purchase_order %s unchanged (hash match)", po_id)
                 if enable_ebay_billing:
                     try:
-                        await _sync_ebay_bill_and_payment_for_purchase_order(
+                        await _sync_ebay_bill_for_purchase_order(
                             po=po,
                             zoho=zoho,
                             remote_po_hint=resolved_zoho_po if resolved_zoho_po_id else None,
@@ -1645,7 +1548,7 @@ async def sync_po_outbound(
                     except Exception as billing_exc:
                         po.zoho_billing_error = str(billing_exc)[:2000]
                         logger.exception(
-                            "sync_po_outbound: ebay bill/payment sync failed on hash-match path | po_id=%s zoho_po_id=%s",
+                            "sync_po_outbound: ebay bill sync failed on hash-match path | po_id=%s zoho_po_id=%s",
                             po_id,
                             po.zoho_id,
                         )
@@ -1759,7 +1662,7 @@ async def sync_po_outbound(
 
             if enable_ebay_billing:
                 try:
-                    await _sync_ebay_bill_and_payment_for_purchase_order(
+                    await _sync_ebay_bill_for_purchase_order(
                         po=po,
                         zoho=zoho,
                         remote_po_hint=zoho_po if resolved_zoho_po_id else None,
@@ -1767,7 +1670,7 @@ async def sync_po_outbound(
                 except Exception as billing_exc:
                     po.zoho_billing_error = str(billing_exc)[:2000]
                     logger.exception(
-                        "sync_po_outbound: ebay bill/payment sync failed | po_id=%s zoho_po_id=%s",
+                        "sync_po_outbound: ebay bill sync failed | po_id=%s zoho_po_id=%s",
                         po_id,
                         po.zoho_id,
                     )
