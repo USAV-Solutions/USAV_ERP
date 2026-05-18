@@ -408,9 +408,6 @@ async def bank_convert(
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
 
-    if format_type == "format_7":
-        raise HTTPException(status_code=501, detail="Format 7 parser is not implemented yet")
-
     parser = BANK_CONVERT_PARSERS.get(format_type)
     if not parser:
         raise HTTPException(status_code=400, detail="Unsupported format_type")

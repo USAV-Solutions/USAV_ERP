@@ -459,6 +459,92 @@ def parse_amazon(pdf_bytes: bytes) -> pd.DataFrame:
     return _format_mismatch_if_empty(df)
 
 
+def parse_paypal(pdf_bytes: bytes) -> pd.DataFrame:
+    date_pattern = re.compile(r"^(\d{1,2}/\d{1,2}/\d{2,4})\s+(.*)")
+    amounts_pattern = re.compile(
+        r"([\-\s]*\$?[\d,]+\.\d{2})\s+([\-\s]*\$?[\d,]+\.\d{2})\s+([\-\s]*\$?[\d,]+\.\d{2})$"
+    )
+
+    extracted_data: list[list[str]] = []
+    in_transaction_history = False
+    current_date: str | None = None
+    current_desc = ""
+    current_gross = ""
+    current_fee = ""
+    current_net = ""
+
+    with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text()
+            if not text:
+                continue
+
+            if "Transaction History" in text:
+                in_transaction_history = True
+            if not in_transaction_history:
+                continue
+
+            for line in text.split("\n"):
+                line = line.strip()
+
+                if (
+                    not line
+                    or line.startswith("Date")
+                    or "Page" in line
+                    or "PayPal ID:" in line
+                    or "Transaction History" in line
+                    or "To report an unauthorized" in line
+                    or "Merchant Account ID" in line
+                ):
+                    continue
+
+                match = date_pattern.match(line)
+                if match:
+                    if current_date:
+                        extracted_data.append(
+                            [current_date, current_desc.strip(" |"), current_gross, current_fee, current_net]
+                        )
+
+                    current_date = match.group(1)
+                    remainder = match.group(2).strip()
+                    amt_match = amounts_pattern.search(remainder)
+                    if amt_match:
+                        current_gross = _clean_amount(amt_match.group(1))
+                        current_fee = _clean_amount(amt_match.group(2))
+                        current_net = _clean_amount(amt_match.group(3))
+                        current_desc = remainder[: amt_match.start()].strip()
+                    else:
+                        current_desc = remainder
+                        current_gross = ""
+                        current_fee = ""
+                        current_net = ""
+                    continue
+
+                if not current_date:
+                    continue
+
+                amt_match = amounts_pattern.search(line)
+                if amt_match and not current_gross:
+                    current_gross = _clean_amount(amt_match.group(1))
+                    current_fee = _clean_amount(amt_match.group(2))
+                    current_net = _clean_amount(amt_match.group(3))
+                    line_without_amount = line[: amt_match.start()].strip()
+                    if line_without_amount:
+                        current_desc += f" | {line_without_amount}"
+                else:
+                    current_desc += f" | {line}"
+
+    if current_date:
+        extracted_data.append([current_date, current_desc.strip(" |"), current_gross, current_fee, current_net])
+
+    df = pd.DataFrame(extracted_data, columns=["Date", "Description & Name", "Gross", "Fee", "Net"])
+    if not df.empty:
+        for col in ["Gross", "Fee", "Net"]:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+        df = df.dropna(subset=["Net"])
+    return _format_mismatch_if_empty(df)
+
+
 BANK_CONVERT_PARSERS = {
     "boa_v1": parse_boa_v1,
     "boa_v2": parse_boa_v2,
@@ -466,4 +552,5 @@ BANK_CONVERT_PARSERS = {
     "amazon": parse_amazon,
     "apple": parse_apple,
     "chase": parse_chase,
+    "format_7": parse_paypal,
 }
