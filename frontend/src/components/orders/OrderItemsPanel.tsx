@@ -23,14 +23,17 @@ import {
   Chip,
   Stack,
   Button,
+  TextField,
 } from '@mui/material'
 import {
   LinkOff,
   Link as LinkIcon,
   CheckCircle,
+  Add,
 } from '@mui/icons-material'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  addOrderItem,
   getOrder,
   matchItem,
   confirmItem,
@@ -53,6 +56,7 @@ interface OrderItemsPanelProps {
 
 export default function OrderItemsPanel({ orderId, headerAction }: OrderItemsPanelProps) {
   const queryClient = useQueryClient()
+  const [showAddItem, setShowAddItem] = useState(false)
 
   const { data: order, isLoading, error } = useQuery<OrderDetail>({
     queryKey: ['order', orderId],
@@ -81,7 +85,7 @@ export default function OrderItemsPanel({ orderId, headerAction }: OrderItemsPan
     )
   }
 
-  if (!order || !order.items.length) {
+  if (!order) {
     return (
       <Typography variant="body2" color="text.secondary" sx={{ py: 2, px: 2 }}>
         No line items.
@@ -203,9 +207,37 @@ export default function OrderItemsPanel({ orderId, headerAction }: OrderItemsPan
           </TableRow>
         </TableHead>
         <TableBody>
+          {!order.items.length && (
+            <TableRow>
+              <TableCell colSpan={8} align="center">
+                <Typography variant="body2" color="text.secondary">
+                  No line items.
+                </Typography>
+              </TableCell>
+            </TableRow>
+          )}
           {order.items.map((item: OrderItemDetail) => (
             <ItemRow key={item.id} item={item} onAction={invalidate} />
           ))}
+          <TableRow>
+            <TableCell colSpan={8}>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<Add />}
+                onClick={() => setShowAddItem((current) => !current)}
+              >
+                {showAddItem ? 'Hide Add Item' : 'Add New Item'}
+              </Button>
+            </TableCell>
+          </TableRow>
+          {showAddItem && (
+            <AddOrderItemRow
+              orderId={orderId}
+              onChanged={invalidate}
+              onDone={() => setShowAddItem(false)}
+            />
+          )}
           <TableRow>
             <TableCell colSpan={3} />
             <TableCell align="right" sx={{ fontWeight: 600 }}>
@@ -221,6 +253,137 @@ export default function OrderItemsPanel({ orderId, headerAction }: OrderItemsPan
         </TableBody>
       </Table>
     </Box>
+  )
+}
+
+function AddOrderItemRow({ orderId, onChanged, onDone }: { orderId: number; onChanged: () => void; onDone: () => void }) {
+  const [externalItemId, setExternalItemId] = useState('')
+  const [externalSku, setExternalSku] = useState('')
+  const [itemName, setItemName] = useState('')
+  const [quantity, setQuantity] = useState('1')
+  const [unitPrice, setUnitPrice] = useState('0')
+  const [selectedVariant, setSelectedVariant] = useState<VariantSearchResult | null>(null)
+
+  const parsedQuantity = Number(quantity) || 0
+  const parsedUnitPrice = Number(unitPrice) || 0
+  const computedTotal = Math.max(parsedQuantity, 0) * Math.max(parsedUnitPrice, 0)
+
+  const addItemMutation = useMutation({
+    mutationFn: () =>
+      addOrderItem(orderId, {
+        external_item_id: externalItemId.trim() || undefined,
+        external_sku: externalSku.trim() || undefined,
+        item_name: itemName.trim(),
+        quantity: parsedQuantity,
+        unit_price: parsedUnitPrice,
+        total_price: computedTotal,
+        variant_id: selectedVariant?.id,
+      }),
+    onSuccess: () => {
+      setExternalItemId('')
+      setExternalSku('')
+      setItemName('')
+      setQuantity('1')
+      setUnitPrice('0')
+      setSelectedVariant(null)
+      onChanged()
+      onDone()
+    },
+  })
+
+  const createDisabled =
+    addItemMutation.isPending || !itemName.trim() || parsedQuantity <= 0 || parsedUnitPrice < 0
+
+  return (
+    <>
+      <TableRow sx={{ backgroundColor: 'background.paper' }}>
+        <TableCell>
+          <TextField
+            size="small"
+            value={itemName}
+            onChange={(e) => setItemName(e.target.value)}
+            placeholder="New line item name"
+            fullWidth
+            required
+          />
+        </TableCell>
+        <TableCell>
+          <TextField
+            size="small"
+            value={externalSku}
+            onChange={(e) => setExternalSku(e.target.value)}
+            placeholder="External SKU (optional)"
+            fullWidth
+          />
+        </TableCell>
+        <TableCell align="center">
+          <TextField
+            size="small"
+            type="number"
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+            inputProps={{ min: 1, step: 1 }}
+            sx={{ width: 90 }}
+          />
+        </TableCell>
+        <TableCell align="right">
+          <TextField
+            size="small"
+            type="number"
+            value={unitPrice}
+            onChange={(e) => setUnitPrice(e.target.value)}
+            inputProps={{ min: 0, step: 0.01 }}
+            sx={{ width: 110 }}
+          />
+        </TableCell>
+        <TableCell align="right">
+          {computedTotal.toFixed(2)}
+        </TableCell>
+        <TableCell align="center">
+          <Chip size="small" color={selectedVariant ? 'info' : 'error'} label={selectedVariant ? 'MATCHED' : 'UNMATCHED'} />
+        </TableCell>
+        <TableCell>
+          {selectedVariant?.full_sku || '—'}
+        </TableCell>
+        <TableCell align="center">
+          <Stack direction="row" spacing={1} justifyContent="center">
+            <Button
+              size="small"
+              variant="contained"
+              onClick={() => addItemMutation.mutate()}
+              disabled={createDisabled}
+            >
+              {addItemMutation.isPending ? 'Adding...' : 'Add Line'}
+            </Button>
+            <Button size="small" onClick={onDone} disabled={addItemMutation.isPending}>
+              Cancel
+            </Button>
+          </Stack>
+        </TableCell>
+      </TableRow>
+      <TableRow sx={{ backgroundColor: 'background.paper' }}>
+        <TableCell colSpan={8}>
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', md: 'center' }}>
+            <VariantSearchAutocomplete value={selectedVariant} onChange={setSelectedVariant} />
+            <TextField
+              size="small"
+              label="External Item ID"
+              value={externalItemId}
+              onChange={(e) => setExternalItemId(e.target.value)}
+              placeholder="Optional"
+              sx={{ minWidth: { xs: '100%', md: 260 } }}
+            />
+          </Stack>
+          {addItemMutation.isError && (
+            <Alert severity="error" sx={{ mt: 1 }}>
+              {(addItemMutation.error as { response?: { data?: { detail?: string } }; message?: string })?.response?.data?.detail
+                || (addItemMutation.error as { message?: string })?.message
+                || 'Failed to create line item.'}
+            </Alert>
+          )}
+        </TableCell>
+      </TableRow>
+    </>
   )
 }
 

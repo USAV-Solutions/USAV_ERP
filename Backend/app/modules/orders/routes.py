@@ -11,6 +11,7 @@ Synchronization
 Order CRUD
     GET  /orders                 – Paginated order list (the dashboard).
     GET  /orders/{order_id}      – Full order detail with line items.
+    POST /orders/{order_id}/items – Manually add an order line item.
     PATCH /orders/{order_id}     – Update order status / notes.
 
 SKU Resolution
@@ -27,7 +28,7 @@ from decimal import Decimal
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -43,11 +44,12 @@ from app.modules.orders.dependencies import (
     get_order_sync_service,
     get_sync_repo,
 )
-from app.modules.orders.models import OrderItemStatus, OrderPlatform, ShippingStatus
+from app.modules.orders.models import Order, OrderItem, OrderItemStatus, OrderPlatform, ShippingStatus
 from app.modules.orders.schemas.orders import (
     OrderBrief,
     OrderDetail,
     OrderItemBrief,
+    OrderItemCreateRequest,
     OrderItemConfirmRequest,
     OrderItemDetail,
     OrderItemMatchRequest,
@@ -66,7 +68,7 @@ from app.modules.orders.schemas.sync import (
     SyncResponse,
     SyncStatusResponse,
 )
-from app.models.entities import Customer
+from app.models.entities import Customer, ProductVariant, ZohoSyncStatus
 from app.modules.orders.service import OrderSyncService
 from app.repositories.orders.order_repository import OrderItemRepository, OrderRepository
 from app.repositories.orders.sync_repository import SyncRepository
@@ -115,6 +117,27 @@ def _compute_order_totals(order) -> tuple[Decimal, Decimal]:
         zoho_total = line_total + tax + shipping + inferred_handling
 
     return _quantize_money(platform_total), _quantize_money(zoho_total)
+
+
+async def _recalculate_order_totals(db: AsyncSession, order: Order) -> None:
+    line_total_raw = (
+        await db.execute(
+            select(func.coalesce(func.sum(OrderItem.total_price), 0)).where(OrderItem.order_id == order.id)
+        )
+    ).scalar_one()
+    line_total = _to_money_decimal(line_total_raw)
+
+    tax = _to_money_decimal(order.tax_amount)
+    shipping = _to_money_decimal(order.shipping_amount)
+    previous_subtotal = _to_money_decimal(order.subtotal_amount)
+    previous_total = _to_money_decimal(order.total_amount)
+
+    inferred_handling = previous_total - (previous_subtotal + tax + shipping)
+    if inferred_handling < Decimal("0"):
+        inferred_handling = Decimal("0")
+
+    order.subtotal_amount = _quantize_money(line_total)
+    order.total_amount = _quantize_money(line_total + tax + shipping + inferred_handling)
 
 _IMPORT_SOURCE_TO_PLATFORM: dict[SalesImportApiSource, str] = {
     SalesImportApiSource.ECWID: "ECWID",
@@ -1072,6 +1095,54 @@ async def get_order(
     detail.platform_total_amount = platform_total_amount
     detail.zoho_total_amount = zoho_total_amount
     return detail
+
+
+@router.post(
+    "/{order_id}/items",
+    response_model=OrderItemDetail,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_order_item(
+    order_id: int,
+    body: OrderItemCreateRequest,
+    order_repo: OrderRepository = Depends(get_order_repo),
+    order_item_repo: OrderItemRepository = Depends(get_order_item_repo),
+    db: AsyncSession = Depends(get_db),
+):
+    order = await order_repo.get(order_id)
+    if order is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Order {order_id} not found.",
+        )
+
+    if body.variant_id is not None:
+        variant = await db.get(ProductVariant, body.variant_id)
+        if variant is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"ProductVariant {body.variant_id} not found.",
+            )
+
+    created = await order_item_repo.create(
+        {
+            "order_id": order_id,
+            "external_item_id": body.external_item_id,
+            "external_sku": body.external_sku,
+            "variant_id": body.variant_id,
+            "status": OrderItemStatus.MATCHED if body.variant_id is not None else OrderItemStatus.UNMATCHED,
+            "item_name": body.item_name,
+            "quantity": body.quantity,
+            "unit_price": body.unit_price,
+            "total_price": body.total_price,
+        }
+    )
+    order.zoho_sync_status = ZohoSyncStatus.DIRTY
+    await _recalculate_order_totals(db, order)
+
+    await db.commit()
+    await db.refresh(created)
+    return OrderItemDetail.model_validate(created)
 
 
 @router.patch("/{order_id}", response_model=OrderDetail)

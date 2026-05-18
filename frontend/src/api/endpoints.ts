@@ -100,6 +100,7 @@ export const ORDERS = {
   // CRUD
   LIST: '/orders',
   ORDER: (id: number) => `/orders/${id}`,
+  ORDER_ITEMS: (id: number) => `/orders/${id}/items`,
   DELETE: (id: number) => `/orders/${id}`,
   UPDATE_STATUS: (id: number) => `/orders/${id}`,
   UPDATE_SHIPPING: (id: number) => `/orders/${id}/shipping`,
