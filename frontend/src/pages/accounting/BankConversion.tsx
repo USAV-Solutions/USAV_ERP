@@ -28,6 +28,7 @@ import sampleBoaV3Pdf from '../../assets/samples/sample_BoA3.pdf'
 import sampleAmazonPdf from '../../assets/samples/sample_amazon.pdf'
 import sampleApplePdf from '../../assets/samples/sample_apple.pdf'
 import sampleChasePdf from '../../assets/samples/sample_chase.pdf'
+import samplePaypalPdf from '../../assets/samples/paypal.pdf'
 
 type OutputType = 'csv' | 'xlsx'
 
@@ -45,6 +46,7 @@ const FORMAT_OPTIONS: FormatOption[] = [
   { id: 'amazon', label: 'Amazon Statement', samplePdfPath: sampleAmazonPdf, description: 'Amazon settlement statement format.' },
   { id: 'apple', label: 'Apple Card', samplePdfPath: sampleApplePdf, description: 'Apple Card statement format.' },
   { id: 'chase', label: 'Chase Statement', samplePdfPath: sampleChasePdf, description: 'Chase account activity section format.' },
+  { id: 'format_7', label: 'PayPal Format 7', samplePdfPath: samplePaypalPdf, description: 'PayPal transaction history with Gross/Fee/Net columns.' },
 ]
 
 function extractFilename(contentDisposition: string | undefined, fallback: string): string {
@@ -251,18 +253,13 @@ export default function BankConversion() {
               variant="contained"
               size="large"
               onClick={downloadConvertedFile}
-              disabled={!file || !selectedFormat || selectedFormat === 'format_7' || isConverting}
+              disabled={!file || !selectedFormat || isConverting}
             >
               {isConverting ? 'Converting...' : 'Convert & Download'}
             </Button>
             {selectedFormatMeta ? (
               <Typography variant="body2" color="text.secondary">
                 Active format: {selectedFormatMeta.label}
-              </Typography>
-            ) : null}
-            {selectedFormat === 'format_7' ? (
-              <Typography variant="body2" color="warning.main">
-                Format 7 placeholder only. Choose one of first 6 formats to convert.
               </Typography>
             ) : null}
           </Stack>
