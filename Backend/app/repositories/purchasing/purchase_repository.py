@@ -85,11 +85,20 @@ class PurchaseOrderRepository(BaseRepository[PurchaseOrder]):
                     )
                 )
             )
+            item_name_match_exists = exists(
+                select(1).where(
+                    and_(
+                        PurchaseOrderItem.purchase_order_id == PurchaseOrder.id,
+                        func.lower(PurchaseOrderItem.external_item_name).like(like_term),
+                    )
+                )
+            )
             stmt = stmt.where(
                 or_(
                     func.lower(PurchaseOrder.po_number).like(like_term),
                     func.lower(Vendor.name).like(like_term),
                     sku_match_exists,
+                    item_name_match_exists,
                 )
             )
 

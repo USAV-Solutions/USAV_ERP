@@ -615,7 +615,7 @@ export default function OrdersManagement() {
             <SearchField
               fullWidth
               size="small"
-              placeholder="Search order ID or customer..."
+              placeholder="Search order ID, customer, SKU, or item name..."
               value={searchInput}
               onChange={(value) => {
                 setSearchInput(value)
