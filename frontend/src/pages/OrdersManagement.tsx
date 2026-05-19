@@ -44,6 +44,7 @@ import {
   KeyboardArrowUp,
   CloudSync,
   FilterList,
+  NoteAlt,
 } from '@mui/icons-material'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 
@@ -765,15 +766,28 @@ export default function OrdersManagement() {
                               orderId={order.id}
                               headerAction={
                                 hasRole(['ADMIN']) ? (
-                                  <Button
-                                    size="small"
-                                    variant="outlined"
-                                    startIcon={syncingOrderId === order.id ? <CircularProgress size={14} /> : <CloudSync />}
-                                    disabled={syncingOrderId === order.id}
-                                    onClick={(e) => handleForceSync(order.id, e)}
-                                  >
-                                    Zoho Sync
-                                  </Button>
+                                  <Stack direction="row" spacing={1}>
+                                    <Button
+                                      size="small"
+                                      variant="outlined"
+                                      startIcon={<NoteAlt />}
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        openHoldPrompt(order)
+                                      }}
+                                    >
+                                      Edit Metadata
+                                    </Button>
+                                    <Button
+                                      size="small"
+                                      variant="outlined"
+                                      startIcon={syncingOrderId === order.id ? <CircularProgress size={14} /> : <CloudSync />}
+                                      disabled={syncingOrderId === order.id}
+                                      onClick={(e) => handleForceSync(order.id, e)}
+                                    >
+                                      Zoho Sync
+                                    </Button>
+                                  </Stack>
                                 ) : undefined
                               }
                             />

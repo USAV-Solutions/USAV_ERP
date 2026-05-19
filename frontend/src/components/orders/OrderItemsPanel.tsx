@@ -101,7 +101,7 @@ export default function OrderItemsPanel({ orderId, headerAction }: OrderItemsPan
         alignItems="center"
         sx={{ mb: 1.25, flexWrap: 'nowrap', overflow: 'hidden' }}
       >
-        <Box sx={{ minWidth: 160, maxWidth: 260, flexShrink: 1, overflow: 'hidden' }}>
+        <Box sx={{ minWidth: 140, maxWidth: 220, flexShrink: 1, overflow: 'hidden' }}>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
             Customer
           </Typography>
@@ -125,7 +125,7 @@ export default function OrderItemsPanel({ orderId, headerAction }: OrderItemsPan
             {order.external_order_number || order.external_order_id}
           </Typography>
         </Box>
-        <Box sx={{ minWidth: 80, flexShrink: 0 }}>
+        <Box sx={{ minWidth: 68, flexShrink: 0 }}>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
             Items
           </Typography>
@@ -133,7 +133,7 @@ export default function OrderItemsPanel({ orderId, headerAction }: OrderItemsPan
             {order.items.length}
           </Typography>
         </Box>
-        <Box sx={{ minWidth: 140, maxWidth: 220, flexShrink: 1, overflow: 'hidden' }}>
+        <Box sx={{ minWidth: 120, maxWidth: 190, flexShrink: 1, overflow: 'hidden' }}>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
             Source
           </Typography>
@@ -142,7 +142,7 @@ export default function OrderItemsPanel({ orderId, headerAction }: OrderItemsPan
           </Typography>
         </Box>
         {(order.platform === 'ECWID' || order.platform === 'SHOPIFY') && (
-          <Box sx={{ minWidth: 80, flexShrink: 0 }}>
+          <Box sx={{ minWidth: 68, flexShrink: 0 }}>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
               Tax
             </Typography>
