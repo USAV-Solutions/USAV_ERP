@@ -1071,7 +1071,7 @@ export default function PurchasingManagement() {
             <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ mb: 2 }} alignItems={{ xs: 'stretch', md: 'center' }}>
               <TextField
                 size="small"
-                label="Search PO # / Vendor / SKU"
+                label="Search PO # / Vendor / SKU / Item Name"
                 value={poNumberSearch}
                 onChange={(e) => {
                   setPoNumberSearch(e.target.value)
