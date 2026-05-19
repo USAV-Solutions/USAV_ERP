@@ -460,84 +460,71 @@ def parse_amazon(pdf_bytes: bytes) -> pd.DataFrame:
 
 
 def parse_paypal(pdf_bytes: bytes) -> pd.DataFrame:
-    date_pattern = re.compile(r"^(\d{1,2}/\d{1,2}/\d{2,4})\s+(.*)")
-    amounts_pattern = re.compile(
-        r"([\-\s]*\$?[\d,]+\.\d{2})\s+([\-\s]*\$?[\d,]+\.\d{2})\s+([\-\s]*\$?[\d,]+\.\d{2})$"
-    )
-
     extracted_data: list[list[str]] = []
-    in_transaction_history = False
-    current_date: str | None = None
-    current_desc = ""
-    current_gross = ""
-    current_fee = ""
-    current_net = ""
 
     with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
         for page in pdf.pages:
-            text = page.extract_text()
-            if not text:
-                continue
+            tables = page.extract_tables() or []
+            for table in tables:
+                for raw_row in table:
+                    row = [str(cell).strip() if cell else "" for cell in (raw_row or [])]
+                    if not row or not re.match(r"^\d{1,2}/\d{1,2}/\d{2,4}", row[0]):
+                        continue
 
-            if "Transaction History" in text:
-                in_transaction_history = True
-            if not in_transaction_history:
-                continue
+                    date = row[0].split("\n")[0].strip()
+                    desc = ""
+                    name_email = ""
+                    gross = ""
+                    fee = ""
+                    net = ""
 
-            for line in text.split("\n"):
-                line = line.strip()
+                    if len(row) >= 6:
+                        desc = row[1]
+                        name_email = row[2]
+                        gross = row[3]
+                        fee = row[4]
+                        net = row[5]
+                    elif len(row) == 5:
+                        combined_text = row[1]
+                        gross = row[2]
+                        fee = row[3]
+                        net = row[4]
 
-                if (
-                    not line
-                    or line.startswith("Date")
-                    or "Page" in line
-                    or "PayPal ID:" in line
-                    or "Transaction History" in line
-                    or "To report an unauthorized" in line
-                    or "Merchant Account ID" in line
-                ):
-                    continue
-
-                match = date_pattern.match(line)
-                if match:
-                    if current_date:
-                        extracted_data.append(
-                            [current_date, current_desc.strip(" |"), current_gross, current_fee, current_net]
-                        )
-
-                    current_date = match.group(1)
-                    remainder = match.group(2).strip()
-                    amt_match = amounts_pattern.search(remainder)
-                    if amt_match:
-                        current_gross = _clean_amount(amt_match.group(1))
-                        current_fee = _clean_amount(amt_match.group(2))
-                        current_net = _clean_amount(amt_match.group(3))
-                        current_desc = remainder[: amt_match.start()].strip()
+                        id_match = re.search(r"(ID:\s*[A-Z0-9]+)", combined_text)
+                        if id_match:
+                            split_point = id_match.end()
+                            desc = combined_text[:split_point].strip()
+                            name_email = combined_text[split_point:].strip()
+                        else:
+                            desc = combined_text
                     else:
-                        current_desc = remainder
-                        current_gross = ""
-                        current_fee = ""
-                        current_net = ""
-                    continue
+                        continue
 
-                if not current_date:
-                    continue
+                    trans_type = desc
+                    trans_id = ""
+                    if "ID:" in desc:
+                        parts = desc.split("ID:", 1)
+                        trans_type = parts[0].strip()
+                        trans_id = parts[1].strip()
+                    trans_type = " ".join(trans_type.split())
 
-                amt_match = amounts_pattern.search(line)
-                if amt_match and not current_gross:
-                    current_gross = _clean_amount(amt_match.group(1))
-                    current_fee = _clean_amount(amt_match.group(2))
-                    current_net = _clean_amount(amt_match.group(3))
-                    line_without_amount = line[: amt_match.start()].strip()
-                    if line_without_amount:
-                        current_desc += f" | {line_without_amount}"
-                else:
-                    current_desc += f" | {line}"
+                    email = ""
+                    name = ""
+                    if name_email:
+                        lines = name_email.split("\n")
+                        email_lines = [line.strip() for line in lines if "@" in line]
+                        name_lines = [line.strip() for line in lines if "@" not in line]
+                        if email_lines:
+                            email = email_lines[0]
+                        name = " ".join(" ".join(name_lines).split())
 
-    if current_date:
-        extracted_data.append([current_date, current_desc.strip(" |"), current_gross, current_fee, current_net])
+                    gross = re.sub(r"[^\d\.\-]", "", gross)
+                    fee = re.sub(r"[^\d\.\-]", "", fee)
+                    net = re.sub(r"[^\d\.\-]", "", net)
 
-    df = pd.DataFrame(extracted_data, columns=["Date", "Description & Name", "Gross", "Fee", "Net"])
+                    extracted_data.append([date, trans_type, trans_id, name, email, gross, fee, net])
+
+    df = pd.DataFrame(extracted_data, columns=["Date", "Type", "ID", "Name", "Email", "Gross", "Fee", "Net"])
     if not df.empty:
         for col in ["Gross", "Fee", "Net"]:
             df[col] = pd.to_numeric(df[col], errors="coerce")
