@@ -128,6 +128,7 @@ export const PURCHASING = {
   PURCHASE_ITEMS: (id: number) => `/purchases/${id}/items`,
   PURCHASE_ITEM: (itemId: number) => `/purchases/items/${itemId}`,
   IMPORT_ZOHO: '/purchases/import/zoho',
+  BACKFILL_DELIVERY_STATUS: '/purchases/backfill-delivery-status',
   IMPORT_PURCHASE_FILE: '/purchases/import/file',
   IMPORT_EBAY: '/purchases/import/ebay',
   IMPORT_GOODWILL_SHIPPED_CSV: '/purchases/import/goodwill-csv',

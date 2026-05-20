@@ -30,6 +30,7 @@ from app.modules.purchasing.schemas import (
     PurchaseFileImportResponse,
     PurchaseFileImportSource,
     PurchaseOrderCreate,
+    PurchaseOrderDeliveryBackfillResponse,
     PurchaseOrderItemCreate,
     PurchaseOrderItemMatchRequest,
     PurchaseOrderItemResponse,
@@ -255,6 +256,32 @@ def _map_zoho_po_status(status_raw: object) -> PurchaseDeliverStatus:
     if status_text in {"closed", "received"}:
         return PurchaseDeliverStatus.DELIVERED
     return PurchaseDeliverStatus.CREATED
+
+
+def _extract_receive_purchaseorder_id(receive: dict) -> str | None:
+    if not isinstance(receive, dict):
+        return None
+
+    direct = str(
+        receive.get("purchaseorder_id")
+        or receive.get("purchase_order_id")
+        or ""
+    ).strip()
+    if direct:
+        return direct
+
+    po_obj = receive.get("purchaseorder") or receive.get("purchase_order")
+    if isinstance(po_obj, dict):
+        nested = str(
+            po_obj.get("purchaseorder_id")
+            or po_obj.get("purchase_order_id")
+            or po_obj.get("purchaseorderid")
+            or ""
+        ).strip()
+        if nested:
+            return nested
+
+    return None
 
 
 def _extract_custom_field_decimal(po_payload: dict, *keys: str) -> Decimal:
@@ -956,6 +983,74 @@ async def import_purchasing_from_zoho(
 
     await db.commit()
     return result
+
+
+@router.post(
+    "/purchases/backfill-delivery-status",
+    response_model=PurchaseOrderDeliveryBackfillResponse,
+)
+async def backfill_purchase_order_delivery_status(
+    _current_user: AdminOrWarehouseUser,
+    receive_date_from: Annotated[date, Query()] = date(2026, 1, 1),
+    receive_date_to: Annotated[date | None, Query()] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Backfill local PO delivery status from Zoho purchase receives."""
+    effective_end_date = receive_date_to or date.today()
+    if receive_date_from > effective_end_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="receive_date_from must be less than or equal to receive_date_to",
+        )
+
+    zoho = ZohoClient()
+    zoho_po_ids_with_receives: set[str] = set()
+    page = 1
+    pages_scanned = 0
+    receives_seen = 0
+    per_page = 200
+
+    while True:
+        receives = await zoho.list_purchase_receives(
+            date_start=receive_date_from.isoformat(),
+            date_end=effective_end_date.isoformat(),
+            page=page,
+            per_page=per_page,
+        )
+        pages_scanned += 1
+        receives_seen += len(receives)
+
+        for receive in receives:
+            po_id = _extract_receive_purchaseorder_id(receive)
+            if po_id:
+                zoho_po_ids_with_receives.add(po_id)
+
+        if len(receives) < per_page:
+            break
+        page += 1
+
+    local_purchase_orders_marked_delivered = 0
+    if zoho_po_ids_with_receives:
+        stmt = select(PurchaseOrder).where(PurchaseOrder.zoho_id.in_(zoho_po_ids_with_receives))
+        local_rows = (await db.execute(stmt)).scalars().all()
+        for po in local_rows:
+            if po.deliver_status != PurchaseDeliverStatus.DELIVERED:
+                po.deliver_status = PurchaseDeliverStatus.DELIVERED
+                po.zoho_sync_status = ZohoSyncStatus.DIRTY
+                po.zoho_sync_error = None
+                db.add(po)
+                local_purchase_orders_marked_delivered += 1
+
+    await db.commit()
+
+    return PurchaseOrderDeliveryBackfillResponse(
+        receive_date_from=receive_date_from,
+        receive_date_to=effective_end_date,
+        pages_scanned=pages_scanned,
+        receives_seen=receives_seen,
+        unique_zoho_purchase_orders=len(zoho_po_ids_with_receives),
+        local_purchase_orders_marked_delivered=local_purchase_orders_marked_delivered,
+    )
 
 
 async def _resolve_vendor_id(
