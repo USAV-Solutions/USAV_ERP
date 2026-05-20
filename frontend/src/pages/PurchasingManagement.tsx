@@ -1214,7 +1214,7 @@ export default function PurchasingManagement() {
                       <TableCell>Vendor</TableCell>
                       <TableCell>Date</TableCell>
                       <TableCell>Tracking #</TableCell>
-                      <TableCell>Expected Delivery</TableCell>
+                      <TableCell>Delivery Status</TableCell>
                       <TableCell align="center">Unmatched</TableCell>
                       <TableCell align="right">Total</TableCell>
                       <TableCell align="center">Zoho Sync Status</TableCell>
@@ -1244,7 +1244,9 @@ export default function PurchasingManagement() {
                             <TableCell>{po.vendor?.name || po.vendor_id}</TableCell>
                             <TableCell>{po.order_date}</TableCell>
                             <TableCell>{po.tracking_number || '-'}</TableCell>
-                            <TableCell>{po.expected_delivery_date || '-'}</TableCell>
+                            <TableCell>
+                              <Chip size="small" color={statusColor[po.deliver_status]} label={po.deliver_status} />
+                            </TableCell>
                             <TableCell align="center">
                               <Chip
                                 size="small"
@@ -1300,9 +1302,11 @@ export default function PurchasingManagement() {
 
                                     <Box sx={{ minWidth: 105, maxWidth: 150, flexShrink: 0, overflow: 'hidden' }}>
                                       <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                                        Status
+                                        Expected Delivery
                                       </Typography>
-                                      <Chip size="small" color={statusColor[po.deliver_status]} label={po.deliver_status} />
+                                      <Typography variant="body2" sx={{ fontSize: '0.82rem' }}>
+                                        {po.expected_delivery_date || '-'}
+                                      </Typography>
                                     </Box>
 
                                     <Box sx={{ minWidth: 100, maxWidth: 120, flexShrink: 0, overflow: 'hidden' }}>
