@@ -495,6 +495,7 @@ async def _sync_single_composite_variant(
             child_variant_stmt = (
                 select(ProductVariant)
                 .where(ProductVariant.identity_id == component.child_identity_id)
+                .where(ProductVariant.is_active == True)
                 .order_by(ProductVariant.id)
                 .limit(1)
             )
@@ -527,10 +528,11 @@ async def _sync_single_composite_variant(
                     child_item_id,
                 )
 
-        if child_item_id:
+        normalized_child_item_id = str(child_item_id).strip() if child_item_id is not None else ""
+        if normalized_child_item_id:
             component_items.append(
                 {
-                    "item_id": child_item_id,
+                    "item_id": normalized_child_item_id,
                     "quantity": int(component.quantity_required),
                 }
             )
@@ -1298,4 +1300,3 @@ async def stop_zoho_bulk_sync(
             _CURRENT_JOB.status = "stopping"
 
         return _as_progress_response(_CURRENT_JOB)
-

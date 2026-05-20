@@ -739,6 +739,11 @@ def _is_invalid_branch_id_error(exc: Exception) -> bool:
     return "invalid value passed for branch_id" in message_lc or '"code":400002' in message_lc
 
 
+def _is_salesorder_already_confirmed_error(exc: Exception) -> bool:
+    message_lc = str(exc).lower()
+    return "confirmed" in message_lc and "already" in message_lc
+
+
 def _strip_po_location_fields(payload: dict[str, Any]) -> dict[str, Any]:
     sanitized: dict[str, Any] = {k: v for k, v in payload.items() if k not in {"location_id", "branch_id"}}
     line_items = payload.get("line_items")
@@ -2116,6 +2121,19 @@ async def sync_order_outbound(order_id: int) -> None:
             so_id = str(so.get("salesorder_id", ""))
             if so_id:
                 order.zoho_id = so_id
+
+            if order.zoho_id:
+                try:
+                    await zoho.confirm_salesorder(order.zoho_id)
+                except Exception as confirm_exc:
+                    if _is_salesorder_already_confirmed_error(confirm_exc):
+                        logger.debug(
+                            "sync_order_outbound: salesorder already confirmed in Zoho | order_id=%s zoho_id=%s",
+                            order_id,
+                            order.zoho_id,
+                        )
+                    else:
+                        raise
 
             order.zoho_last_sync_hash = new_hash
             order.zoho_last_synced_at = datetime.now()

@@ -23,7 +23,9 @@ Zoho client/sync engine used for outbound and inbound synchronization flows.
 - Zoho can return code `15` for sales-order `shipping_address` length; outbound sales-order payload now omits `shipping_address` and relies on `customer_id` contact addresses instead.
 - Sales-order outbound payload now sends `shipping_charge` from `Order.shipping_amount` for all sources and always syncs totals using Zoho-total math: line total + shipping + inferred handling, plus tax only for non-marketplace platforms.
 - Sales-order outbound tax handling is platform-based: for marketplaces (`AMAZON`, `WALMART`, all `EBAY_*`) payload tax is forced to 0 (via zero tax adjustment and line `tax_percentage=0`); for other ecommerce platforms (for example `ECWID`, `SHOPIFY`) tax is preserved in payload adjustment.
+- Sales-order outbound sync now calls Zoho confirm (`/salesorders/{id}/status/confirmed`) after create/update; errors that indicate “already confirmed” are treated as non-fatal, while other confirm failures keep sync in `ERROR`.
 - Purchase-order outbound line `rate` should be derived from `PurchaseOrderItem.total_price / quantity` when available (not only `unit_price`) to avoid cent drift on multi-qty lines (example: `26.99 / 5 = 5.398`).
+- Zoho composite-item create/update payloads must use `mapped_items` (not `component_items`); Zoho returns `code:4` / `Invalid value passed for mapped_items` when the mapping key or mapped entry shape is wrong.
 
 ## Child Folders
 - (No child folders)
