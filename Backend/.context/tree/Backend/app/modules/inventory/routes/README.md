@@ -14,6 +14,7 @@ Inventory route handlers split by feature surface (variants, listings, images, e
 - `thumbnail_url` is SKU-path scoped; when `full_sku` changes, clear/recompute `thumbnail_url` to avoid cross-SKU thumbnails being shown.
 - Product-to-kit conversion now has a dedicated route: `POST /variants/{variant_id}/convert-to-kit` (Admin/Sales). It creates a new `K` identity+variant, writes bundle components, migrates linked rows (`platform_listing`, `inventory_item`, `order_item`, `purchase_order_item`), and deactivates the source variant in one transaction.
 - `convert-to-kit` child lines accept only Product/Part variants, reject Bundle/Kit/self/duplicate-child-identity lines, and intentionally do not call Zoho APIs; the new kit variant remains pending for manual Zoho sync.
+- Zoho composite sync resolves bundle/kit child dependencies from active child variants only; inactive child variants are ignored to avoid sending stale Zoho `item_id` values in composite mapped items.
 - Variants export endpoint `GET /variants/export/zoho-import.csv` now treats Kits like Bundles for `exclude_bundles=true` (both `B` and `K` are excluded).
 - Identity creation flow now auto-generates the base variant for `K` identities (same as Product/Part/Bundle), so downstream variant/search screens see newly created Kits immediately.
 - eBay publish route now uses Inventory API sequence (`PUT inventory_item` -> create/update `offer` -> `publish`) and stores `platform_metadata.publish_engine=inventory_api_v1`, `platform_metadata.offer_id`, and `external_ref_id=listingId`.

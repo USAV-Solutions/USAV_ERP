@@ -413,27 +413,81 @@ class ZohoClient:
         )
         return result
 
+    @staticmethod
+    def _normalize_mapped_items(raw_items: Any) -> list[dict[str, Any]]:
+        """Normalize mapped-items payload for Zoho composite APIs."""
+        if not isinstance(raw_items, list):
+            return []
+
+        normalized: list[dict[str, Any]] = []
+        for raw_item in raw_items:
+            if not isinstance(raw_item, dict):
+                continue
+
+            raw_item_id = raw_item.get("item_id")
+            if raw_item_id is None:
+                continue
+            item_id = str(raw_item_id).strip()
+            if not item_id:
+                continue
+
+            raw_quantity = raw_item.get("quantity", 1)
+            try:
+                quantity_value = float(raw_quantity)
+            except (TypeError, ValueError):
+                continue
+            if quantity_value <= 0:
+                continue
+
+            quantity: int | float
+            if quantity_value.is_integer():
+                quantity = int(quantity_value)
+            else:
+                quantity = quantity_value
+
+            normalized.append(
+                {
+                    "item_id": item_id,
+                    "quantity": quantity,
+                }
+            )
+
+        return normalized
+
+    def _prepare_composite_payload(self, composite_data: dict) -> dict:
+        """Map internal composite payload keys to Zoho's API contract."""
+        payload = dict(composite_data)
+        raw_mapped_items = payload.get("mapped_items")
+        if raw_mapped_items is None:
+            raw_mapped_items = payload.get("component_items")
+
+        payload.pop("component_items", None)
+        payload["mapped_items"] = self._normalize_mapped_items(raw_mapped_items)
+        return payload
+
     async def create_composite_item(self, composite_data: dict) -> dict:
         """Create a composite item in Zoho Inventory."""
+        request_payload = self._prepare_composite_payload(composite_data)
         logger.debug(
-            "[DEBUG.EXTERNAL_PAYLOAD] Zoho create_composite_item payload | sku=%s component_count=%s payload=%s",
-            composite_data.get("sku"),
-            len(composite_data.get("component_items", [])),
-            composite_data,
+            "[DEBUG.EXTERNAL_PAYLOAD] Zoho create_composite_item payload | sku=%s mapped_count=%s payload=%s",
+            request_payload.get("sku"),
+            len(request_payload.get("mapped_items", [])),
+            request_payload,
         )
         result = await self._request(
             "POST",
             "/compositeitems",
-            data={"JSONString": json.dumps(composite_data)},
+            data={"JSONString": json.dumps(request_payload)},
         )
         return result.get("composite_item", {})
 
     async def update_composite_item(self, composite_item_id: str, composite_data: dict) -> dict:
         """Update a Zoho composite item."""
+        request_payload = self._prepare_composite_payload(composite_data)
         result = await self._request(
             "PUT",
             f"/compositeitems/{composite_item_id}",
-            data={"JSONString": json.dumps(composite_data)},
+            data={"JSONString": json.dumps(request_payload)},
         )
         return result.get("composite_item", {})
 
@@ -459,7 +513,7 @@ class ZohoClient:
             "sku": sku,
             "rate": rate,
             "description": description or "",
-            "component_items": component_items,
+            "mapped_items": component_items,
             **extra_fields,
         }
 
@@ -1082,5 +1136,4 @@ class ZohoClient:
         except Exception as e:
             logger.error(f"Zoho health check failed: {e}")
             return False
-
 
