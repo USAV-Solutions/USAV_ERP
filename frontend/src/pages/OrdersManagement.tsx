@@ -138,7 +138,7 @@ export default function OrdersManagement() {
 
   // Pagination
   const [page, setPage] = useState(0)
-  const [rowsPerPage, setRowsPerPage] = useState(25)
+  const [rowsPerPage, setRowsPerPage] = useState(50)
 
   // Filters
   const [platformFilter, setPlatformFilter] = useState<OrderPlatform | ''>('')

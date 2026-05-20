@@ -5,6 +5,7 @@ from app.modules.purchasing.schemas.purchasing import (
     ItemReceipt,
     PurchaseFileImportResponse,
     PurchaseFileImportSource,
+    PurchaseOrderDeliveryBackfillResponse,
     PurchaseOrderCreate,
     PurchaseOrderItemCreate,
     PurchaseOrderItemMatchRequest,
@@ -38,4 +39,5 @@ __all__ = [
     "PurchaseFileImportSource",
     "PurchaseFileImportResponse",
     "GoodwillCsvImportResponse",
+    "PurchaseOrderDeliveryBackfillResponse",
 ]

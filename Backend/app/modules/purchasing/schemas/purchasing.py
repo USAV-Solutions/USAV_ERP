@@ -188,3 +188,12 @@ class GoodwillCsvImportResponse(BaseModel):
     purchase_order_items_updated: int = 0
     source_rows_seen: int = 0
     source_rows_skipped: int = 0
+
+
+class PurchaseOrderDeliveryBackfillResponse(BaseModel):
+    receive_date_from: date
+    receive_date_to: date
+    pages_scanned: int = 0
+    receives_seen: int = 0
+    unique_zoho_purchase_orders: int = 0
+    local_purchase_orders_marked_delivered: int = 0

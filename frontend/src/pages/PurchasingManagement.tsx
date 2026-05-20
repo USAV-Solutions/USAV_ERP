@@ -21,6 +21,7 @@ import {
   FormControlLabel,
   InputLabel,
   MenuItem,
+  Menu,
   Select,
   Table,
   TableBody,
@@ -42,11 +43,13 @@ import {
   Visibility,
   Link as LinkIcon,
   LinkOff,
+  ArrowDropDown,
 } from '@mui/icons-material'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
   addPurchaseOrderItem,
+  backfillPurchaseOrderDeliveryStatus,
   createPurchaseOrder,
   createVendor,
   deletePurchaseOrder,
@@ -66,6 +69,7 @@ import type {
   PurchaseOrderCreate,
   PurchaseDeliverStatus,
   PurchaseOrderItem,
+  PurchaseOrderDeliveryBackfillResponse,
   PurchaseOrderUpdate,
   PurchaseFileImportSource,
   VendorCreate,
@@ -564,7 +568,7 @@ export default function PurchasingManagement() {
   const queryClient = useQueryClient()
 
   const [page, setPage] = useState(0)
-  const [rowsPerPage, setRowsPerPage] = useState(25)
+  const [rowsPerPage, setRowsPerPage] = useState(50)
   const [sortBy, setSortBy] = useState<'order_date' | 'po_number' | 'total_amount' | 'created_at'>('order_date')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [deliverStatusFilter, setDeliverStatusFilter] = useState<PurchaseDeliverStatus | 'ALL'>('ALL')
@@ -584,6 +588,7 @@ export default function PurchasingManagement() {
   const [editingPoId, setEditingPoId] = useState<number | null>(null)
   const [editVendorSearchInput, setEditVendorSearchInput] = useState('')
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false)
+  const [zohoActionsAnchorEl, setZohoActionsAnchorEl] = useState<null | HTMLElement>(null)
   const [bulkLoading, setBulkLoading] = useState(false)
   const [bulkError, setBulkError] = useState<string | null>(null)
   const [bulkTotal, setBulkTotal] = useState(0)
@@ -599,6 +604,9 @@ export default function PurchasingManagement() {
   const [importZohoRangeOpen, setImportZohoRangeOpen] = useState(false)
   const [importZohoRangeFrom, setImportZohoRangeFrom] = useState('')
   const [importZohoRangeTo, setImportZohoRangeTo] = useState('')
+  const [backfillZohoDeliveryOpen, setBackfillZohoDeliveryOpen] = useState(false)
+  const [backfillZohoDeliveryFrom, setBackfillZohoDeliveryFrom] = useState('')
+  const [backfillZohoDeliveryTo, setBackfillZohoDeliveryTo] = useState('')
   const [purchaseImportSource, setPurchaseImportSource] = useState<PurchaseFileImportSource>('amazon')
   const [expandedPoId, setExpandedPoId] = useState<number | null>(null)
   const [snackbar, setSnackbar] = useState<{ open: boolean; msg: string; severity: 'success' | 'error' }>({
@@ -737,6 +745,7 @@ export default function PurchasingManagement() {
   const hasNextPage = pagedOrders.length > rowsPerPage
   const orders = hasNextPage ? pagedOrders.slice(0, rowsPerPage) : pagedOrders
   const paginationCount = page * rowsPerPage + orders.length + (hasNextPage ? 1 : 0)
+  const totalPurchaseCount = purchaseSummary?.totalOrders ?? paginationCount
 
   const refreshPurchases = async () => {
     await queryClient.invalidateQueries({ queryKey: ['purchases'] })
@@ -848,6 +857,31 @@ export default function PurchasingManagement() {
     },
   })
 
+  const backfillZohoDeliveryMutation = useMutation({
+    mutationFn: (params: { receiveDateFrom?: string; receiveDateTo?: string }) =>
+      backfillPurchaseOrderDeliveryStatus(params),
+    onSuccess: async (res: PurchaseOrderDeliveryBackfillResponse) => {
+      await queryClient.invalidateQueries({ queryKey: ['purchases'] })
+      setBackfillZohoDeliveryOpen(false)
+      setSnackbar({
+        open: true,
+        severity: 'success',
+        msg:
+          `Backfill done (${res.receive_date_from} to ${res.receive_date_to}): ` +
+          `${res.local_purchase_orders_marked_delivered} PO marked DELIVERED, ` +
+          `${res.unique_zoho_purchase_orders} Zoho PO with receives, ` +
+          `${res.receives_seen} receives scanned across ${res.pages_scanned} pages.`,
+      })
+    },
+    onError: (error: { response?: { data?: { detail?: string } }; message?: string }) => {
+      setSnackbar({
+        open: true,
+        msg: error.response?.data?.detail || error.message || 'Failed to backfill Zoho delivery status.',
+        severity: 'error',
+      })
+    },
+  })
+
   const importPurchaseFileMutation = useMutation({
     mutationFn: ({ source, file }: { source: PurchaseFileImportSource; file: File }) =>
       importPurchasesFromFile(source, file),
@@ -899,6 +933,7 @@ export default function PurchasingManagement() {
   })
 
   const isEbayPurchaseSource = ebayPurchaseSources.includes(purchaseImportSource)
+  const isZohoActionsMenuOpen = Boolean(zohoActionsAnchorEl)
 
   const handlePurchaseImportSelected = (event: ChangeEvent<HTMLInputElement>) => {
     if (isEbayPurchaseSource) {
@@ -932,6 +967,26 @@ export default function PurchasingManagement() {
   })
 
   const canSyncPo = (po: PurchaseOrder) => po.items.length > 0
+
+  const openSyncPeriodDialog = () => {
+    setBulkDialogOpen(true)
+    setBulkError(null)
+    setBulkDone(false)
+    setBulkTotal(0)
+    setBulkProgress({ queued: 0, success: 0, failed: 0 })
+  }
+
+  const openImportRangeDialog = () => {
+    setImportZohoRangeFrom(orderDateFrom)
+    setImportZohoRangeTo(orderDateTo)
+    setImportZohoRangeOpen(true)
+  }
+
+  const backfillInvalidRange = Boolean(
+    backfillZohoDeliveryFrom &&
+      backfillZohoDeliveryTo &&
+      backfillZohoDeliveryFrom > backfillZohoDeliveryTo,
+  )
 
   const handleBulkSync = async () => {
     setBulkLoading(true)
@@ -1020,27 +1075,44 @@ export default function PurchasingManagement() {
         <Stack direction="row" spacing={1}>
           <Button
             variant="outlined"
-            onClick={() => {
-              setBulkDialogOpen(true)
-              setBulkError(null)
-              setBulkDone(false)
-              setBulkTotal(0)
-              setBulkProgress({ queued: 0, success: 0, failed: 0 })
-            }}
+            endIcon={<ArrowDropDown />}
+            onClick={(event) => setZohoActionsAnchorEl(event.currentTarget)}
+            disabled={bulkLoading || importZohoRangeMutation.isPending || backfillZohoDeliveryMutation.isPending}
           >
-            Sync period to Zoho
+            Zoho Action
           </Button>
-          <Button
-            variant="outlined"
-            onClick={() => {
-              setImportZohoRangeFrom(orderDateFrom)
-              setImportZohoRangeTo(orderDateTo)
-              setImportZohoRangeOpen(true)
-            }}
-            disabled={importZohoRangeMutation.isPending}
+          <Menu
+            anchorEl={zohoActionsAnchorEl}
+            open={isZohoActionsMenuOpen}
+            onClose={() => setZohoActionsAnchorEl(null)}
           >
-            {importZohoRangeMutation.isPending ? 'Importing range...' : 'Import Range from Zoho'}
-          </Button>
+            <MenuItem
+              onClick={() => {
+                setZohoActionsAnchorEl(null)
+                openSyncPeriodDialog()
+              }}
+            >
+              Sync Period to Zoho
+            </MenuItem>
+            <MenuItem
+              onClick={() => {
+                setZohoActionsAnchorEl(null)
+                openImportRangeDialog()
+              }}
+              disabled={importZohoRangeMutation.isPending}
+            >
+              Import Range from Zoho
+            </MenuItem>
+            <MenuItem
+              onClick={() => {
+                setZohoActionsAnchorEl(null)
+                setBackfillZohoDeliveryOpen(true)
+              }}
+              disabled={backfillZohoDeliveryMutation.isPending}
+            >
+              Backfill Zoho Delivery
+            </MenuItem>
+          </Menu>
           <Button
             variant="outlined"
             onClick={() => setImportPurchaseOpen(true)}
@@ -1385,7 +1457,7 @@ export default function PurchasingManagement() {
               </TableContainer>
             )}
             <TablePaginationWithPageJump
-              count={paginationCount}
+              count={totalPurchaseCount}
               page={page}
               rowsPerPage={rowsPerPage}
               rowsPerPageOptions={[10, 25, 50, 100]}
@@ -1534,6 +1606,65 @@ export default function PurchasingManagement() {
             }
           >
             Create
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={backfillZohoDeliveryOpen}
+        onClose={() => {
+          if (!backfillZohoDeliveryMutation.isPending) {
+            setBackfillZohoDeliveryOpen(false)
+          }
+        }}
+        fullWidth
+        maxWidth="xs"
+      >
+        <DialogTitle>Backfill Zoho Delivery</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              size="small"
+              type="date"
+              label="Start Date (Optional)"
+              InputLabelProps={{ shrink: true }}
+              value={backfillZohoDeliveryFrom}
+              onChange={(e) => setBackfillZohoDeliveryFrom(e.target.value)}
+            />
+            <TextField
+              size="small"
+              type="date"
+              label="End Date (Optional)"
+              InputLabelProps={{ shrink: true }}
+              value={backfillZohoDeliveryTo}
+              onChange={(e) => setBackfillZohoDeliveryTo(e.target.value)}
+            />
+            <Alert severity="info">
+              Leave fields empty to use backend defaults (start: 2026-01-01, end: today).
+            </Alert>
+            {backfillInvalidRange && (
+              <Alert severity="warning">Start date must be earlier than or equal to end date.</Alert>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setBackfillZohoDeliveryOpen(false)}
+            disabled={backfillZohoDeliveryMutation.isPending}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            disabled={backfillZohoDeliveryMutation.isPending || backfillInvalidRange}
+            onClick={() =>
+              backfillZohoDeliveryMutation.mutate({
+                receiveDateFrom: backfillZohoDeliveryFrom || undefined,
+                receiveDateTo: backfillZohoDeliveryTo || undefined,
+              })
+            }
+          >
+            {backfillZohoDeliveryMutation.isPending ? 'Backfilling...' : 'Backfill'}
           </Button>
         </DialogActions>
       </Dialog>

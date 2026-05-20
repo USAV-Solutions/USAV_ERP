@@ -1,7 +1,7 @@
 ﻿# Backend\app\modules\purchasing
 
 ## What This Folder Does
-Purchase order domain: import pipelines, vendor workflows, receiving, matching, and purchase-order/item mutation endpoints (including guarded deletes).
+Purchase order domain: import pipelines, vendor workflows, receiving, matching, purchase-order/item mutation endpoints (including guarded deletes), and Zoho receive-driven delivery-status backfill.
 
 ## Typical Contents
 - Python modules, schemas, or support assets scoped to this domain.
@@ -18,6 +18,7 @@ Purchase order domain: import pipelines, vendor workflows, receiving, matching, 
 - Purchase-order deletes are blocked when any line item is already `RECEIVED`; frontend should surface API detail text for this guardrail.
 - Purchase item `unit_price` now supports precision beyond 2 decimals; keep UI/editor inputs and import paths from coercing prices to cent precision when quantity-split totals require fractional cents.
 - Purchase list endpoint supports approximate total search (`total_amount` with optional `total_amount_range`); frontend and backend must stay aligned on inclusive bounds (`total_amount - range` through `total_amount + range`).
+- Delivery-status backfill (`POST /purchases/backfill-delivery-status`) marks local POs as `DELIVERED` when Zoho purchase receives exist in the requested receive-date window (defaults: `2026-01-01` through today); it does not auto-downgrade orders with no receives.
 
 ## Child Folders
 - `schemas/`

@@ -15,6 +15,7 @@ import type {
   PurchaseOrderReceiveResponse,
   Vendor,
   VendorCreate,
+  PurchaseOrderDeliveryBackfillResponse,
   ZohoPurchaseImportResponse,
 } from '../types/purchasing'
 
@@ -163,6 +164,22 @@ export async function importPurchasesFromZoho(params: {
   const url = qs ? `${PURCHASING.IMPORT_ZOHO}?${qs}` : PURCHASING.IMPORT_ZOHO
 
   const { data } = await axiosClient.post<ZohoPurchaseImportResponse>(url)
+  return data
+}
+
+export async function backfillPurchaseOrderDeliveryStatus(params: {
+  receiveDateFrom?: string
+  receiveDateTo?: string
+} = {}): Promise<PurchaseOrderDeliveryBackfillResponse> {
+  const query = new URLSearchParams()
+  if (params.receiveDateFrom) query.set('receive_date_from', params.receiveDateFrom)
+  if (params.receiveDateTo) query.set('receive_date_to', params.receiveDateTo)
+  const qs = query.toString()
+  const url = qs
+    ? `${PURCHASING.BACKFILL_DELIVERY_STATUS}?${qs}`
+    : PURCHASING.BACKFILL_DELIVERY_STATUS
+
+  const { data } = await axiosClient.post<PurchaseOrderDeliveryBackfillResponse>(url)
   return data
 }
 

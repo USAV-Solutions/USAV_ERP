@@ -414,7 +414,7 @@ export default function ProductListings() {
   const [filtersDialogOpen, setFiltersDialogOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [page, setPage] = useState(0)
-  const [rowsPerPage, setRowsPerPage] = useState(25)
+  const [rowsPerPage, setRowsPerPage] = useState(50)
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const [matchingListingId, setMatchingListingId] = useState<number | null>(null)
   const [selectedMatchVariant, setSelectedMatchVariant] = useState<any | null>(null)

@@ -180,3 +180,12 @@ export interface GoodwillCsvImportResponse {
   source_rows_seen: number
   source_rows_skipped: number
 }
+
+export interface PurchaseOrderDeliveryBackfillResponse {
+  receive_date_from: string
+  receive_date_to: string
+  pages_scanned: number
+  receives_seen: number
+  unique_zoho_purchase_orders: number
+  local_purchase_orders_marked_delivered: number
+}
