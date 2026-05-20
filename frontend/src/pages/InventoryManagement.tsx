@@ -325,7 +325,7 @@ export default function InventoryManagement() {
   const [createCatalogDialogOpen, setCreateCatalogDialogOpen] = useState(false)
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
   const [page, setPage] = useState(0)
-  const [rowsPerPage, setRowsPerPage] = useState(25)
+  const [rowsPerPage, setRowsPerPage] = useState(50)
   const [listSortBy, setListSortBy] = useState<ListSortBy>('name')
   const [groupSortBy, setGroupSortBy] = useState<GroupSortBy>('name')
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
