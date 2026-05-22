@@ -148,6 +148,7 @@ async def _build_purchase_order_report(
     item_filter: list[str] | None = None,
     source_filter: list[str] | None = None,
     vendor_filter: list[str] | None = None,
+    po_status_filter: list[str] | None = None,
     order_by: OrderByType = "date",
 ) -> list[dict[str, object]]:
     stmt = (
@@ -185,6 +186,8 @@ async def _build_purchase_order_report(
         stmt = stmt.where(PurchaseOrder.source.in_(source_filter))
     if vendor_filter:
         stmt = stmt.where(or_(*[Vendor.name.ilike(f"%{token}%") for token in vendor_filter]))
+    if po_status_filter:
+        stmt = stmt.where(PurchaseOrder.deliver_status.in_(po_status_filter))
     rows = (await db.execute(stmt)).mappings().all()
 
     grouped: dict[str, dict[str, object]] = {}
@@ -266,6 +269,7 @@ async def _build_purchase_order_filter_options(
             PurchaseOrder.source.label("source"),
             Vendor.name.label("vendor"),
             PurchaseOrderItem.external_item_name.label("name"),
+            PurchaseOrder.deliver_status.label("po_status"),
         )
         .join(PurchaseOrderItem, PurchaseOrderItem.purchase_order_id == PurchaseOrder.id)
         .join(Vendor, Vendor.id == PurchaseOrder.vendor_id)
@@ -293,10 +297,18 @@ async def _build_purchase_order_filter_options(
             item_options[value] = label
     source_values = sorted({(row["source"] or "").strip() for row in rows if (row["source"] or "").strip()})
     vendor_values = sorted({(row["vendor"] or "").strip() for row in rows if (row["vendor"] or "").strip()})
+    po_status_values = sorted(
+        {
+            (row["po_status"].value if row["po_status"] is not None and hasattr(row["po_status"], "value") else str(row["po_status"] or "").strip())
+            for row in rows
+            if row["po_status"] is not None and str(row["po_status"]).strip()
+        }
+    )
     return {
         "item_options": [{"value": value, "label": label} for value, label in sorted(item_options.items(), key=lambda item: item[1].lower())],
         "source_options": source_values,
         "vendor_options": vendor_values,
+        "po_status_options": po_status_values,
     }
 
 
@@ -491,6 +503,7 @@ async def get_purchase_order_reports(
     item: list[str] | None = Query(default=None),
     source: list[str] | None = Query(default=None),
     vendor: list[str] | None = Query(default=None),
+    po_status: list[str] | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ):
     if end_date < start_date:
@@ -504,6 +517,7 @@ async def get_purchase_order_reports(
         item_filter=_clean_filters(item),
         source_filter=_clean_filters(source),
         vendor_filter=_clean_filters(vendor),
+        po_status_filter=_clean_filters(po_status),
     )
     return {"rows": rows}
 
@@ -518,6 +532,7 @@ async def export_purchase_order_reports(
     item: list[str] | None = Query(default=None),
     source: list[str] | None = Query(default=None),
     vendor: list[str] | None = Query(default=None),
+    po_status: list[str] | None = Query(default=None),
     file_type: Literal["csv", "xlsx"] = Query("csv"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -532,6 +547,7 @@ async def export_purchase_order_reports(
         item_filter=_clean_filters(item),
         source_filter=_clean_filters(source),
         vendor_filter=_clean_filters(vendor),
+        po_status_filter=_clean_filters(po_status),
     )
     headers = ["group", "order_date", "order_number", "item", "sku", "source", "quantity", "total_price", "tax", "shipping", "handling", "vendor"]
     stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -565,7 +581,7 @@ async def get_purchase_order_report_filter_options(
     db: AsyncSession = Depends(get_db),
 ):
     if end_date < start_date:
-        return {"item_options": [], "source_options": [], "vendor_options": []}
+        return {"item_options": [], "source_options": [], "vendor_options": [], "po_status_options": []}
     return await _build_purchase_order_filter_options(db, start_date=start_date, end_date=end_date)
 
 

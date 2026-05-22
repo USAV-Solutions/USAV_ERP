@@ -24,6 +24,7 @@ export interface PurchaseOrderReportFilterOptions {
   item_options: { value: string; label: string }[]
   source_options: string[]
   vendor_options: string[]
+  po_status_options: string[]
 }
 
 export interface SalesOrderReportRow {
@@ -63,6 +64,7 @@ export async function fetchPurchaseOrderReport(params: {
   item?: string[]
   source?: string[]
   vendor?: string[]
+  poStatus?: string[]
 }): Promise<PurchaseOrderReportRow[]> {
   const query = new URLSearchParams()
   query.set('start_date', params.startDate)
@@ -72,6 +74,7 @@ export async function fetchPurchaseOrderReport(params: {
   appendListParams(query, 'item', params.item)
   appendListParams(query, 'source', params.source)
   appendListParams(query, 'vendor', params.vendor)
+  appendListParams(query, 'po_status', params.poStatus)
 
   const { data } = await axiosClient.get<{ rows: PurchaseOrderReportRow[] }>(
     `${ACCOUNTING.PURCHASE_ORDER_REPORTS}?${query.toString()}`,
@@ -87,6 +90,7 @@ export async function exportPurchaseOrderReport(params: {
   item?: string[]
   source?: string[]
   vendor?: string[]
+  poStatus?: string[]
   fileType: 'csv' | 'xlsx'
 }): Promise<Blob> {
   const query = new URLSearchParams()
@@ -97,6 +101,7 @@ export async function exportPurchaseOrderReport(params: {
   appendListParams(query, 'item', params.item)
   appendListParams(query, 'source', params.source)
   appendListParams(query, 'vendor', params.vendor)
+  appendListParams(query, 'po_status', params.poStatus)
   query.set('file_type', params.fileType)
 
   const { data } = await axiosClient.get(

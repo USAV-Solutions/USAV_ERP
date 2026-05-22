@@ -90,6 +90,7 @@ export default function AccountingReports() {
   const [item, setItem] = useState<{ value: string; label: string }[]>([])
   const [source, setSource] = useState<string[]>([])
   const [counterparty, setCounterparty] = useState<string[]>([])
+  const [poStatus, setPoStatus] = useState<string[]>([])
 
   const [appliedStartDate, setAppliedStartDate] = useState<string>(initialStartDate)
   const [appliedEndDate, setAppliedEndDate] = useState<string>(initialEndDate)
@@ -98,6 +99,7 @@ export default function AccountingReports() {
   const [appliedItem, setAppliedItem] = useState<string[]>([])
   const [appliedSource, setAppliedSource] = useState<string[]>([])
   const [appliedCounterparty, setAppliedCounterparty] = useState<string[]>([])
+  const [appliedPoStatus, setAppliedPoStatus] = useState<string[]>([])
 
   const [exporting, setExporting] = useState<'csv' | 'xlsx' | null>(null)
   const [exportError, setExportError] = useState<string>('')
@@ -105,7 +107,7 @@ export default function AccountingReports() {
   const isPurchasingReport = reportType === 'purchasing'
 
   const reportQuery = useQuery({
-    queryKey: ['accounting-report', reportType, appliedStartDate, appliedEndDate, appliedGroupBy, appliedOrderBy, appliedItem, appliedSource, appliedCounterparty],
+    queryKey: ['accounting-report', reportType, appliedStartDate, appliedEndDate, appliedGroupBy, appliedOrderBy, appliedItem, appliedSource, appliedCounterparty, appliedPoStatus],
     queryFn: async (): Promise<ReportRow[]> => {
       if (isPurchasingReport) {
         const rows = await fetchPurchaseOrderReport({
@@ -116,6 +118,7 @@ export default function AccountingReports() {
           item: appliedItem,
           source: appliedSource,
           vendor: appliedCounterparty,
+          poStatus: appliedPoStatus,
         })
         return rows.map((row) => ({ ...row, counterparty: row.vendor }))
       }
@@ -143,6 +146,7 @@ export default function AccountingReports() {
           item_options: data.item_options,
           source_options: data.source_options,
           counterparty_options: data.vendor_options,
+          po_status_options: data.po_status_options,
         }
       }
       const data = await fetchSalesOrderReportFilterOptions({ startDate, endDate })
@@ -150,6 +154,7 @@ export default function AccountingReports() {
         item_options: data.item_options,
         source_options: data.source_options,
         counterparty_options: data.customer_options,
+        po_status_options: [],
       }
     },
     staleTime: 60_000,
@@ -159,6 +164,7 @@ export default function AccountingReports() {
   const itemOptions = filterOptionsQuery.data?.item_options ?? []
   const sourceOptions = filterOptionsQuery.data?.source_options ?? []
   const counterpartyOptions = filterOptionsQuery.data?.counterparty_options ?? []
+  const poStatusOptions = filterOptionsQuery.data?.po_status_options ?? []
 
   const applyFilter = () => {
     setAppliedStartDate(startDate)
@@ -168,6 +174,7 @@ export default function AccountingReports() {
     setAppliedItem(item.map((option) => option.value.trim()).filter(Boolean))
     setAppliedSource(source.map((value) => value.trim()).filter(Boolean))
     setAppliedCounterparty(counterparty.map((value) => value.trim()).filter(Boolean))
+    setAppliedPoStatus(poStatus.map((value) => value.trim()).filter(Boolean))
     setFilterOpen(false)
   }
 
@@ -178,9 +185,11 @@ export default function AccountingReports() {
     setItem([])
     setSource([])
     setCounterparty([])
+    setPoStatus([])
     setAppliedItem([])
     setAppliedSource([])
     setAppliedCounterparty([])
+    setAppliedPoStatus([])
     setExportError('')
   }
 
@@ -197,6 +206,7 @@ export default function AccountingReports() {
           item: appliedItem,
           source: appliedSource,
           vendor: appliedCounterparty,
+          poStatus: appliedPoStatus,
           fileType,
         })
         downloadBlob(blob, `purchase_order_report_${appliedGroupBy}.${fileType}`)
@@ -359,6 +369,25 @@ export default function AccountingReports() {
                   )}
                 />
               </Grid>
+              {isPurchasingReport ? (
+                <Grid item xs={12} md={6}>
+                  <Autocomplete
+                    multiple
+                    disableCloseOnSelect
+                    options={poStatusOptions}
+                    value={poStatus}
+                    onChange={(_, values) => setPoStatus(values)}
+                    loading={filterOptionsQuery.isLoading}
+                    renderInput={(params) => <TextField {...params} label="PO Status" placeholder="Select PO status" />}
+                    renderOption={(props, option, { selected }) => (
+                      <li {...props}>
+                        <Checkbox checked={selected} sx={{ mr: 1 }} />
+                        {option}
+                      </li>
+                    )}
+                  />
+                </Grid>
+              ) : null}
             </Grid>
             {filterOptionsQuery.error ? (
               <Alert severity="error" sx={{ mt: 2 }}>
@@ -372,6 +401,7 @@ export default function AccountingReports() {
                 setItem([])
                 setSource([])
                 setCounterparty([])
+                setPoStatus([])
               }}
             >
               Clear
