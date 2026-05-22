@@ -26,6 +26,8 @@ Inventory route handlers split by feature surface (variants, listings, images, e
 - `ai-enrich` Gemini prompts intentionally mirror the prompt patterns used in `misc/Ebay_Listing/useAppLogic.ts` (HTML description template + package JSON estimate), and AI package values only fill missing dimensions/weight fields.
 - Listing creation UI scaffolding now has dedicated routes under `/listings/create/*`; these are intentional placeholders and return scaffold status until full creation flows are implemented.
 - Active Listings UI actions now rely on listing routes for `POST /listings/{id}/sync`, `POST /listings/{id}/match`, and `POST /listings/{id}/unmatch`; these currently update listing sync/match state in DB and do not call remote platform APIs directly.
+- Active Listings now supports bulk CSV import via `POST /listings/import/csv` (Admin/Sales): expected columns are `item_id` (external ref), `platform`, `inventory_db_sku_primary` (variant full SKU), and `item_name`/`listing_name`; platform values may come as list-like strings (for example `['amazon']`) and are normalized to internal platform enums.
+- CSV import response now includes per-row `created_logs`, `updated_logs`, and `errors` summaries (first 200 lines each), and server logs emit row-level create/update/skip messages for troubleshooting.
 
 ## Child Folders
 - (No child folders)

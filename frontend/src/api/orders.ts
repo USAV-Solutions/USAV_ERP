@@ -13,12 +13,14 @@ import type {
   ShippingStatusUpdate,
   OrderItemDetail,
   OrderItemCreateRequest,
+  OrderItemUpdateRequest,
   OrderItemMatchRequest,
   OrderItemConfirmRequest,
   SyncRequest,
   SyncRangeRequest,
   SyncResponse,
   SyncStatusResponse,
+  RefreshMatchingResponse,
   IntegrationStateResponse,
   OrderPlatform,
   OrderStatus,
@@ -110,6 +112,11 @@ export async function getSyncStatus(): Promise<SyncStatusResponse> {
   return data
 }
 
+export async function refreshUnmatchedItemMatching(): Promise<RefreshMatchingResponse> {
+  const { data } = await axiosClient.post<RefreshMatchingResponse>(ORDERS.SYNC_REFRESH_MATCHING)
+  return data
+}
+
 export async function resetSyncState(platform: string): Promise<IntegrationStateResponse> {
   const { data } = await axiosClient.post<IntegrationStateResponse>(ORDERS.SYNC_RESET(platform))
   return data
@@ -165,6 +172,18 @@ export async function addOrderItem(
 ): Promise<OrderItemDetail> {
   const { data } = await axiosClient.post<OrderItemDetail>(ORDERS.ORDER_ITEMS(orderId), body)
   return data
+}
+
+export async function updateOrderItem(
+  itemId: number,
+  body: OrderItemUpdateRequest,
+): Promise<OrderItemDetail> {
+  const { data } = await axiosClient.patch<OrderItemDetail>(ORDERS.ORDER_ITEM(itemId), body)
+  return data
+}
+
+export async function deleteOrderItem(itemId: number): Promise<void> {
+  await axiosClient.delete(ORDERS.ORDER_ITEM(itemId))
 }
 
 // ── Variant Search (for SKU resolution) ──────────────────────────────

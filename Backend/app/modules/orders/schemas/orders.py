@@ -99,6 +99,17 @@ class OrderItemCreateRequest(BaseModel):
     variant_id: Optional[int] = None
 
 
+class OrderItemUpdateRequest(BaseModel):
+    """Payload for PATCH /orders/items/{item_id}."""
+    external_item_id: Optional[str] = Field(default=None, max_length=100)
+    external_sku: Optional[str] = Field(default=None, max_length=100)
+    item_name: Optional[str] = Field(default=None, max_length=500)
+    quantity: Optional[int] = Field(default=None, gt=0)
+    unit_price: Optional[Decimal] = Field(default=None, ge=0)
+    total_price: Optional[Decimal] = Field(default=None, ge=0)
+    variant_id: Optional[int] = None
+
+
 # ============================================================================
 # ORDER HEADER SCHEMAS
 # ============================================================================

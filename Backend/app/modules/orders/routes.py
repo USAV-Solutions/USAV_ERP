@@ -5,6 +5,7 @@ Endpoints
 ---------
 Synchronization
     POST /orders/sync            – Trigger "Safe Sync" for one or all platforms.
+    POST /orders/sync/refresh-matching – Re-check unmatched items against listing mappings.
     GET  /orders/sync/status     – Dashboard overview of all platform states.
     POST /orders/sync/{platform}/reset – Force-reset a stuck platform to IDLE.
 
@@ -12,6 +13,8 @@ Order CRUD
     GET  /orders                 – Paginated order list (the dashboard).
     GET  /orders/{order_id}      – Full order detail with line items.
     POST /orders/{order_id}/items – Manually add an order line item.
+    PATCH /orders/items/{item_id} – Edit a sales-order line item.
+    DELETE /orders/items/{item_id} – Delete a sales-order line item.
     PATCH /orders/{order_id}     – Update order status / notes.
 
 SKU Resolution
@@ -50,6 +53,7 @@ from app.modules.orders.schemas.orders import (
     OrderDetail,
     OrderItemBrief,
     OrderItemCreateRequest,
+    OrderItemUpdateRequest,
     OrderItemConfirmRequest,
     OrderItemDetail,
     OrderItemMatchRequest,
@@ -700,6 +704,24 @@ async def sync_orders_range(
     return results
 
 
+@router.post("/sync/refresh-matching", response_model=dict[str, int])
+async def refresh_unmatched_item_matching(
+    _admin: AdminUser,
+    service: OrderSyncService = Depends(get_order_sync_service),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Admin-only bulk rematch pass for unmatched sales-order items.
+
+    For each UNMATCHED item:
+    1) Match by exact external_item_id against PLATFORM_LISTING.external_ref_id.
+    2) Fallback to exact listing name match.
+    """
+    summary = await service.refresh_unmatched_item_matches()
+    await db.commit()
+    return summary
+
+
 @router.get("/sync/status", response_model=SyncStatusResponse)
 async def sync_status(
     sync_repo: SyncRepository = Depends(get_sync_repo),
@@ -1143,6 +1165,87 @@ async def add_order_item(
     await db.commit()
     await db.refresh(created)
     return OrderItemDetail.model_validate(created)
+
+
+@router.patch(
+    "/items/{item_id}",
+    response_model=OrderItemDetail,
+)
+async def update_order_item(
+    item_id: int,
+    body: OrderItemUpdateRequest,
+    order_item_repo: OrderItemRepository = Depends(get_order_item_repo),
+    db: AsyncSession = Depends(get_db),
+):
+    item = await order_item_repo.get(item_id)
+    if item is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"OrderItem {item_id} not found.",
+        )
+
+    if body.variant_id is not None:
+        variant = await db.get(ProductVariant, body.variant_id)
+        if variant is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"ProductVariant {body.variant_id} not found.",
+            )
+
+    if body.external_item_id is not None:
+        item.external_item_id = body.external_item_id or None
+    if body.external_sku is not None:
+        item.external_sku = body.external_sku or None
+    if body.item_name is not None:
+        item.item_name = body.item_name
+    if body.quantity is not None:
+        item.quantity = body.quantity
+    if body.unit_price is not None:
+        item.unit_price = body.unit_price
+    if body.total_price is not None:
+        item.total_price = body.total_price
+    if body.variant_id is not None:
+        item.variant_id = body.variant_id
+        item.status = OrderItemStatus.MATCHED
+
+    order = await db.get(Order, item.order_id)
+    if order is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Order {item.order_id} not found.",
+        )
+
+    order.zoho_sync_status = ZohoSyncStatus.DIRTY
+    await _recalculate_order_totals(db, order)
+    await db.commit()
+    await db.refresh(item)
+    return OrderItemDetail.model_validate(item)
+
+
+@router.delete("/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_order_item(
+    item_id: int,
+    order_item_repo: OrderItemRepository = Depends(get_order_item_repo),
+    db: AsyncSession = Depends(get_db),
+):
+    item = await order_item_repo.get(item_id)
+    if item is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"OrderItem {item_id} not found.",
+        )
+
+    order = await db.get(Order, item.order_id)
+    if order is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Order {item.order_id} not found.",
+        )
+
+    await order_item_repo.delete(item_id)
+    order.zoho_sync_status = ZohoSyncStatus.DIRTY
+    await _recalculate_order_totals(db, order)
+    await db.commit()
 
 
 @router.patch("/{order_id}", response_model=OrderDetail)

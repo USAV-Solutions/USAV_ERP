@@ -30,17 +30,22 @@ import {
   Link as LinkIcon,
   CheckCircle,
   Add,
+  NoteAlt,
 } from '@mui/icons-material'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   addOrderItem,
+  deleteOrderItem,
   getOrder,
   matchItem,
   confirmItem,
   rejectItem,
+  updateOrderItem,
 } from '../../api/orders'
 import VariantSearchAutocomplete from '../common/VariantSearchAutocomplete'
 import StatusBadge from './StatusBadge'
+import LongPressTableRow from '../common/LongPressTableRow'
+import HoldActionPromptDialog from '../common/HoldActionPromptDialog'
 import type {
   OrderDetail,
   OrderItemDetail,
@@ -392,6 +397,16 @@ function AddOrderItemRow({ orderId, onChanged, onDone }: { orderId: number; onCh
 function ItemRow({ item, onAction }: { item: OrderItemDetail; onAction: () => void }) {
   const [selectedVariant, setSelectedVariant] = useState<VariantSearchResult | null>(null)
   const [showMatch, setShowMatch] = useState(false)
+  const [promptOpen, setPromptOpen] = useState(false)
+  const [externalItemId, setExternalItemId] = useState(item.external_item_id || '')
+  const [externalSku, setExternalSku] = useState(item.external_sku || '')
+  const [itemName, setItemName] = useState(item.item_name)
+  const [quantity, setQuantity] = useState(String(item.quantity))
+  const [unitPrice, setUnitPrice] = useState(String(item.unit_price))
+
+  const parsedQuantity = Number(quantity) || 0
+  const parsedUnitPrice = Number(unitPrice) || 0
+  const computedTotalPrice = Math.max(parsedQuantity, 0) * Math.max(parsedUnitPrice, 0)
 
   const matchMutation = useMutation({
     mutationFn: () =>
@@ -415,12 +430,57 @@ function ItemRow({ item, onAction }: { item: OrderItemDetail; onAction: () => vo
     onSuccess: onAction,
   })
 
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      updateOrderItem(item.id, {
+        external_item_id: externalItemId.trim() || null,
+        external_sku: externalSku.trim() || null,
+        item_name: itemName.trim(),
+        quantity: parsedQuantity,
+        unit_price: parsedUnitPrice,
+        total_price: computedTotalPrice,
+        variant_id: selectedVariant ? selectedVariant.id : item.variant_id ?? undefined,
+      }),
+    onSuccess: async () => {
+      setPromptOpen(false)
+      await onAction()
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteOrderItem(item.id),
+    onSuccess: async () => {
+      setPromptOpen(false)
+      await onAction()
+    },
+  })
+
   const anyPending =
-    matchMutation.isPending || confirmMutation.isPending || rejectMutation.isPending
+    matchMutation.isPending
+    || confirmMutation.isPending
+    || rejectMutation.isPending
+    || saveMutation.isPending
+    || deleteMutation.isPending
+
+  const openPrompt = () => {
+    setExternalItemId(item.external_item_id || '')
+    setExternalSku(item.external_sku || '')
+    setItemName(item.item_name)
+    setQuantity(String(item.quantity))
+    setUnitPrice(String(item.unit_price))
+    setSelectedVariant(null)
+    setPromptOpen(true)
+  }
 
   return (
     <>
-      <TableRow>
+      <LongPressTableRow
+        payload={item}
+        onLongPress={openPrompt}
+        longPressDelayMs={900}
+        rowSx={{ cursor: 'pointer' }}
+        onClick={openPrompt}
+      >
         <TableCell>
           <Typography
             variant="body2"
@@ -469,6 +529,19 @@ function ItemRow({ item, onAction }: { item: OrderItemDetail; onAction: () => vo
                 </IconButton>
               </Tooltip>
             )}
+            <Tooltip title="Edit line item">
+              <IconButton
+                size="small"
+                color="primary"
+                onClick={(e: MouseEvent) => {
+                  e.stopPropagation()
+                  openPrompt()
+                }}
+                disabled={anyPending}
+              >
+                <NoteAlt fontSize="small" />
+              </IconButton>
+            </Tooltip>
             {item.status === 'MATCHED' && (
               <>
                 <Tooltip title="Confirm match">
@@ -501,7 +574,7 @@ function ItemRow({ item, onAction }: { item: OrderItemDetail; onAction: () => vo
             )}
           </Stack>
         </TableCell>
-      </TableRow>
+      </LongPressTableRow>
 
       {/* Inline match form with variant search */}
       {showMatch && (
@@ -543,6 +616,85 @@ function ItemRow({ item, onAction }: { item: OrderItemDetail; onAction: () => vo
           </TableCell>
         </TableRow>
       )}
+
+      <HoldActionPromptDialog
+        open={promptOpen}
+        onClose={() => setPromptOpen(false)}
+        title="Edit Sales Order Item"
+        onSave={() => saveMutation.mutate()}
+        onDelete={() => deleteMutation.mutate()}
+        saveDisabled={!itemName.trim() || Number(quantity) <= 0}
+        deleteDisabled={false}
+        saveLoading={saveMutation.isPending}
+        deleteLoading={deleteMutation.isPending}
+        deleteConfirmTitle="Delete Sales Order Item"
+        deleteConfirmMessage={(
+          <Typography>
+            Delete item <strong>{item.item_name}</strong>? This action cannot be undone.
+          </Typography>
+        )}
+      >
+        <Stack spacing={2} sx={{ mt: 1 }}>
+          <TextField
+            label="Item ID"
+            value={externalItemId}
+            onChange={(e) => setExternalItemId(e.target.value)}
+            fullWidth
+          />
+          <TextField
+            label="External SKU"
+            value={externalSku}
+            onChange={(e) => setExternalSku(e.target.value)}
+            fullWidth
+          />
+          <TextField
+            label="Item Name"
+            value={itemName}
+            onChange={(e) => setItemName(e.target.value)}
+            fullWidth
+          />
+          <TextField
+            label="Quantity"
+            type="number"
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+            fullWidth
+          />
+          <TextField
+            label="Unit Price"
+            type="number"
+            value={unitPrice}
+            onChange={(e) => setUnitPrice(e.target.value)}
+            inputProps={{ min: 0, step: 0.001 }}
+            fullWidth
+          />
+          <TextField
+            label="Total Price (Auto)"
+            type="number"
+            value={computedTotalPrice.toFixed(2)}
+            InputProps={{ readOnly: true }}
+            fullWidth
+          />
+          <VariantSearchAutocomplete value={selectedVariant} onChange={setSelectedVariant} />
+          <Typography variant="caption" color="text.secondary">
+            Current SKU: {item.variant_sku || 'Unmatched'}
+          </Typography>
+          {saveMutation.isError && (
+            <Alert severity="error">
+              {(saveMutation.error as { response?: { data?: { detail?: string } }; message?: string })?.response?.data?.detail
+                || (saveMutation.error as { message?: string })?.message
+                || 'Failed to update line item.'}
+            </Alert>
+          )}
+          {deleteMutation.isError && (
+            <Alert severity="error">
+              {(deleteMutation.error as { response?: { data?: { detail?: string } }; message?: string })?.response?.data?.detail
+                || (deleteMutation.error as { message?: string })?.message
+                || 'Failed to delete line item.'}
+            </Alert>
+          )}
+        </Stack>
+      </HoldActionPromptDialog>
     </>
   )
 }

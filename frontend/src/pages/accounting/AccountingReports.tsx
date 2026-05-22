@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type SyntheticEvent } from 'react'
 import {
   Alert,
   Autocomplete,
@@ -18,22 +18,28 @@ import {
   MenuItem,
   Select,
   Stack,
+  Tab,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
+  Tabs,
   TextField,
   Typography,
 } from '@mui/material'
 import { useQuery } from '@tanstack/react-query'
 import {
   exportPurchaseOrderReport,
+  exportSalesOrderReport,
   fetchPurchaseOrderReport,
   fetchPurchaseOrderReportFilterOptions,
+  fetchSalesOrderReport,
+  fetchSalesOrderReportFilterOptions,
   type GroupBy,
   type OrderBy,
+  type SalesGroupBy,
 } from '../../api/accountingReports'
 
 function toIsoDate(value: Date): string {
@@ -51,56 +57,114 @@ function downloadBlob(blob: Blob, filename: string): void {
   URL.revokeObjectURL(url)
 }
 
+type ReportType = 'purchasing' | 'sale'
+type ReportGroupBy = GroupBy | SalesGroupBy
+
+interface ReportRow {
+  group: string
+  order_date: string
+  order_number: string
+  item: string
+  sku: string
+  source: string
+  quantity: number
+  total_price: string
+  tax: string
+  shipping: string
+  handling: string
+  counterparty: string
+}
+
 export default function AccountingReports() {
   const today = useMemo(() => new Date(), [])
   const initialStartDate = toIsoDate(new Date(today.getFullYear(), today.getMonth(), 1))
   const initialEndDate = toIsoDate(today)
 
+  const [reportType, setReportType] = useState<ReportType>('purchasing')
   const [startDate, setStartDate] = useState<string>(initialStartDate)
   const [endDate, setEndDate] = useState<string>(initialEndDate)
-  const [groupBy, setGroupBy] = useState<GroupBy>('month')
+  const [groupBy, setGroupBy] = useState<ReportGroupBy>('month')
   const [orderBy, setOrderBy] = useState<OrderBy>('date')
   const [filterOpen, setFilterOpen] = useState<boolean>(false)
 
   const [item, setItem] = useState<{ value: string; label: string }[]>([])
   const [source, setSource] = useState<string[]>([])
-  const [vendor, setVendor] = useState<string[]>([])
+  const [counterparty, setCounterparty] = useState<string[]>([])
+  const [poStatus, setPoStatus] = useState<string[]>([])
 
   const [appliedStartDate, setAppliedStartDate] = useState<string>(initialStartDate)
   const [appliedEndDate, setAppliedEndDate] = useState<string>(initialEndDate)
-  const [appliedGroupBy, setAppliedGroupBy] = useState<GroupBy>('month')
+  const [appliedGroupBy, setAppliedGroupBy] = useState<ReportGroupBy>('month')
   const [appliedOrderBy, setAppliedOrderBy] = useState<OrderBy>('date')
   const [appliedItem, setAppliedItem] = useState<string[]>([])
   const [appliedSource, setAppliedSource] = useState<string[]>([])
-  const [appliedVendor, setAppliedVendor] = useState<string[]>([])
+  const [appliedCounterparty, setAppliedCounterparty] = useState<string[]>([])
+  const [appliedPoStatus, setAppliedPoStatus] = useState<string[]>([])
 
   const [exporting, setExporting] = useState<'csv' | 'xlsx' | null>(null)
   const [exportError, setExportError] = useState<string>('')
 
+  const isPurchasingReport = reportType === 'purchasing'
+
   const reportQuery = useQuery({
-    queryKey: ['purchase-order-report', appliedStartDate, appliedEndDate, appliedGroupBy, appliedOrderBy, appliedItem, appliedSource, appliedVendor],
-    queryFn: () => fetchPurchaseOrderReport({
-      startDate: appliedStartDate,
-      endDate: appliedEndDate,
-      groupBy: appliedGroupBy,
-      orderBy: appliedOrderBy,
-      item: appliedItem,
-      source: appliedSource,
-      vendor: appliedVendor,
-    }),
+    queryKey: ['accounting-report', reportType, appliedStartDate, appliedEndDate, appliedGroupBy, appliedOrderBy, appliedItem, appliedSource, appliedCounterparty, appliedPoStatus],
+    queryFn: async (): Promise<ReportRow[]> => {
+      if (isPurchasingReport) {
+        const rows = await fetchPurchaseOrderReport({
+          startDate: appliedStartDate,
+          endDate: appliedEndDate,
+          groupBy: appliedGroupBy as GroupBy,
+          orderBy: appliedOrderBy,
+          item: appliedItem,
+          source: appliedSource,
+          vendor: appliedCounterparty,
+          poStatus: appliedPoStatus,
+        })
+        return rows.map((row) => ({ ...row, counterparty: row.vendor }))
+      }
+
+      const rows = await fetchSalesOrderReport({
+        startDate: appliedStartDate,
+        endDate: appliedEndDate,
+        groupBy: appliedGroupBy as SalesGroupBy,
+        orderBy: appliedOrderBy,
+        item: appliedItem,
+        source: appliedSource,
+        customer: appliedCounterparty,
+      })
+      return rows.map((row) => ({ ...row, counterparty: row.customer }))
+    },
     staleTime: 60_000,
   })
 
   const filterOptionsQuery = useQuery({
-    queryKey: ['purchase-order-report-filter-options', startDate, endDate],
-    queryFn: () => fetchPurchaseOrderReportFilterOptions({ startDate, endDate }),
+    queryKey: ['accounting-report-filter-options', reportType, startDate, endDate],
+    queryFn: async () => {
+      if (isPurchasingReport) {
+        const data = await fetchPurchaseOrderReportFilterOptions({ startDate, endDate })
+        return {
+          item_options: data.item_options,
+          source_options: data.source_options,
+          counterparty_options: data.vendor_options,
+          po_status_options: data.po_status_options,
+        }
+      }
+      const data = await fetchSalesOrderReportFilterOptions({ startDate, endDate })
+      return {
+        item_options: data.item_options,
+        source_options: data.source_options,
+        counterparty_options: data.customer_options,
+        po_status_options: [],
+      }
+    },
     staleTime: 60_000,
     enabled: filterOpen,
   })
 
   const itemOptions = filterOptionsQuery.data?.item_options ?? []
   const sourceOptions = filterOptionsQuery.data?.source_options ?? []
-  const vendorOptions = filterOptionsQuery.data?.vendor_options ?? []
+  const counterpartyOptions = filterOptionsQuery.data?.counterparty_options ?? []
+  const poStatusOptions = filterOptionsQuery.data?.po_status_options ?? []
 
   const applyFilter = () => {
     setAppliedStartDate(startDate)
@@ -109,25 +173,56 @@ export default function AccountingReports() {
     setAppliedOrderBy(orderBy)
     setAppliedItem(item.map((option) => option.value.trim()).filter(Boolean))
     setAppliedSource(source.map((value) => value.trim()).filter(Boolean))
-    setAppliedVendor(vendor.map((value) => value.trim()).filter(Boolean))
+    setAppliedCounterparty(counterparty.map((value) => value.trim()).filter(Boolean))
+    setAppliedPoStatus(poStatus.map((value) => value.trim()).filter(Boolean))
     setFilterOpen(false)
+  }
+
+  const handleReportTypeChange = (_: SyntheticEvent, value: ReportType) => {
+    setReportType(value)
+    setGroupBy('month')
+    setAppliedGroupBy('month')
+    setItem([])
+    setSource([])
+    setCounterparty([])
+    setPoStatus([])
+    setAppliedItem([])
+    setAppliedSource([])
+    setAppliedCounterparty([])
+    setAppliedPoStatus([])
+    setExportError('')
   }
 
   const handleExport = async (fileType: 'csv' | 'xlsx') => {
     try {
       setExportError('')
       setExporting(fileType)
-      const blob = await exportPurchaseOrderReport({
-        startDate: appliedStartDate,
-        endDate: appliedEndDate,
-        groupBy: appliedGroupBy,
-        orderBy: appliedOrderBy,
-        item: appliedItem,
-        source: appliedSource,
-        vendor: appliedVendor,
-        fileType,
-      })
-      downloadBlob(blob, `purchase_order_report_${appliedGroupBy}.${fileType}`)
+      if (isPurchasingReport) {
+        const blob = await exportPurchaseOrderReport({
+          startDate: appliedStartDate,
+          endDate: appliedEndDate,
+          groupBy: appliedGroupBy as GroupBy,
+          orderBy: appliedOrderBy,
+          item: appliedItem,
+          source: appliedSource,
+          vendor: appliedCounterparty,
+          poStatus: appliedPoStatus,
+          fileType,
+        })
+        downloadBlob(blob, `purchase_order_report_${appliedGroupBy}.${fileType}`)
+      } else {
+        const blob = await exportSalesOrderReport({
+          startDate: appliedStartDate,
+          endDate: appliedEndDate,
+          groupBy: appliedGroupBy as SalesGroupBy,
+          orderBy: appliedOrderBy,
+          item: appliedItem,
+          source: appliedSource,
+          customer: appliedCounterparty,
+          fileType,
+        })
+        downloadBlob(blob, `sales_order_report_${appliedGroupBy}.${fileType}`)
+      }
     } catch {
       setExportError('Failed to export report')
     } finally {
@@ -139,8 +234,12 @@ export default function AccountingReports() {
     <Card>
       <CardContent>
         <Typography variant="h4" gutterBottom>
-          Purchase Order Reports
+          Accounting Reports
         </Typography>
+        <Tabs value={reportType} onChange={handleReportTypeChange} sx={{ mb: 2 }}>
+          <Tab label="Purchasing Report" value="purchasing" />
+          <Tab label="Sale Report" value="sale" />
+        </Tabs>
         <Grid container spacing={2} sx={{ mb: 2 }}>
           <Grid item xs={12} md={3}>
             <TextField
@@ -172,6 +271,7 @@ export default function AccountingReports() {
                 onChange={(event) => setOrderBy(event.target.value as OrderBy)}
               >
                 <MenuItem value="total_price">Total Price</MenuItem>
+                <MenuItem value="quantity">Quantity</MenuItem>
                 <MenuItem value="sku">SKU</MenuItem>
                 <MenuItem value="source">Source</MenuItem>
                 <MenuItem value="date">Date</MenuItem>
@@ -185,11 +285,13 @@ export default function AccountingReports() {
                 labelId="group-by-label"
                 value={groupBy}
                 label="Group By"
-                onChange={(event) => setGroupBy(event.target.value as GroupBy)}
+                onChange={(event) => setGroupBy(event.target.value as ReportGroupBy)}
               >
                 <MenuItem value="sku">SKU</MenuItem>
                 <MenuItem value="source">Source</MenuItem>
-                <MenuItem value="vendor">Vendor</MenuItem>
+                <MenuItem value={isPurchasingReport ? 'vendor' : 'customer'}>
+                  {isPurchasingReport ? 'Vendor' : 'Customer'}
+                </MenuItem>
                 <MenuItem value="week">Week</MenuItem>
                 <MenuItem value="month">Month</MenuItem>
                 <MenuItem value="quarter">Quarter</MenuItem>
@@ -248,11 +350,17 @@ export default function AccountingReports() {
                 <Autocomplete
                   multiple
                   disableCloseOnSelect
-                  options={vendorOptions}
-                  value={vendor}
-                  onChange={(_, values) => setVendor(values)}
+                  options={counterpartyOptions}
+                  value={counterparty}
+                  onChange={(_, values) => setCounterparty(values)}
                   loading={filterOptionsQuery.isLoading}
-                  renderInput={(params) => <TextField {...params} label="Vendor" placeholder="Search and select vendors" />}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label={isPurchasingReport ? 'Vendor' : 'Customer'}
+                      placeholder={isPurchasingReport ? 'Search and select vendors' : 'Search and select customers'}
+                    />
+                  )}
                   renderOption={(props, option, { selected }) => (
                     <li {...props}>
                       <Checkbox checked={selected} sx={{ mr: 1 }} />
@@ -261,6 +369,25 @@ export default function AccountingReports() {
                   )}
                 />
               </Grid>
+              {isPurchasingReport ? (
+                <Grid item xs={12} md={6}>
+                  <Autocomplete
+                    multiple
+                    disableCloseOnSelect
+                    options={poStatusOptions}
+                    value={poStatus}
+                    onChange={(_, values) => setPoStatus(values)}
+                    loading={filterOptionsQuery.isLoading}
+                    renderInput={(params) => <TextField {...params} label="PO Status" placeholder="Select PO status" />}
+                    renderOption={(props, option, { selected }) => (
+                      <li {...props}>
+                        <Checkbox checked={selected} sx={{ mr: 1 }} />
+                        {option}
+                      </li>
+                    )}
+                  />
+                </Grid>
+              ) : null}
             </Grid>
             {filterOptionsQuery.error ? (
               <Alert severity="error" sx={{ mt: 2 }}>
@@ -273,7 +400,8 @@ export default function AccountingReports() {
               onClick={() => {
                 setItem([])
                 setSource([])
-                setVendor([])
+                setCounterparty([])
+                setPoStatus([])
               }}
             >
               Clear
@@ -329,7 +457,7 @@ export default function AccountingReports() {
                   <TableCell align="right">Tax</TableCell>
                   <TableCell align="right">Shipping</TableCell>
                   <TableCell align="right">Handling</TableCell>
-                  <TableCell>Vendor</TableCell>
+                  <TableCell>{isPurchasingReport ? 'Vendor' : 'Customer'}</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -346,7 +474,7 @@ export default function AccountingReports() {
                     <TableCell align="right">{row.tax}</TableCell>
                     <TableCell align="right">{row.shipping}</TableCell>
                     <TableCell align="right">{row.handling}</TableCell>
-                    <TableCell>{row.vendor}</TableCell>
+                    <TableCell>{row.counterparty}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

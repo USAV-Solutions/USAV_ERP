@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, Fragment } from 'react'
+import React, { useEffect, useState, useMemo, Fragment, useRef } from 'react'
 import {
   Box,
   Typography,
@@ -42,6 +42,7 @@ import {
   Visibility,
   Link as LinkIcon,
   LinkOff,
+  UploadFile,
 } from '@mui/icons-material'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axiosClient from '../api/axiosClient'
@@ -420,6 +421,10 @@ export default function ProductListings() {
   const [selectedMatchVariant, setSelectedMatchVariant] = useState<any | null>(null)
   const [editingListing, setEditingListing] = useState<EnhancedListing | null>(null)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [importSummary, setImportSummary] = useState<string | null>(null)
+  const [importError, setImportError] = useState<string | null>(null)
+  const [importLogs, setImportLogs] = useState<string[]>([])
+  const importInputRef = useRef<HTMLInputElement | null>(null)
   const { hasRole } = useAuth()
   const queryClient = useQueryClient()
 
@@ -503,6 +508,42 @@ export default function ProductListings() {
       queryClient.invalidateQueries({ queryKey: ['listings'] })
       setMatchingListingId(null)
       setSelectedMatchVariant(null)
+    },
+  })
+  const importCsvMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData()
+      formData.append('file', file)
+      const response = await axiosClient.post(LISTINGS.IMPORT_CSV, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      return response.data as {
+        created: number
+        updated: number
+        skipped: number
+        total_rows: number
+        created_logs?: string[]
+        updated_logs?: string[]
+        errors?: string[]
+      }
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['listings'] })
+      setImportError(null)
+      const errorCount = data.errors?.length || 0
+      setImportSummary(
+        `Import done. Created ${data.created}, updated ${data.updated}, skipped ${data.skipped} out of ${data.total_rows} rows.${errorCount > 0 ? ` ${errorCount} row errors.` : ''}`,
+      )
+      setImportLogs([
+        ...(data.created_logs || []),
+        ...(data.updated_logs || []),
+        ...((data.errors || []).map((line) => `ERROR: ${line}`)),
+      ])
+    },
+    onError: (err: any) => {
+      setImportSummary(null)
+      setImportError(err.response?.data?.detail || 'Failed to import CSV')
+      setImportLogs([])
     },
   })
 
@@ -762,20 +803,72 @@ export default function ProductListings() {
     0,
   )
 
+  const handleCsvSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = event.target.files?.[0]
+    if (!selectedFile) return
+    setImportSummary(null)
+    setImportError(null)
+    setImportLogs([])
+    importCsvMutation.mutate(selectedFile)
+    event.target.value = ''
+  }
+
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4">Active Listings</Typography>
         {hasRole(['ADMIN', 'SALES_REP']) && (
-          <Button
-            variant="contained"
-            startIcon={<Add />}
-            onClick={() => setCreateDialogOpen(true)}
-          >
-            Add Listing
-          </Button>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button
+              variant="outlined"
+              startIcon={<UploadFile />}
+              onClick={() => importInputRef.current?.click()}
+              disabled={importCsvMutation.isPending}
+            >
+              {importCsvMutation.isPending ? 'Importing...' : 'Bulk SKU Import'}
+            </Button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              style={{ display: 'none' }}
+              onChange={handleCsvSelected}
+            />
+            <Button
+              variant="contained"
+              startIcon={<Add />}
+              onClick={() => setCreateDialogOpen(true)}
+            >
+              Add Listing
+            </Button>
+          </Box>
         )}
       </Box>
+
+      {importSummary && (
+        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setImportSummary(null)}>
+          {importSummary}
+        </Alert>
+      )}
+      {importError && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setImportError(null)}>
+          {importError}
+        </Alert>
+      )}
+      {importLogs.length > 0 && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>
+            Import Logs (first {importLogs.length} lines)
+          </Typography>
+          <Box sx={{ maxHeight: 240, overflowY: 'auto' }}>
+            {importLogs.map((line, idx) => (
+              <Typography key={`${idx}-${line}`} variant="caption" sx={{ display: 'block', fontFamily: 'monospace' }}>
+                {line}
+              </Typography>
+            ))}
+          </Box>
+        </Alert>
+      )}
 
       <Paper sx={{ p: 2, mb: 3 }}>
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
