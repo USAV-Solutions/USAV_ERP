@@ -28,6 +28,8 @@ Sales orders domain: ingestion/import, listing-centric matching, filtering, cust
 - Order list/detail responses now include `platform_total_amount` and `zoho_total_amount`; `zoho_total_amount` excludes tax for marketplace platforms (`AMAZON`, `WALMART`, and all eBay stores) and includes tax for other platforms.
 - `order_item.variant_id` is denormalized once `platform_listing_id` is introduced; code paths that update listing assignments must keep `order_item.variant_id` in sync.
 - Sales-order line items can now be added manually via `POST /orders/{order_id}/items`; new rows mark order `zoho_sync_status=DIRTY`, set item status from `variant_id` (`MATCHED` vs `UNMATCHED`), and recalculate order subtotal/total from line totals while preserving any previously inferred handling delta.
+- Sales-order line items now support inline maintenance via `PATCH /orders/items/{item_id}` and `DELETE /orders/items/{item_id}`; successful edits/deletes mark parent order `zoho_sync_status=DIRTY` and recalculate order subtotal/total from current line totals.
+- Admin can bulk re-check unmatched line items via `POST /orders/sync/refresh-matching`; it tries `external_item_id` → `platform_listing.external_ref_id` first, then normalized name matching (`lowercase` + punctuation/spacing removed) between `item_name` and `platform_listing.listed_name`, and auto-sets `order_item.variant_id/status` when a mapped active listing is found.
 
 ## Child Folders
 - `schemas/`

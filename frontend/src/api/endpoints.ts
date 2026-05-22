@@ -52,6 +52,7 @@ export const LISTINGS = {
   EBAY_IMAGES_UPLOAD: '/listings/ebay/images/upload',
   EBAY_IMAGES_SEND: '/listings/ebay/images/send',
   EBAY_PUBLISH: '/listings/ebay/publish',
+  IMPORT_CSV: '/listings/import/csv',
   LISTING: (id: number) => `/listings/${id}`,
   BY_PLATFORM_REF: (platform: string, refId: string) => `/listings/platform/${platform}/ref/${refId}`,
   PENDING: '/listings/pending',
@@ -101,6 +102,7 @@ export const ORDERS = {
   LIST: '/orders',
   ORDER: (id: number) => `/orders/${id}`,
   ORDER_ITEMS: (id: number) => `/orders/${id}/items`,
+  ORDER_ITEM: (itemId: number) => `/orders/items/${itemId}`,
   DELETE: (id: number) => `/orders/${id}`,
   UPDATE_STATUS: (id: number) => `/orders/${id}`,
   UPDATE_SHIPPING: (id: number) => `/orders/${id}/shipping`,
@@ -108,6 +110,7 @@ export const ORDERS = {
   // Sync
   SYNC: '/orders/sync',
   SYNC_RANGE: '/orders/sync/range',
+  SYNC_REFRESH_MATCHING: '/orders/sync/refresh-matching',
   SYNC_STATUS: '/orders/sync/status',
   SYNC_RESET: (platform: string) => `/orders/sync/${platform}/reset`,
   IMPORT_API: '/orders/import/api',
@@ -140,4 +143,7 @@ export const ACCOUNTING = {
   PURCHASE_ORDER_REPORTS: '/accounting/reports/purchase-orders',
   PURCHASE_ORDER_REPORTS_EXPORT: '/accounting/reports/purchase-orders/export',
   PURCHASE_ORDER_REPORT_FILTER_OPTIONS: '/accounting/reports/purchase-orders/filter-options',
+  SALES_ORDER_REPORTS: '/accounting/reports/sales-orders',
+  SALES_ORDER_REPORTS_EXPORT: '/accounting/reports/sales-orders/export',
+  SALES_ORDER_REPORT_FILTER_OPTIONS: '/accounting/reports/sales-orders/filter-options',
 }

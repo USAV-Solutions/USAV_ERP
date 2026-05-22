@@ -21,6 +21,7 @@ import {
   TableRow,
   CircularProgress,
   Select,
+  Menu,
   MenuItem,
   FormControl,
   InputLabel,
@@ -37,6 +38,10 @@ import {
   DialogActions,
   LinearProgress,
   TextField,
+  List,
+  ListItem,
+  ListItemIcon,
+  ListItemText,
 } from '@mui/material'
 import {
   Refresh,
@@ -45,10 +50,15 @@ import {
   CloudSync,
   FilterList,
   NoteAlt,
+  ArrowDropDown,
+  Sync,
+  DateRange,
+  CheckCircle,
+  Error as ErrorIcon,
 } from '@mui/icons-material'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 
-import { listOrders, getSyncStatus, updateOrderStatus, updateShippingStatus, deleteOrder } from '../api/orders'
+import { listOrders, getSyncStatus, refreshUnmatchedItemMatching, syncOrders, syncOrdersRange, updateOrderStatus, updateShippingStatus, deleteOrder } from '../api/orders'
 import { forceSyncOrder } from '../api/sync'
 import type {
   OrderBrief,
@@ -58,11 +68,10 @@ import type {
   OrderItemStatus,
   ShippingStatus,
   SyncStatusResponse,
+  SyncResponse,
   ZohoSyncStatus,
 } from '../types/orders'
 
-import OrderSyncButton from '../components/orders/OrderSyncButton'
-import AdminDateRangeSync from '../components/orders/AdminDateRangeSync'
 import OrderImportButton from '../components/orders/OrderImportButton'
 import OrderItemsPanel from '../components/orders/OrderItemsPanel'
 import OrderSummaryCards from '../components/common/OrderSummaryCards'
@@ -123,6 +132,16 @@ const SORT_BY_OPTIONS = [
   { value: 'external_order_id', label: 'External Order ID' },
 ] as const
 
+const SYNC_PLATFORM_OPTIONS = [
+  { value: '', label: 'All Configured Platforms' },
+  { value: 'ECWID', label: 'Ecwid' },
+  { value: 'EBAY_MEKONG', label: 'eBay Mekong' },
+  { value: 'EBAY_USAV', label: 'eBay USAV' },
+  { value: 'EBAY_DRAGON', label: 'eBay Dragon' },
+  { value: 'AMAZON', label: 'Amazon' },
+  { value: 'WALMART', label: 'Walmart' },
+] as const
+
 const ZOHO_SYNC_COLOR: Record<ZohoSyncStatus, 'default' | 'success' | 'error' | 'warning'> = {
   PENDING: 'warning',
   DIRTY: 'warning',
@@ -179,6 +198,15 @@ export default function OrdersManagement() {
   const [bulkFromDate, setBulkFromDate] = useState('')
   const [bulkToDate, setBulkToDate] = useState('')
   const [bulkFailureDetails, setBulkFailureDetails] = useState<string[]>([])
+  const [saleActionsAnchorEl, setSaleActionsAnchorEl] = useState<null | HTMLElement>(null)
+  const [syncOrdersDialogOpen, setSyncOrdersDialogOpen] = useState(false)
+  const [syncOrdersPlatform, setSyncOrdersPlatform] = useState('')
+  const [syncOrdersResults, setSyncOrdersResults] = useState<SyncResponse[] | null>(null)
+  const [rangeSyncDialogOpen, setRangeSyncDialogOpen] = useState(false)
+  const [rangeSyncPlatform, setRangeSyncPlatform] = useState('')
+  const [rangeSyncSince, setRangeSyncSince] = useState('')
+  const [rangeSyncUntil, setRangeSyncUntil] = useState('')
+  const [rangeSyncResults, setRangeSyncResults] = useState<SyncResponse[] | null>(null)
 
   // ── Queries ──────────────────────────────────────────────────────
 
@@ -313,6 +341,46 @@ export default function OrdersManagement() {
     onSettled: () => setShippingUpdatingId(null),
   })
 
+  const syncOrdersMutation = useMutation({
+    mutationFn: () => syncOrders(syncOrdersPlatform ? { platform: syncOrdersPlatform } : {}),
+    onSuccess: (data) => {
+      setSyncOrdersResults(data)
+      queryClient.invalidateQueries({ queryKey: ['orders'] })
+      queryClient.invalidateQueries({ queryKey: ['syncStatus'] })
+    },
+  })
+
+  const rangeSyncMutation = useMutation({
+    mutationFn: () =>
+      syncOrdersRange({
+        platform: rangeSyncPlatform || undefined,
+        since: new Date(rangeSyncSince).toISOString(),
+        until: new Date(rangeSyncUntil).toISOString(),
+      }),
+    onSuccess: (data) => {
+      setRangeSyncResults(data)
+      queryClient.invalidateQueries({ queryKey: ['orders'] })
+      queryClient.invalidateQueries({ queryKey: ['syncStatus'] })
+    },
+  })
+
+  const refreshMatchingMutation = useMutation({
+    mutationFn: refreshUnmatchedItemMatching,
+    onSuccess: async (data) => {
+      setSnackbarSeverity('success')
+      setSnackbarMessage(`Refresh matching done. Checked ${data.checked_items}, matched ${data.matched_items}.`)
+      setSnackbarOpen(true)
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      await queryClient.invalidateQueries({ queryKey: ['syncStatus'] })
+    },
+    onError: (error: { response?: { data?: { detail?: string } }; message?: string }) => {
+      const detail = error.response?.data?.detail || error.message || 'Refresh matching failed.'
+      setSnackbarSeverity('error')
+      setSnackbarMessage(detail)
+      setSnackbarOpen(true)
+    },
+  })
+
   const saveHoldOrderMutation = useMutation({
     mutationFn: async () => {
       if (!selectedOrder) {
@@ -379,6 +447,28 @@ export default function OrdersManagement() {
   const handleForceSync = (orderId: number, e: React.MouseEvent) => {
     e.stopPropagation() // prevent row expand
     forceSyncMutation.mutate(orderId)
+  }
+
+  const isSaleActionsMenuOpen = Boolean(saleActionsAnchorEl)
+
+  const handleOpenSaleActionsMenu = (event: React.MouseEvent<HTMLButtonElement>) => {
+    setSaleActionsAnchorEl(event.currentTarget)
+  }
+
+  const handleCloseSaleActionsMenu = () => {
+    setSaleActionsAnchorEl(null)
+  }
+
+  const handleCloseSyncOrdersDialog = () => {
+    setSyncOrdersDialogOpen(false)
+    setSyncOrdersResults(null)
+    syncOrdersMutation.reset()
+  }
+
+  const handleCloseRangeSyncDialog = () => {
+    setRangeSyncDialogOpen(false)
+    setRangeSyncResults(null)
+    rangeSyncMutation.reset()
   }
 
   const getErrorMessage = (error: unknown): string => {
@@ -518,6 +608,9 @@ export default function OrdersManagement() {
       && new Date(`${bulkFromDate}T00:00:00`) > new Date(`${bulkToDate}T23:59:59.999`),
   )
   const canStartBulkSync = Boolean(bulkFromDate && bulkToDate && !invalidBulkRange)
+  const isValidRangeSync = Boolean(
+    rangeSyncSince && rangeSyncUntil && new Date(rangeSyncSince) < new Date(rangeSyncUntil),
+  )
   const columnCount = 10
   const activeFilterCount = [
     platformFilter !== '',
@@ -559,26 +652,67 @@ export default function OrdersManagement() {
               <Refresh />
             </IconButton>
           </Tooltip>
-          {hasRole(['ADMIN']) && <AdminDateRangeSync />}
-          {hasRole(['ADMIN']) && (
-            <Button
-              variant="outlined"
+          <Button
+            variant="outlined"
+            onClick={handleOpenSaleActionsMenu}
+            endIcon={<ArrowDropDown />}
+            disabled={bulkLoading || syncOrdersMutation.isPending || rangeSyncMutation.isPending || refreshMatchingMutation.isPending}
+          >
+            Sale Actions
+          </Button>
+          <Menu
+            anchorEl={saleActionsAnchorEl}
+            open={isSaleActionsMenuOpen}
+            onClose={handleCloseSaleActionsMenu}
+          >
+            <MenuItem
               onClick={() => {
-                setBulkDialogOpen(true)
-                setBulkError(null)
-                setBulkDone(false)
-                setBulkTotal(0)
-                setBulkProgress({ queued: 0, success: 0, failed: 0 })
-                setBulkFromDate('')
-                setBulkToDate('')
-                setBulkFailureDetails([])
+                handleCloseSaleActionsMenu()
+                setSyncOrdersDialogOpen(true)
               }}
             >
-              Sync matched to Zoho
-            </Button>
-          )}
+              Sync Orders
+            </MenuItem>
+            {hasRole(['ADMIN']) && (
+              <MenuItem
+                onClick={() => {
+                  handleCloseSaleActionsMenu()
+                  setRangeSyncDialogOpen(true)
+                }}
+              >
+                Range Sync
+              </MenuItem>
+            )}
+            {hasRole(['ADMIN']) && (
+              <MenuItem
+                onClick={() => {
+                  handleCloseSaleActionsMenu()
+                  refreshMatchingMutation.mutate()
+                }}
+                disabled={refreshMatchingMutation.isPending}
+              >
+                {refreshMatchingMutation.isPending ? 'Refreshing Matching...' : 'Refresh Matching'}
+              </MenuItem>
+            )}
+            {hasRole(['ADMIN']) && (
+              <MenuItem
+                onClick={() => {
+                  handleCloseSaleActionsMenu()
+                  setBulkDialogOpen(true)
+                  setBulkError(null)
+                  setBulkDone(false)
+                  setBulkTotal(0)
+                  setBulkProgress({ queued: 0, success: 0, failed: 0 })
+                  setBulkFromDate('')
+                  setBulkToDate('')
+                  setBulkFailureDetails([])
+                }}
+              >
+                Sync matched to Zoho
+              </MenuItem>
+            )}
+          </Menu>
           {hasRole(['ADMIN', 'SALES_REP']) && <OrderImportButton />}
-          <OrderSyncButton />
         </Stack>
       </Box>
 
@@ -813,6 +947,179 @@ export default function OrdersManagement() {
           }}
         />
       </Paper>
+
+      <Dialog open={syncOrdersDialogOpen} onClose={handleCloseSyncOrdersDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>Sync Orders from Platform</DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <FormControl fullWidth>
+              <InputLabel>Platform</InputLabel>
+              <Select
+                value={syncOrdersPlatform}
+                onChange={(e: { target: { value: string } }) => setSyncOrdersPlatform(e.target.value)}
+                label="Platform"
+                disabled={syncOrdersMutation.isPending}
+              >
+                {SYNC_PLATFORM_OPTIONS.map((opt) => (
+                  <MenuItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <Alert severity="info" variant="outlined">
+              Sync fetches new orders since the last successful sync for selected platform(s).
+              Duplicate orders are automatically skipped.
+            </Alert>
+
+            {syncOrdersMutation.isError && (
+              <Alert severity="error">
+                {(syncOrdersMutation.error as Error)?.message || 'Sync request failed.'}
+              </Alert>
+            )}
+
+            {syncOrdersResults && (
+              <Box>
+                <Typography variant="subtitle2" gutterBottom>
+                  Sync Results
+                </Typography>
+                <List dense disablePadding>
+                  {syncOrdersResults.map((r) => (
+                    <ListItem key={r.platform} disableGutters>
+                      <ListItemIcon sx={{ minWidth: 32 }}>
+                        {r.success ? (
+                          <CheckCircle color="success" fontSize="small" />
+                        ) : (
+                          <ErrorIcon color="error" fontSize="small" />
+                        )}
+                      </ListItemIcon>
+                      <ListItemText
+                        primary={r.platform}
+                        secondary={
+                          r.success
+                            ? `${r.new_orders} new orders, ${r.auto_matched} auto-matched, ${r.skipped_duplicates} skipped`
+                            : r.errors.join('; ')
+                        }
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              </Box>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseSyncOrdersDialog}>
+            {syncOrdersResults ? 'Close' : 'Cancel'}
+          </Button>
+          {!syncOrdersResults && (
+            <Button
+              variant="contained"
+              onClick={() => syncOrdersMutation.mutate()}
+              disabled={syncOrdersMutation.isPending}
+              startIcon={syncOrdersMutation.isPending ? <CircularProgress size={18} /> : <Sync />}
+            >
+              {syncOrdersMutation.isPending ? 'Syncing...' : 'Start Sync'}
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={rangeSyncDialogOpen} onClose={handleCloseRangeSyncDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>Admin: Sync Orders by Date Range</DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <FormControl fullWidth>
+              <InputLabel>Platform</InputLabel>
+              <Select
+                value={rangeSyncPlatform}
+                onChange={(e) => setRangeSyncPlatform(e.target.value)}
+                label="Platform"
+                disabled={rangeSyncMutation.isPending}
+              >
+                {SYNC_PLATFORM_OPTIONS.map((opt) => (
+                  <MenuItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <TextField
+              label="Start Date & Time"
+              type="datetime-local"
+              value={rangeSyncSince}
+              onChange={(e) => setRangeSyncSince(e.target.value)}
+              disabled={rangeSyncMutation.isPending}
+              InputLabelProps={{ shrink: true }}
+              fullWidth
+            />
+            <TextField
+              label="End Date & Time"
+              type="datetime-local"
+              value={rangeSyncUntil}
+              onChange={(e) => setRangeSyncUntil(e.target.value)}
+              disabled={rangeSyncMutation.isPending}
+              InputLabelProps={{ shrink: true }}
+              fullWidth
+            />
+
+            <Alert severity="warning" variant="outlined">
+              Admin-only: fetches orders within selected date range. Duplicate orders are skipped.
+            </Alert>
+
+            {rangeSyncMutation.isError && (
+              <Alert severity="error">
+                {(rangeSyncMutation.error as Error)?.message || 'Sync request failed.'}
+              </Alert>
+            )}
+
+            {rangeSyncResults && (
+              <Box>
+                <Typography variant="subtitle2" gutterBottom>
+                  Sync Results
+                </Typography>
+                <List dense disablePadding>
+                  {rangeSyncResults.map((r) => (
+                    <ListItem key={r.platform} disableGutters>
+                      <ListItemIcon sx={{ minWidth: 32 }}>
+                        {r.success ? (
+                          <CheckCircle color="success" fontSize="small" />
+                        ) : (
+                          <ErrorIcon color="error" fontSize="small" />
+                        )}
+                      </ListItemIcon>
+                      <ListItemText
+                        primary={r.platform}
+                        secondary={
+                          r.success
+                            ? `${r.new_orders} new orders, ${r.auto_matched} auto-matched, ${r.skipped_duplicates} skipped`
+                            : r.errors.join('; ')
+                        }
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              </Box>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseRangeSyncDialog}>
+            {rangeSyncResults ? 'Close' : 'Cancel'}
+          </Button>
+          {!rangeSyncResults && (
+            <Button
+              variant="contained"
+              onClick={() => rangeSyncMutation.mutate()}
+              disabled={!isValidRangeSync || rangeSyncMutation.isPending}
+              startIcon={rangeSyncMutation.isPending ? <CircularProgress size={18} /> : <DateRange />}
+            >
+              {rangeSyncMutation.isPending ? 'Syncing...' : 'Start Range Sync'}
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
 
       {/* Bulk Zoho sync dialog */}
       <Dialog

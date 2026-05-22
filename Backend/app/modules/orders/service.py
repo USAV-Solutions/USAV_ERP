@@ -11,6 +11,7 @@ Implements MOD-002-ORD §4: State-aware synchronization with:
 Also implements manual Match & Learn, Confirm, and Reject actions.
 """
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional, Sequence
@@ -270,6 +271,11 @@ class OrderSyncService:
     # PUBLIC – Manual Match & Learn
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _normalize_matching_name(value: str | None) -> str:
+        text = (value or "").strip().lower()
+        return re.sub(r"[^a-z0-9]+", "", text)
+
     async def match_item(
         self,
         item_id: int,
@@ -302,6 +308,72 @@ class OrderSyncService:
         await self.session.flush()
         await self.session.refresh(item)
         return item
+
+    async def refresh_unmatched_item_matches(self) -> dict[str, int]:
+        """
+        Re-check unmatched sales-order items against PLATFORM_LISTING mappings.
+
+        Matching strategy:
+        1) external_item_id -> platform_listing.external_ref_id
+        2) exact item_name -> platform_listing.listed_name (case-insensitive)
+        """
+        unmatched_items = (
+            await self.session.execute(
+                select(OrderItem).where(OrderItem.status == OrderItemStatus.UNMATCHED)
+            )
+        ).scalars().all()
+
+        order_cache: dict[int, Optional[Order]] = {}
+        listing_name_cache: dict[Platform, dict[str, PlatformListing]] = {}
+        checked = 0
+        matched = 0
+
+        for item in unmatched_items:
+            checked += 1
+            if item.order_id not in order_cache:
+                order_cache[item.order_id] = await self.order_repo.get(item.order_id)
+            order = order_cache[item.order_id]
+            if order is None:
+                continue
+
+            entity_platform = _ORDER_TO_ENTITY_PLATFORM.get(order.platform)
+            if entity_platform is None:
+                continue
+
+            listing = None
+            ext_ref = str(item.external_item_id or "").strip()
+            if ext_ref:
+                listing = await self.listing_repo.get_active_by_external_ref(entity_platform, ext_ref)
+
+            if listing is None:
+                normalized_item_name = self._normalize_matching_name(item.item_name)
+                if normalized_item_name:
+                    platform_cache = listing_name_cache.get(entity_platform)
+                    if platform_cache is None:
+                        platform_cache = {}
+                        listings = await self.listing_repo.list_active_with_listed_name(entity_platform)
+                        for listing_item in listings:
+                            normalized_listing_name = self._normalize_matching_name(listing_item.listed_name)
+                            if normalized_listing_name and normalized_listing_name not in platform_cache:
+                                platform_cache[normalized_listing_name] = listing_item
+                        listing_name_cache[entity_platform] = platform_cache
+                    listing = platform_cache.get(normalized_item_name)
+
+            if listing is None or listing.variant_id is None:
+                continue
+
+            item.variant_id = listing.variant_id
+            item.status = OrderItemStatus.MATCHED
+            item.platform_listing_id = listing.id
+            self.session.add(item)
+            matched += 1
+
+        await self.session.flush()
+        return {
+            "checked_items": checked,
+            "matched_items": matched,
+            "unmatched_items": max(checked - matched, 0),
+        }
 
     async def confirm_item(self, item_id: int, notes: Optional[str] = None) -> OrderItem:
         """Confirm an auto-matched item – no DB change needed beyond status."""

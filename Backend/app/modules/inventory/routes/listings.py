@@ -5,6 +5,8 @@ Manages listings for external platforms (Zoho, Amazon, eBay, etc.).
 import logging
 import json
 import shutil
+import csv
+import ast
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -55,6 +57,36 @@ router = APIRouter(prefix="/listings", tags=["Platform Listings"])
 logger = logging.getLogger(__name__)
 EBAY_LISTING_MAX_PICTURES = 24
 EBAY_WIZARD_ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tiff", ".avif", ".heic"}
+
+
+_CSV_PLATFORM_MAP: dict[str, Platform] = {
+    "amazon": Platform.AMAZON,
+    "ebay_mekong": Platform.EBAY_MEKONG,
+    "ebay_usav": Platform.EBAY_USAV,
+    "ebay_dragon": Platform.EBAY_DRAGON,
+    "ecwid": Platform.ECWID,
+    "walmart": Platform.WALMART,
+}
+
+
+def _normalize_csv_token(value: str | None) -> str:
+    token = (value or "").strip().strip("'").strip('"').strip()
+    return token.lower()
+
+
+def _extract_first_listish_value(raw_value: str | None) -> str | None:
+    raw = (raw_value or "").strip()
+    if not raw:
+        return None
+    if raw.startswith("[") and raw.endswith("]"):
+        try:
+            parsed = ast.literal_eval(raw)
+            if isinstance(parsed, list) and parsed:
+                first = str(parsed[0]).strip()
+                return first or None
+        except Exception:
+            return None
+    return raw
 
 
 def _build_ebay_client_for_platform(platform: Platform) -> EbayClient:
@@ -1364,6 +1396,133 @@ async def create_platform_listing(
     
     listing = await listing_repo.create(listing_data)
     return PlatformListingResponse.model_validate(listing)
+
+
+@router.post("/import/csv", response_model=dict[str, Any])
+async def import_platform_listings_csv(
+    _user: AdminOrSalesUser,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Bulk import platform listings from CSV.
+
+    Expected columns:
+    - item_id -> external_ref_id
+    - item_name or listing_name -> listed_name
+    - inventory_db_sku_primary -> ProductVariant.full_sku
+    - platform
+    """
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Only CSV files are supported")
+
+    content = await file.read()
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="CSV must be UTF-8 encoded")
+
+    reader = csv.DictReader(text.splitlines())
+    required = {"item_id", "platform", "inventory_db_sku_primary"}
+    headers = set(reader.fieldnames or [])
+    missing = [col for col in sorted(required) if col not in headers]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Missing required CSV columns: {', '.join(missing)}")
+
+    listing_repo = PlatformListingRepository(db)
+    variant_repo = ProductVariantRepository(db)
+
+    created = 0
+    updated = 0
+    skipped = 0
+    errors: list[str] = []
+    created_logs: list[str] = []
+    updated_logs: list[str] = []
+
+    for row_number, row in enumerate(reader, start=2):
+        external_ref_id = (row.get("item_id") or "").strip()
+        if not external_ref_id:
+            skipped += 1
+            message = f"row {row_number}: missing item_id"
+            errors.append(message)
+            logger.warning("Listings CSV import skipped: %s", message)
+            continue
+
+        platform_raw = _extract_first_listish_value(row.get("platform"))
+        platform_key = _normalize_csv_token(platform_raw)
+        platform = _CSV_PLATFORM_MAP.get(platform_key)
+        if not platform:
+            skipped += 1
+            message = f"row {row_number}: unsupported platform '{row.get('platform')}'"
+            errors.append(message)
+            logger.warning("Listings CSV import skipped: %s", message)
+            continue
+
+        sku = (row.get("inventory_db_sku_primary") or "").strip()
+        if not sku:
+            skipped += 1
+            message = f"row {row_number}: missing inventory_db_sku_primary"
+            errors.append(message)
+            logger.warning("Listings CSV import skipped: %s", message)
+            continue
+
+        variant = await variant_repo.get_by_sku(sku)
+        if not variant:
+            skipped += 1
+            message = f"row {row_number}: variant not found for SKU '{sku}'"
+            errors.append(message)
+            logger.warning("Listings CSV import skipped: %s", message)
+            continue
+
+        listed_name = _extract_first_listish_value(row.get("listing_name")) or _extract_first_listish_value(row.get("item_name"))
+        listing_data = {
+            "variant_id": variant.id,
+            "platform": platform,
+            "external_ref_id": external_ref_id,
+            "merchant_sku": variant.full_sku,
+            "listed_name": (listed_name or "").strip() or None,
+            "sync_status": PlatformSyncStatus.PENDING,
+        }
+
+        existing = await listing_repo.get_by_external_ref(platform, external_ref_id)
+        if existing:
+            changed_fields: list[str] = []
+            if existing.variant_id != listing_data["variant_id"]:
+                changed_fields.append("variant_id")
+            if existing.merchant_sku != listing_data["merchant_sku"]:
+                changed_fields.append("merchant_sku")
+            if existing.listed_name != listing_data["listed_name"]:
+                changed_fields.append("listed_name")
+            if existing.sync_status != listing_data["sync_status"]:
+                changed_fields.append("sync_status")
+            await listing_repo.update(existing, listing_data)
+            updated += 1
+            summary = ", ".join(changed_fields) if changed_fields else "no field changes"
+            log_line = (
+                f"row {row_number}: updated listing_id={existing.id}, platform={platform.value}, "
+                f"external_ref_id={external_ref_id}, sku={variant.full_sku}, changed={summary}"
+            )
+            updated_logs.append(log_line)
+            logger.info("Listings CSV import update: %s", log_line)
+        else:
+            created_listing = await listing_repo.create(listing_data)
+            created += 1
+            log_line = (
+                f"row {row_number}: created listing_id={created_listing.id}, platform={platform.value}, "
+                f"external_ref_id={external_ref_id}, sku={variant.full_sku}"
+            )
+            created_logs.append(log_line)
+            logger.info("Listings CSV import create: %s", log_line)
+
+    return {
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        "total_rows": created + updated + skipped,
+        "created_logs": created_logs[:200],
+        "updated_logs": updated_logs[:200],
+        "errors": errors[:200],
+    }
 
 
 @router.get("/{listing_id}", response_model=PlatformListingResponse)

@@ -215,6 +215,41 @@ class PlatformListingRepository(BaseRepository[PlatformListing]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_active_by_listed_name_exact(
+        self,
+        platform: Platform,
+        name: str,
+    ) -> Optional[PlatformListing]:
+        """Exact listed_name match (case-insensitive), restricted to active variants."""
+        normalized = (name or "").strip()
+        if not normalized:
+            return None
+        stmt = (
+            select(PlatformListing)
+            .join(ProductVariant, ProductVariant.id == PlatformListing.variant_id)
+            .where(PlatformListing.platform == platform)
+            .where(PlatformListing.listed_name.ilike(normalized))
+            .where(ProductVariant.is_active == True)
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def list_active_with_listed_name(
+        self,
+        platform: Platform,
+    ) -> Sequence[PlatformListing]:
+        """Return active listings on a platform that have a listed_name."""
+        stmt = (
+            select(PlatformListing)
+            .join(ProductVariant, ProductVariant.id == PlatformListing.variant_id)
+            .where(PlatformListing.platform == platform)
+            .where(PlatformListing.listed_name.is_not(None))
+            .where(ProductVariant.is_active == True)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalars().all()
+
 
 class InventoryItemRepository(BaseRepository[InventoryItem]):
     """Repository for InventoryItem operations."""

@@ -10,14 +10,15 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, require_roles
 from app.core.database import get_db
 from app.models import UserRole
-from app.models.entities import ProductVariant
+from app.models.entities import Customer, ProductVariant
 from app.models.purchasing import PurchaseOrder, PurchaseOrderItem, Vendor
+from app.modules.orders.models import Order, OrderItem
 from app.modules.accounting.bank_convert_utils import BANK_CONVERT_PARSERS
 
 
@@ -28,16 +29,17 @@ router = APIRouter(
 )
 
 GroupByType = Literal["sku", "week", "month", "quarter", "year", "source", "vendor"]
-OrderByType = Literal["total_price", "sku", "source", "date"]
+SalesGroupByType = Literal["sku", "week", "month", "quarter", "year", "source", "customer"]
+OrderByType = Literal["total_price", "quantity", "sku", "source", "date"]
 
 
-def _group_value(group_by: GroupByType, order_date: date | None, sku: str | None, source: str | None, vendor: str | None) -> str:
+def _group_value(group_by: GroupByType | SalesGroupByType, order_date: date | None, sku: str | None, source: str | None, counterparty: str | None) -> str:
     if group_by == "sku":
         return (sku or "UNMATCHED").strip() or "UNMATCHED"
     if group_by == "source":
         return (source or "UNKNOWN").strip() or "UNKNOWN"
-    if group_by == "vendor":
-        return (vendor or "UNKNOWN").strip() or "UNKNOWN"
+    if group_by in ("vendor", "customer"):
+        return (counterparty or "UNKNOWN").strip() or "UNKNOWN"
     if not order_date:
         return "UNKNOWN"
     if group_by == "week":
@@ -192,7 +194,7 @@ async def _build_purchase_order_report(
             order_date=row["order_date"],
             sku=row["sku"],
             source=row["source"],
-            vendor=row["vendor"],
+            counterparty=row["vendor"],
         )
         entry = grouped.setdefault(
             key,
@@ -220,6 +222,8 @@ async def _build_purchase_order_report(
     grouped_values = list(grouped.values())
     if order_by == "total_price":
         grouped_values.sort(key=lambda value: Decimal(value["total_price"]), reverse=True)
+    elif order_by == "quantity":
+        grouped_values.sort(key=lambda value: int(value["quantity"]), reverse=True)
     elif order_by == "sku":
         grouped_values.sort(key=lambda value: str(value["sku"] or "").lower())
     elif order_by == "source":
@@ -293,6 +297,174 @@ async def _build_purchase_order_filter_options(
         "item_options": [{"value": value, "label": label} for value, label in sorted(item_options.items(), key=lambda item: item[1].lower())],
         "source_options": source_values,
         "vendor_options": vendor_values,
+    }
+
+
+async def _build_sales_order_report(
+    db: AsyncSession,
+    start_date: date,
+    end_date: date,
+    group_by: SalesGroupByType,
+    item_filter: list[str] | None = None,
+    source_filter: list[str] | None = None,
+    customer_filter: list[str] | None = None,
+    order_by: OrderByType = "date",
+) -> list[dict[str, object]]:
+    stmt = (
+        select(
+            Order.ordered_at.label("order_at"),
+            Order.external_order_number.label("order_number"),
+            Order.external_order_id.label("order_id"),
+            OrderItem.item_name.label("item"),
+            ProductVariant.full_sku.label("sku"),
+            OrderItem.external_sku.label("external_sku"),
+            Order.source.label("source"),
+            OrderItem.quantity.label("quantity"),
+            OrderItem.total_price.label("item_total_price"),
+            Order.tax_amount.label("tax_amount"),
+            Order.shipping_amount.label("shipping_amount"),
+            Customer.name.label("customer"),
+        )
+        .join(OrderItem, OrderItem.order_id == Order.id)
+        .outerjoin(ProductVariant, ProductVariant.id == OrderItem.variant_id)
+        .outerjoin(Customer, Customer.id == Order.customer_id)
+        .where(Order.ordered_at.is_not(None))
+        .where(and_(func.date(Order.ordered_at) >= start_date, func.date(Order.ordered_at) <= end_date))
+    )
+    if item_filter:
+        stmt = stmt.where(
+            or_(
+                *[
+                    or_(
+                        ProductVariant.full_sku.ilike(f"%{token}%"),
+                        OrderItem.external_sku.ilike(f"%{token}%"),
+                        OrderItem.item_name.ilike(f"%{token}%"),
+                    )
+                    for token in item_filter
+                ]
+            )
+        )
+    if source_filter:
+        stmt = stmt.where(Order.source.in_(source_filter))
+    if customer_filter:
+        stmt = stmt.where(or_(*[Customer.name.ilike(f"%{token}%") for token in customer_filter]))
+    rows = (await db.execute(stmt)).mappings().all()
+
+    grouped: dict[str, dict[str, object]] = {}
+    for row in rows:
+        ordered_at = row["order_at"]
+        order_date = ordered_at.date() if isinstance(ordered_at, datetime) else None
+        display_sku = (row["sku"] or row["external_sku"] or "").strip()
+        display_order_number = (row["order_number"] or row["order_id"] or "").strip()
+        key = _group_value(
+            group_by=group_by,
+            order_date=order_date,
+            sku=display_sku,
+            source=row["source"],
+            counterparty=row["customer"],
+        )
+        entry = grouped.setdefault(
+            key,
+            {
+                "group": key,
+                "order_date": order_date,
+                "order_number": display_order_number if group_by == "sku" else "",
+                "item": row["item"] if group_by == "sku" else "",
+                "sku": display_sku if group_by == "sku" else "",
+                "source": row["source"] if group_by == "source" else "",
+                "customer": row["customer"] if group_by == "customer" else "",
+                "quantity": 0,
+                "total_price": Decimal("0"),
+                "tax": Decimal("0"),
+                "shipping": Decimal("0"),
+                "handling": Decimal("0"),
+            },
+        )
+        entry["quantity"] = int(entry["quantity"]) + int(row["quantity"] or 0)
+        entry["total_price"] = Decimal(entry["total_price"]) + Decimal(row["item_total_price"] or 0)
+        entry["tax"] = Decimal(entry["tax"]) + Decimal(row["tax_amount"] or 0)
+        entry["shipping"] = Decimal(entry["shipping"]) + Decimal(row["shipping_amount"] or 0)
+
+    grouped_values = list(grouped.values())
+    if order_by == "total_price":
+        grouped_values.sort(key=lambda value: Decimal(value["total_price"]), reverse=True)
+    elif order_by == "quantity":
+        grouped_values.sort(key=lambda value: int(value["quantity"]), reverse=True)
+    elif order_by == "sku":
+        grouped_values.sort(key=lambda value: str(value["sku"] or "").lower())
+    elif order_by == "source":
+        grouped_values.sort(key=lambda value: str(value["source"] or "").lower())
+    else:
+        grouped_values.sort(
+            key=lambda value: value["order_date"] if isinstance(value["order_date"], date) else date.min,
+            reverse=True,
+        )
+
+    report_rows: list[dict[str, object]] = []
+    for value in grouped_values:
+        report_rows.append(
+            {
+                "group": value["group"],
+                "order_date": value["order_date"].isoformat() if value["order_date"] else "",
+                "order_number": value["order_number"],
+                "item": value["item"],
+                "sku": value["sku"],
+                "source": value["source"],
+                "quantity": value["quantity"],
+                "total_price": str(Decimal(value["total_price"]).quantize(Decimal("0.01"))),
+                "tax": str(Decimal(value["tax"]).quantize(Decimal("0.01"))),
+                "shipping": str(Decimal(value["shipping"]).quantize(Decimal("0.01"))),
+                "handling": str(Decimal(value["handling"]).quantize(Decimal("0.01"))),
+                "customer": value["customer"],
+            }
+        )
+    return report_rows
+
+
+async def _build_sales_order_filter_options(
+    db: AsyncSession,
+    start_date: date,
+    end_date: date,
+) -> dict[str, object]:
+    stmt = (
+        select(
+            ProductVariant.full_sku.label("sku"),
+            OrderItem.external_sku.label("external_sku"),
+            Order.source.label("source"),
+            Customer.name.label("customer"),
+            OrderItem.item_name.label("name"),
+        )
+        .join(OrderItem, OrderItem.order_id == Order.id)
+        .outerjoin(ProductVariant, ProductVariant.id == OrderItem.variant_id)
+        .outerjoin(Customer, Customer.id == Order.customer_id)
+        .where(Order.ordered_at.is_not(None))
+        .where(and_(func.date(Order.ordered_at) >= start_date, func.date(Order.ordered_at) <= end_date))
+    )
+    rows = (await db.execute(stmt)).mappings().all()
+
+    item_options: dict[str, str] = {}
+    for row in rows:
+        sku = (row["sku"] or row["external_sku"] or "").strip()
+        name = (row["name"] or "").strip()
+        label = ""
+        value = ""
+        if sku and name:
+            label = f"{sku} - {name}"
+            value = sku
+        elif sku:
+            label = sku
+            value = sku
+        elif name:
+            label = name
+            value = name
+        if value and value not in item_options:
+            item_options[value] = label
+    source_values = sorted({(row["source"] or "").strip() for row in rows if (row["source"] or "").strip()})
+    customer_values = sorted({(row["customer"] or "").strip() for row in rows if (row["customer"] or "").strip()})
+    return {
+        "item_options": [{"value": value, "label": label} for value, label in sorted(item_options.items(), key=lambda item: item[1].lower())],
+        "source_options": source_values,
+        "customer_options": customer_values,
     }
 
 
@@ -395,6 +567,94 @@ async def get_purchase_order_report_filter_options(
     if end_date < start_date:
         return {"item_options": [], "source_options": [], "vendor_options": []}
     return await _build_purchase_order_filter_options(db, start_date=start_date, end_date=end_date)
+
+
+@router.get("/reports/sales-orders")
+async def get_sales_order_reports(
+    _: CurrentUser,
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    order_by: OrderByType = Query("date"),
+    group_by: SalesGroupByType = Query("month"),
+    item: list[str] | None = Query(default=None),
+    source: list[str] | None = Query(default=None),
+    customer: list[str] | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    if end_date < start_date:
+        return {"rows": [], "message": "end_date must be on or after start_date"}
+    rows = await _build_sales_order_report(
+        db,
+        start_date=start_date,
+        end_date=end_date,
+        order_by=order_by,
+        group_by=group_by,
+        item_filter=_clean_filters(item),
+        source_filter=_clean_filters(source),
+        customer_filter=_clean_filters(customer),
+    )
+    return {"rows": rows}
+
+
+@router.get("/reports/sales-orders/export")
+async def export_sales_order_reports(
+    _: CurrentUser,
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    order_by: OrderByType = Query("date"),
+    group_by: SalesGroupByType = Query("month"),
+    item: list[str] | None = Query(default=None),
+    source: list[str] | None = Query(default=None),
+    customer: list[str] | None = Query(default=None),
+    file_type: Literal["csv", "xlsx"] = Query("csv"),
+    db: AsyncSession = Depends(get_db),
+):
+    if end_date < start_date:
+        end_date = start_date
+    rows = await _build_sales_order_report(
+        db,
+        start_date=start_date,
+        end_date=end_date,
+        order_by=order_by,
+        group_by=group_by,
+        item_filter=_clean_filters(item),
+        source_filter=_clean_filters(source),
+        customer_filter=_clean_filters(customer),
+    )
+    headers = ["group", "order_date", "order_number", "item", "sku", "source", "quantity", "total_price", "tax", "shipping", "handling", "customer"]
+    stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+
+    if file_type == "csv":
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=headers)
+        writer.writeheader()
+        writer.writerows(rows)
+        filename = f"sales_order_report_{group_by}_{stamp}.csv"
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    xlsx_content = _xlsx_bytes(rows=rows, headers=headers)
+    filename = f"sales_order_report_{group_by}_{stamp}.xlsx"
+    return StreamingResponse(
+        io.BytesIO(xlsx_content),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/reports/sales-orders/filter-options")
+async def get_sales_order_report_filter_options(
+    _: CurrentUser,
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    if end_date < start_date:
+        return {"item_options": [], "source_options": [], "customer_options": []}
+    return await _build_sales_order_filter_options(db, start_date=start_date, end_date=end_date)
 
 
 @router.post("/bank-convert")

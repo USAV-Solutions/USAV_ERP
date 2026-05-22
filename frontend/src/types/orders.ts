@@ -112,6 +112,16 @@ export interface OrderItemCreateRequest {
   variant_id?: number
 }
 
+export interface OrderItemUpdateRequest {
+  external_item_id?: string | null
+  external_sku?: string | null
+  item_name?: string
+  quantity?: number
+  unit_price?: number
+  total_price?: number
+  variant_id?: number
+}
+
 // ── Order Header Schemas ─────────────────────────────────────────────
 
 export interface OrderBrief {
@@ -253,4 +263,10 @@ export interface SyncStatusResponse {
   total_orders: number
   total_unmatched_items: number
   total_matched_items: number
+}
+
+export interface RefreshMatchingResponse {
+  checked_items: number
+  matched_items: number
+  unmatched_items: number
 }
