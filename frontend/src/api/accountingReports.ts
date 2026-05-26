@@ -92,6 +92,7 @@ export async function exportPurchaseOrderReport(params: {
   vendor?: string[]
   poStatus?: string[]
   fileType: 'csv' | 'xlsx'
+  exportFull?: boolean
 }): Promise<Blob> {
   const query = new URLSearchParams()
   query.set('start_date', params.startDate)
@@ -103,6 +104,9 @@ export async function exportPurchaseOrderReport(params: {
   appendListParams(query, 'vendor', params.vendor)
   appendListParams(query, 'po_status', params.poStatus)
   query.set('file_type', params.fileType)
+  if (params.exportFull) {
+    query.set('export_full', 'true')
+  }
 
   const { data } = await axiosClient.get(
     `${ACCOUNTING.PURCHASE_ORDER_REPORTS_EXPORT}?${query.toString()}`,
@@ -157,6 +161,7 @@ export async function exportSalesOrderReport(params: {
   source?: string[]
   customer?: string[]
   fileType: 'csv' | 'xlsx'
+  exportFull?: boolean
 }): Promise<Blob> {
   const query = new URLSearchParams()
   query.set('start_date', params.startDate)
@@ -167,6 +172,9 @@ export async function exportSalesOrderReport(params: {
   appendListParams(query, 'source', params.source)
   appendListParams(query, 'customer', params.customer)
   query.set('file_type', params.fileType)
+  if (params.exportFull) {
+    query.set('export_full', 'true')
+  }
 
   const { data } = await axiosClient.get(
     `${ACCOUNTING.SALES_ORDER_REPORTS_EXPORT}?${query.toString()}`,

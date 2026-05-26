@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import CurrentUser, require_roles
 from app.core.database import get_db
 from app.models import UserRole
-from app.models.entities import Customer, ProductVariant
+from app.models.entities import Customer, PlatformListing, ProductVariant
 from app.models.purchasing import PurchaseOrder, PurchaseOrderItem, Vendor
 from app.modules.orders.models import Order, OrderItem
 from app.modules.accounting.bank_convert_utils import BANK_CONVERT_PARSERS
@@ -150,6 +150,7 @@ async def _build_purchase_order_report(
     vendor_filter: list[str] | None = None,
     po_status_filter: list[str] | None = None,
     order_by: OrderByType = "date",
+    export_full: bool = False,
 ) -> list[dict[str, object]]:
     stmt = (
         select(
@@ -157,6 +158,7 @@ async def _build_purchase_order_report(
             PurchaseOrder.po_number.label("order_number"),
             PurchaseOrderItem.external_item_name.label("item"),
             ProductVariant.full_sku.label("sku"),
+            ProductVariant.variant_name.label("inventory_name"),
             PurchaseOrder.source.label("source"),
             PurchaseOrderItem.quantity.label("quantity"),
             PurchaseOrderItem.total_price.label("item_total_price"),
@@ -189,6 +191,43 @@ async def _build_purchase_order_report(
     if po_status_filter:
         stmt = stmt.where(PurchaseOrder.deliver_status.in_(po_status_filter))
     rows = (await db.execute(stmt)).mappings().all()
+
+    if export_full:
+        export_rows = list(rows)
+        if order_by == "total_price":
+            export_rows.sort(key=lambda row: Decimal(row["item_total_price"] or 0), reverse=True)
+        elif order_by == "quantity":
+            export_rows.sort(key=lambda row: int(row["quantity"] or 0), reverse=True)
+        elif order_by == "sku":
+            export_rows.sort(key=lambda row: str(row["sku"] or "").lower())
+        elif order_by == "source":
+            export_rows.sort(key=lambda row: str(row["source"] or "").lower())
+        else:
+            export_rows.sort(
+                key=lambda row: row["order_date"] if isinstance(row["order_date"], date) else date.min,
+                reverse=True,
+            )
+
+        report_rows: list[dict[str, object]] = []
+        for row in export_rows:
+            report_rows.append(
+                {
+                    "group": "",
+                    "order_date": row["order_date"].isoformat() if row["order_date"] else "",
+                    "order_number": row["order_number"],
+                    "item": row["item"],
+                    "sku": row["sku"],
+                    "inventory_name": row["inventory_name"],
+                    "source": row["source"],
+                    "quantity": row["quantity"],
+                    "total_price": str(Decimal(row["item_total_price"] or 0).quantize(Decimal("0.01"))),
+                    "tax": str(Decimal(row["tax_amount"] or 0).quantize(Decimal("0.01"))),
+                    "shipping": str(Decimal(row["shipping_amount"] or 0).quantize(Decimal("0.01"))),
+                    "handling": str(Decimal(row["handling_amount"] or 0).quantize(Decimal("0.01"))),
+                    "vendor": row["vendor"],
+                }
+            )
+        return report_rows
 
     grouped: dict[str, dict[str, object]] = {}
     for row in rows:
@@ -321,6 +360,7 @@ async def _build_sales_order_report(
     source_filter: list[str] | None = None,
     customer_filter: list[str] | None = None,
     order_by: OrderByType = "date",
+    export_full: bool = False,
 ) -> list[dict[str, object]]:
     stmt = (
         select(
@@ -329,6 +369,9 @@ async def _build_sales_order_report(
             Order.external_order_id.label("order_id"),
             OrderItem.item_name.label("item"),
             ProductVariant.full_sku.label("sku"),
+            ProductVariant.variant_name.label("inventory_name"),
+            PlatformListing.external_ref_id.label("listing_external_ref"),
+            OrderItem.external_item_id.label("external_item_id"),
             OrderItem.external_sku.label("external_sku"),
             Order.source.label("source"),
             OrderItem.quantity.label("quantity"),
@@ -339,6 +382,7 @@ async def _build_sales_order_report(
         )
         .join(OrderItem, OrderItem.order_id == Order.id)
         .outerjoin(ProductVariant, ProductVariant.id == OrderItem.variant_id)
+        .outerjoin(PlatformListing, PlatformListing.id == OrderItem.platform_listing_id)
         .outerjoin(Customer, Customer.id == Order.customer_id)
         .where(Order.ordered_at.is_not(None))
         .where(and_(func.date(Order.ordered_at) >= start_date, func.date(Order.ordered_at) <= end_date))
@@ -355,12 +399,68 @@ async def _build_sales_order_report(
                     for token in item_filter
                 ]
             )
-        )
+            )
     if source_filter:
         stmt = stmt.where(Order.source.in_(source_filter))
     if customer_filter:
         stmt = stmt.where(or_(*[Customer.name.ilike(f"%{token}%") for token in customer_filter]))
     rows = (await db.execute(stmt)).mappings().all()
+
+    if export_full:
+        export_rows = list(rows)
+        if order_by == "total_price":
+            export_rows.sort(key=lambda row: Decimal(row["item_total_price"] or 0), reverse=True)
+        elif order_by == "quantity":
+            export_rows.sort(key=lambda row: int(row["quantity"] or 0), reverse=True)
+        elif order_by == "sku":
+            export_rows.sort(
+                key=lambda row: str(
+                    row["sku"]
+                    or row["listing_external_ref"]
+                    or row["external_item_id"]
+                    or row["external_sku"]
+                    or ""
+                ).lower()
+            )
+        elif order_by == "source":
+            export_rows.sort(key=lambda row: str(row["source"] or "").lower())
+        else:
+            export_rows.sort(
+                key=lambda row: row["order_at"] if isinstance(row["order_at"], datetime) else datetime.min,
+                reverse=True,
+            )
+
+        report_rows: list[dict[str, object]] = []
+        for row in export_rows:
+            ordered_at = row["order_at"]
+            order_date = ordered_at.date() if isinstance(ordered_at, datetime) else None
+            display_order_number = (row["order_number"] or row["order_id"] or "").strip()
+            inventory_sku = (row["sku"] or "").strip()
+            platform_sku = (
+                row["listing_external_ref"]
+                or row["external_item_id"]
+                or row["external_sku"]
+                or ""
+            ).strip()
+            report_rows.append(
+                {
+                    "group": "",
+                    "order_date": order_date.isoformat() if order_date else "",
+                    "order_number": display_order_number,
+                    "item": row["item"],
+                    "inventory_name": row["inventory_name"],
+                    "inventory_sku": inventory_sku,
+                    "platform_sku": platform_sku,
+                    "source": row["source"],
+                    "quantity": row["quantity"],
+                    "total_price": str(Decimal(row["item_total_price"] or 0).quantize(Decimal("0.01"))),
+                    "tax": str(Decimal(row["tax_amount"] or 0).quantize(Decimal("0.01"))),
+                    "shipping": str(Decimal(row["shipping_amount"] or 0).quantize(Decimal("0.01"))),
+                    "handling": str(Decimal("0").quantize(Decimal("0.01"))),
+                    "customer": row["customer"],
+                }
+            )
+        return report_rows
 
     grouped: dict[str, dict[str, object]] = {}
     for row in rows:
@@ -534,6 +634,7 @@ async def export_purchase_order_reports(
     vendor: list[str] | None = Query(default=None),
     po_status: list[str] | None = Query(default=None),
     file_type: Literal["csv", "xlsx"] = Query("csv"),
+    export_full: bool = Query(False),
     db: AsyncSession = Depends(get_db),
 ):
     if end_date < start_date:
@@ -548,8 +649,25 @@ async def export_purchase_order_reports(
         source_filter=_clean_filters(source),
         vendor_filter=_clean_filters(vendor),
         po_status_filter=_clean_filters(po_status),
+        export_full=export_full,
     )
     headers = ["group", "order_date", "order_number", "item", "sku", "source", "quantity", "total_price", "tax", "shipping", "handling", "vendor"]
+    if export_full:
+        headers = [
+            "group",
+            "order_date",
+            "order_number",
+            "item",
+            "sku",
+            "inventory_name",
+            "source",
+            "quantity",
+            "total_price",
+            "tax",
+            "shipping",
+            "handling",
+            "vendor",
+        ]
     stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
     if file_type == "csv":
@@ -557,7 +675,7 @@ async def export_purchase_order_reports(
         writer = csv.DictWriter(output, fieldnames=headers)
         writer.writeheader()
         writer.writerows(rows)
-        filename = f"purchase_order_report_{group_by}_{stamp}.csv"
+        filename = f"purchase_order_report_{'full' if export_full else group_by}_{stamp}.csv"
         return StreamingResponse(
             iter([output.getvalue()]),
             media_type="text/csv",
@@ -565,7 +683,7 @@ async def export_purchase_order_reports(
         )
 
     xlsx_content = _xlsx_bytes(rows=rows, headers=headers)
-    filename = f"purchase_order_report_{group_by}_{stamp}.xlsx"
+    filename = f"purchase_order_report_{'full' if export_full else group_by}_{stamp}.xlsx"
     return StreamingResponse(
         io.BytesIO(xlsx_content),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -623,6 +741,7 @@ async def export_sales_order_reports(
     source: list[str] | None = Query(default=None),
     customer: list[str] | None = Query(default=None),
     file_type: Literal["csv", "xlsx"] = Query("csv"),
+    export_full: bool = Query(False),
     db: AsyncSession = Depends(get_db),
 ):
     if end_date < start_date:
@@ -636,8 +755,26 @@ async def export_sales_order_reports(
         item_filter=_clean_filters(item),
         source_filter=_clean_filters(source),
         customer_filter=_clean_filters(customer),
+        export_full=export_full,
     )
     headers = ["group", "order_date", "order_number", "item", "sku", "source", "quantity", "total_price", "tax", "shipping", "handling", "customer"]
+    if export_full:
+        headers = [
+            "group",
+            "order_date",
+            "order_number",
+            "item",
+            "inventory_name",
+            "inventory_sku",
+            "platform_sku",
+            "source",
+            "quantity",
+            "total_price",
+            "tax",
+            "shipping",
+            "handling",
+            "customer",
+        ]
     stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
     if file_type == "csv":
@@ -645,7 +782,7 @@ async def export_sales_order_reports(
         writer = csv.DictWriter(output, fieldnames=headers)
         writer.writeheader()
         writer.writerows(rows)
-        filename = f"sales_order_report_{group_by}_{stamp}.csv"
+        filename = f"sales_order_report_{'full' if export_full else group_by}_{stamp}.csv"
         return StreamingResponse(
             iter([output.getvalue()]),
             media_type="text/csv",
@@ -653,7 +790,7 @@ async def export_sales_order_reports(
         )
 
     xlsx_content = _xlsx_bytes(rows=rows, headers=headers)
-    filename = f"sales_order_report_{group_by}_{stamp}.xlsx"
+    filename = f"sales_order_report_{'full' if export_full else group_by}_{stamp}.xlsx"
     return StreamingResponse(
         io.BytesIO(xlsx_content),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
