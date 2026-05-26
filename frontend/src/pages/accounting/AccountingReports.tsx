@@ -193,7 +193,7 @@ export default function AccountingReports() {
     setExportError('')
   }
 
-  const handleExport = async (fileType: 'csv' | 'xlsx') => {
+  const handleExport = async (fileType: 'csv' | 'xlsx', exportFull = false) => {
     try {
       setExportError('')
       setExporting(fileType)
@@ -208,8 +208,9 @@ export default function AccountingReports() {
           vendor: appliedCounterparty,
           poStatus: appliedPoStatus,
           fileType,
+          exportFull,
         })
-        downloadBlob(blob, `purchase_order_report_${appliedGroupBy}.${fileType}`)
+        downloadBlob(blob, `purchase_order_report_${exportFull ? 'full' : appliedGroupBy}.${fileType}`)
       } else {
         const blob = await exportSalesOrderReport({
           startDate: appliedStartDate,
@@ -220,8 +221,9 @@ export default function AccountingReports() {
           source: appliedSource,
           customer: appliedCounterparty,
           fileType,
+          exportFull,
         })
-        downloadBlob(blob, `sales_order_report_${appliedGroupBy}.${fileType}`)
+        downloadBlob(blob, `sales_order_report_${exportFull ? 'full' : appliedGroupBy}.${fileType}`)
       }
     } catch {
       setExportError('Failed to export report')
@@ -425,6 +427,20 @@ export default function AccountingReports() {
             disabled={exporting !== null}
           >
             {exporting === 'xlsx' ? 'Exporting XLSX...' : 'Export XLSX'}
+          </Button>
+          <Button
+            variant="outlined"
+            onClick={() => handleExport('csv', true)}
+            disabled={exporting !== null}
+          >
+            {exporting === 'csv' ? 'Exporting Full CSV...' : 'Export Full CSV'}
+          </Button>
+          <Button
+            variant="outlined"
+            onClick={() => handleExport('xlsx', true)}
+            disabled={exporting !== null}
+          >
+            {exporting === 'xlsx' ? 'Exporting Full XLSX...' : 'Export Full XLSX'}
           </Button>
         </Stack>
 
