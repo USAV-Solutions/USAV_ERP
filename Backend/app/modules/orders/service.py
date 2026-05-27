@@ -884,39 +884,42 @@ class OrderSyncService:
         if entity_platform is None:
             return
 
+
         ext_ref = item.external_item_id or item.external_sku
 
-        # Check if a listing already exists for this variant+platform
-        existing = await self.listing_repo.get_by_variant_platform(
-            variant_id, entity_platform,
-        )
-        if existing is not None:
-            # Update with richer data if missing
-            changed = False
-            if not existing.external_ref_id and ext_ref:
-                existing.external_ref_id = ext_ref
-                changed = True
-            if not existing.listed_name and item.item_name:
-                existing.listed_name = item.item_name
-                changed = True
-            if not existing.listing_price and item.unit_price:
-                existing.listing_price = item.unit_price
-                changed = True
-            if changed:
-                self.session.add(existing)
-                try:
-                    await self.session.flush()
-                except IntegrityError:
-                    await self.session.rollback()
-            return
-
-        # Also check by external_ref_id to avoid duplicate ref conflicts
+        # If this external ref already exists, prefer updating that listing
+        # (but block creating a new mapping that points the same ext_ref to
+        # a different variant). This allows a single variant to have multiple
+        # listings on the same platform as long as each listing uses a unique
+        # external_ref_id.
         if ext_ref:
             ref_existing = await self.listing_repo.get_by_external_ref(
                 entity_platform, ext_ref,
             )
             if ref_existing is not None:
-                return  # Already mapped to a different variant
+                # If the existing listing maps to a different variant, do not
+                # create a conflicting mapping.
+                if ref_existing.variant_id != variant_id:
+                    return
+
+                # Same variant: enrich missing fields and finish.
+                changed = False
+                if not ref_existing.external_ref_id and ext_ref:
+                    ref_existing.external_ref_id = ext_ref
+                    changed = True
+                if not ref_existing.listed_name and item.item_name:
+                    ref_existing.listed_name = item.item_name
+                    changed = True
+                if not ref_existing.listing_price and item.unit_price:
+                    ref_existing.listing_price = item.unit_price
+                    changed = True
+                if changed:
+                    self.session.add(ref_existing)
+                    try:
+                        await self.session.flush()
+                    except IntegrityError:
+                        await self.session.rollback()
+                return
 
         listing = PlatformListing(
             variant_id=variant_id,

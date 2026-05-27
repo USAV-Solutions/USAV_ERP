@@ -31,6 +31,10 @@ Sales orders domain: ingestion/import, listing-centric matching, filtering, cust
 - Sales-order line items now support inline maintenance via `PATCH /orders/items/{item_id}` and `DELETE /orders/items/{item_id}`; successful edits/deletes mark parent order `zoho_sync_status=DIRTY` and recalculate order subtotal/total from current line totals.
 - Admin can bulk re-check unmatched line items via `POST /orders/sync/refresh-matching`; it tries `external_item_id` → `platform_listing.external_ref_id` first, then normalized name matching (`lowercase` + punctuation/spacing removed) between `item_name` and `platform_listing.listed_name`, and auto-sets `order_item.variant_id/status` when a mapped active listing is found.
 
+## Recent Behavior Change: Platform Listing mappings
+
+- The `_learn_listing` flow now allows multiple `PlatformListing` rows for the same `variant_id` on the same `platform` as long as each listing has a unique `external_ref_id`. The service prefers to update an existing listing when the incoming `external_ref_id` already exists; it will block creating a conflicting mapping that would point the same `external_ref_id` at a different variant. This change prevents accidental deduplication of distinct listings that reference the same internal variant.
+
 ## Child Folders
 - `schemas/`
 
