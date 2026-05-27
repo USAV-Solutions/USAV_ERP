@@ -697,14 +697,22 @@ class EbayClient(BasePlatformClient):
                         logger.debug(f"eBay {self.store_name}: No more orders, stopping pagination")
                         break
                     
-                    # Convert each order
+                    # Hydrate each order from the detail endpoint so line items
+                    # carry legacyItemId as the external ref id.
                     for order_data in page_orders:
                         try:
-                            order = self._convert_order(order_data)
-                            orders.append(order)
+                            order_id = order_data.get("orderId")
+                            if not order_id:
+                                logger.debug(
+                                    f"[DEBUG.EXTERNAL_API] eBay {self.store_name}: skipping order without orderId in list response"
+                                )
+                                continue
+                            detailed_order = await self.get_order(order_id)
+                            if detailed_order is not None:
+                                orders.append(detailed_order)
                         except Exception as e:
                             logger.error(
-                                f"eBay {self.store_name}: Error converting order {order_data.get('orderId')}: {e}",
+                                f"eBay {self.store_name}: Error hydrating order {order_data.get('orderId')}: {e}",
                                 exc_info=True
                             )
                     
@@ -717,7 +725,7 @@ class EbayClient(BasePlatformClient):
                         logger.debug(f"eBay {self.store_name}: Reached end of results")
                         break
                 
-                logger.debug(f"[DEBUG.EXTERNAL_API] eBay {self.store_name}: Successfully fetched {len(orders)} orders")
+                logger.debug(f"[DEBUG.EXTERNAL_API] eBay {self.store_name}: Successfully fetched {len(orders)} orders via detail endpoint")
                 return orders
                 
         except httpx.HTTPStatusError as e:
@@ -738,9 +746,25 @@ class EbayClient(BasePlatformClient):
         Endpoint: GET /sell/fulfillment/v1/order/{orderId}
         """
         logger.debug(f"[DEBUG.EXTERNAL_API] Fetching eBay {self.store_name} order: {order_id}")
-        
-        # TODO: Implement actual API call
-        return None
+        try:
+            path = f"/sell/fulfillment/v1/order/{quote(str(order_id), safe='')}"
+            payload = await self._rest_get(path)
+            if not payload:
+                return None
+            # Payload is the Order object
+            return self._convert_order(payload)
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"eBay {self.store_name}: get_order HTTP {e.response.status_code} - {e.response.text}",
+                exc_info=True,
+            )
+            return None
+        except Exception as e:
+            logger.error(
+                f"eBay {self.store_name}: get_order error for {order_id}: {e}",
+                exc_info=True,
+            )
+            return None
     
     async def update_stock(self, updates: List[StockUpdate]) -> List[StockUpdateResult]:
         """
@@ -1376,11 +1400,11 @@ class EbayClient(BasePlatformClient):
             else {}
         )
         
-        # Convert line items
+        # Convert line items. Prefer explicit item/listing ids when present
         items = []
         for item in ebay_order.get("lineItems", []):
             items.append(ExternalOrderItem(
-                platform_item_id=item.get("lineItemId"),
+                platform_item_id=(item.get("legacyItemId") or item.get("itemId") or item.get("listingId") or item.get("lineItemId")),
                 platform_sku=item.get("sku"),
                 asin=None,  # eBay doesn't have ASIN
                 title=item.get("title", "Unknown Item"),
