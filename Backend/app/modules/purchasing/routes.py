@@ -995,7 +995,7 @@ async def backfill_purchase_order_delivery_status(
     receive_date_to: Annotated[date | None, Query()] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Backfill local PO delivery status from Zoho purchase receives."""
+    """Backfill local PO delivery status from Zoho purchase-order received status."""
     effective_end_date = receive_date_to or date.today()
     if receive_date_from > effective_end_date:
         raise HTTPException(
@@ -1011,21 +1011,25 @@ async def backfill_purchase_order_delivery_status(
     per_page = 200
 
     while True:
-        receives = await zoho.list_purchase_receives(
+        purchase_orders = await zoho.list_purchase_orders(
             date_start=receive_date_from.isoformat(),
             date_end=effective_end_date.isoformat(),
             page=page,
             per_page=per_page,
         )
         pages_scanned += 1
-        receives_seen += len(receives)
+        receives_seen += len(purchase_orders)
 
-        for receive in receives:
-            po_id = _extract_receive_purchaseorder_id(receive)
-            if po_id:
+        for purchase_order in purchase_orders:
+            po_id = str(purchase_order.get("purchaseorder_id") or "").strip()
+            if not po_id:
+                continue
+
+            received_status = str(purchase_order.get("received_status") or "").strip().lower()
+            if received_status == "received":
                 zoho_po_ids_with_receives.add(po_id)
 
-        if len(receives) < per_page:
+        if len(purchase_orders) < per_page:
             break
         page += 1
 

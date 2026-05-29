@@ -838,6 +838,13 @@ class OrderSyncService:
 
         # Fallback: try matching by item name against platform listing titles
         if variant_id is None and entity_platform and ext_item.title:
+            logger.debug(
+                "[DEBUG.INTERNAL_API] Auto-match fallback item='%s' platform_item_id=%s platform_sku=%s platform=%s",
+                ext_item.title,
+                ext_item.platform_item_id,
+                ext_item.platform_sku,
+                platform,
+            )
             listing = await self.listing_repo.search_active_by_listed_name(
                 entity_platform, ext_item.title,
             )
@@ -887,6 +894,15 @@ class OrderSyncService:
 
         ext_ref = item.external_item_id or item.external_sku
 
+        logger.debug(
+            "[DEBUG.INTERNAL_API] Learn listing candidate order_item_id=%s platform=%s variant_id=%s external_ref=%s item_name=%s",
+            item.id,
+            order.platform,
+            variant_id,
+            ext_ref,
+            item.item_name,
+        )
+
         # If this external ref already exists, prefer updating that listing
         # (but block creating a new mapping that points the same ext_ref to
         # a different variant). This allows a single variant to have multiple
@@ -897,9 +913,22 @@ class OrderSyncService:
                 entity_platform, ext_ref,
             )
             if ref_existing is not None:
+                logger.debug(
+                    "[DEBUG.INTERNAL_API] Existing listing found for external_ref=%s platform=%s listing_id=%s variant_id=%s target_variant_id=%s",
+                    ext_ref,
+                    entity_platform,
+                    ref_existing.id,
+                    ref_existing.variant_id,
+                    variant_id,
+                )
                 # If the existing listing maps to a different variant, do not
                 # create a conflicting mapping.
                 if ref_existing.variant_id != variant_id:
+                    logger.debug(
+                        "[DEBUG.INTERNAL_API] Skipping learn_listing because external_ref=%s is already bound to variant_id=%s",
+                        ext_ref,
+                        ref_existing.variant_id,
+                    )
                     return
 
                 # Same variant: enrich missing fields and finish.
@@ -919,6 +948,12 @@ class OrderSyncService:
                         await self.session.flush()
                     except IntegrityError:
                         await self.session.rollback()
+                logger.debug(
+                    "[DEBUG.INTERNAL_API] Reused existing listing for external_ref=%s platform=%s listing_id=%s",
+                    ext_ref,
+                    entity_platform,
+                    ref_existing.id,
+                )
                 return
 
         listing = PlatformListing(
@@ -931,6 +966,13 @@ class OrderSyncService:
         self.session.add(listing)
         try:
             await self.session.flush()
+            logger.debug(
+                "[DEBUG.INTERNAL_API] Created learned listing external_ref=%s platform=%s variant_id=%s listing_id=%s",
+                ext_ref,
+                entity_platform,
+                variant_id,
+                listing.id,
+            )
         except IntegrityError:
             # Another concurrent request already created this listing
             await self.session.rollback()
