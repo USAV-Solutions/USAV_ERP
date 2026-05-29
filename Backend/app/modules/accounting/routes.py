@@ -156,6 +156,7 @@ async def _build_purchase_order_report(
         select(
             PurchaseOrder.order_date.label("order_date"),
             PurchaseOrder.po_number.label("order_number"),
+            PurchaseOrder.deliver_status.label("po_status"),
             PurchaseOrderItem.external_item_name.label("item"),
             ProductVariant.full_sku.label("sku"),
             ProductVariant.variant_name.label("inventory_name"),
@@ -215,6 +216,7 @@ async def _build_purchase_order_report(
                     "group": "",
                     "order_date": row["order_date"].isoformat() if row["order_date"] else "",
                     "order_number": row["order_number"],
+                    "po_status": row["po_status"].value if row["po_status"] is not None and hasattr(row["po_status"], "value") else str(row["po_status"] or ""),
                     "item": row["item"],
                     "sku": row["sku"],
                     "inventory_name": row["inventory_name"],
@@ -657,6 +659,7 @@ async def export_purchase_order_reports(
             "group",
             "order_date",
             "order_number",
+            "po_status",
             "item",
             "sku",
             "inventory_name",
