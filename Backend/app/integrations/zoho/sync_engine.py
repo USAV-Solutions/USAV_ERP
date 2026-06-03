@@ -1952,7 +1952,8 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
     if customer.email:
         payload["email"] = customer.email
 
-    platform_name = str(getattr(order, "platform", "") or "").strip().upper()
+    platform_value = getattr(getattr(order, "platform", None), "value", getattr(order, "platform", None))
+    platform_name = str(platform_value or "").strip().upper()
     is_marketplace_order = platform_name in _MARKETPLACE_ORDER_PLATFORMS
 
     # Line items

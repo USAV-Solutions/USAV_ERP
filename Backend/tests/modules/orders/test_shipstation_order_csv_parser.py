@@ -117,7 +117,7 @@ def test_shipstation_multiline_order_rows_merge_into_single_order(tmp_path, monk
                 "Amount - Shipping Cost": "15.00",
                 "Date - Order Date": "4/2/2026 10:39:21 AM",
                 "Tracking Number": "TRACK-1",
-                "Source": "ecwid",
+                "Source": "amazon",
             },
             {
                 "Order - Number": "SO-500",
@@ -132,7 +132,7 @@ def test_shipstation_multiline_order_rows_merge_into_single_order(tmp_path, monk
                 "Amount - Shipping Cost": "15.00",
                 "Date - Order Date": "4/2/2026 10:39:21 AM",
                 "Tracking Number": "TRACK-2",
-                "Source": "ecwid",
+                "Source": "amazon",
             },
         ]
     )
