@@ -86,8 +86,9 @@ def _normalize_purchase_order_item_prices(
     if quantity <= 0:
         raise ValueError("quantity must be greater than 0")
 
+    total_missing = total_price is None or str(total_price).strip() == ""
     normalized_total = _quantize_po_item_total(_to_decimal(total_price, default="0"))
-    if normalized_total <= Decimal("0"):
+    if total_missing:
         normalized_total = _quantize_po_item_total(
             _to_decimal(unit_price, default="0") * Decimal(quantity)
         )
