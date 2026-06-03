@@ -1,4 +1,4 @@
-﻿# Backend\app\integrations\zoho
+# Backend\app\integrations\zoho
 
 ## What This Folder Does
 Zoho client/sync engine used for outbound and inbound synchronization flows.
@@ -21,12 +21,13 @@ Zoho client/sync engine used for outbound and inbound synchronization flows.
 - Sales-order outbound payload uses `salesorder_number` (from `external_order_number` fallback `external_order_id`) and reserves `reference_number` for tracking (`Order.tracking_number`). Legacy duplicate detection still falls back to matching `reference_number == external_order_id` for older rows.
 - Sales-order source is sent through SO custom fields (`api_name=cf_source`) using `Order.platform` first and `Order.source` only as fallback. Current dropdown mapping: `Ebay_Dragon`, `Ebay_Mekong`, `Ebay_USAV`, `ECWID`, `Amazon`, `Shopify`, `Walmart`, fallback `Other`.
 - Zoho can return code `15` for sales-order `shipping_address` length; outbound sales-order payload now omits `shipping_address` and relies on `customer_id` contact addresses instead.
-- Sales-order outbound payload now sends `shipping_charge` from `Order.shipping_amount` for all sources and syncs totals using Zoho-total math: line total + shipping + tax + inferred handling.
-- Sales-order outbound tax handling is still platform-based for line details: marketplaces (`AMAZON`, `WALMART`, all `EBAY_*`) keep line `tax_percentage=0`, but their Zoho order-level adjustment now still includes `tax_amount + inferred handling` so imported marketplace totals match Zoho UI totals.
+- Sales-order outbound payload now sends `shipping_charge` from `Order.shipping_amount` for all sources and syncs totals using Zoho-total math: marketplaces use line total + shipping + inferred handling, while non-marketplace platforms add tax + inferred handling.
+- Sales-order outbound tax handling is platform-based end-to-end: marketplaces (`AMAZON`, `WALMART`, all `EBAY_*`) keep line `tax_percentage=0`, exclude tax from stored/Zoho totals, and only send inferred handling as Zoho adjustment; other ecommerce platforms preserve tax in payload adjustment.
 - Sales-order outbound sync now calls Zoho confirm (`/salesorders/{id}/status/confirmed`) after create/update; errors that indicate “already confirmed” are treated as non-fatal, while other confirm failures keep sync in `ERROR`.
 - Purchase-order outbound line `rate` should be derived from `PurchaseOrderItem.total_price / quantity` when available (not only `unit_price`) to avoid cent drift on multi-qty lines (example: `26.99 / 5 = 5.398`).
 - Purchase-order outbound sync now folds `tax_amount + shipping_amount + handling_amount` into line-item rates by splitting the charge pool evenly across PO lines. Do not send PO-level `adjustment`/`adjustment_description` for these charges, and keep the post-sync total guardrail aligned with `PurchaseOrder.total_amount`.
 - Zoho composite-item create/update payloads must use `mapped_items` (not `component_items`); Zoho returns `code:4` / `Invalid value passed for mapped_items` when the mapping key or mapped entry shape is wrong.
+- Zoho API requests using `httpx.AsyncClient` must configure a generous timeout (e.g., `timeout=30.0`) to avoid `ConnectTimeout` exceptions during slow or large-payload syncs.
 
 ## Child Folders
 - (No child folders)

@@ -108,16 +108,17 @@ def _compute_order_totals(order) -> tuple[Decimal, Decimal]:
     shipping = _to_money_decimal(order.shipping_amount)
     stored_total = _to_money_decimal(order.total_amount)
 
-    # Infer handling from stored platform total when present.
-    inferred_handling = stored_total - (line_total + tax + shipping)
-    if inferred_handling < Decimal("0"):
-        inferred_handling = Decimal("0")
-
-    platform_total = stored_total if stored_total > Decimal("0") else (line_total + tax + shipping)
-
     if order.platform in _MARKETPLACE_ZOHO_EXCLUDE_TAX_PLATFORMS:
+        inferred_handling = stored_total - (line_total + shipping)
+        if inferred_handling < Decimal("0"):
+            inferred_handling = Decimal("0")
+        platform_total = stored_total if stored_total > Decimal("0") else (line_total + shipping)
         zoho_total = line_total + shipping + inferred_handling
     else:
+        inferred_handling = stored_total - (line_total + tax + shipping)
+        if inferred_handling < Decimal("0"):
+            inferred_handling = Decimal("0")
+        platform_total = stored_total if stored_total > Decimal("0") else (line_total + tax + shipping)
         zoho_total = line_total + tax + shipping + inferred_handling
 
     return _quantize_money(platform_total), _quantize_money(zoho_total)
@@ -135,6 +136,14 @@ async def _recalculate_order_totals(db: AsyncSession, order: Order) -> None:
     shipping = _to_money_decimal(order.shipping_amount)
     previous_subtotal = _to_money_decimal(order.subtotal_amount)
     previous_total = _to_money_decimal(order.total_amount)
+
+    if order.platform in _MARKETPLACE_ZOHO_EXCLUDE_TAX_PLATFORMS:
+        inferred_handling = previous_total - (previous_subtotal + shipping)
+        if inferred_handling < Decimal("0"):
+            inferred_handling = Decimal("0")
+        order.subtotal_amount = _quantize_money(line_total)
+        order.total_amount = _quantize_money(line_total + shipping + inferred_handling)
+        return
 
     inferred_handling = previous_total - (previous_subtotal + tax + shipping)
     if inferred_handling < Decimal("0"):
@@ -405,15 +414,21 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
 
         quantity = _as_int(row, "Item - Qty", "quantity", "Count - Number of Items", default=1)
         unit_price = _as_float(row, "Item - Price", "unit_price", default=0.0)
-        total_price = _as_float(row, "total_price", default=0.0)
+        total_price = _as_float(row, "Item - Total", "item_total", "line_total", "Amount - Item Total", "total_price", default=0.0)
         if unit_price == 0.0 or total_price == 0.0:
             subtotal_amount = _as_float(row, "subtotal_amount", "subtotal", "Amount - Order Subtotal", default=0.0)
             total_amount = _as_float(row, "total_amount", "total", "Amount - Order Total", default=0.0)
-            item_total_fallback = subtotal_amount if subtotal_amount > 0 else total_amount
-            if unit_price == 0.0:
-                unit_price = item_total_fallback / quantity if quantity > 0 else 0.0
-            if total_price == 0.0:
-                total_price = item_total_fallback if item_total_fallback > 0 else (unit_price * quantity)
+            if is_shipstation_order_csv:
+                if unit_price == 0.0 and total_price > 0.0:
+                    unit_price = total_price / quantity if quantity > 0 else 0.0
+                if total_price == 0.0:
+                    total_price = unit_price * quantity if quantity > 0 else 0.0
+            else:
+                item_total_fallback = subtotal_amount if subtotal_amount > 0 else total_amount
+                if unit_price == 0.0:
+                    unit_price = item_total_fallback / quantity if quantity > 0 else 0.0
+                if total_price == 0.0:
+                    total_price = item_total_fallback if item_total_fallback > 0 else (unit_price * quantity)
 
         ordered_at = None
         ordered_at_raw = _pick(row, "ordered_at", "Date - Order Date")

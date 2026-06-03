@@ -540,8 +540,8 @@ async def create_purchase_order(
 
     await db.flush()
     await _recalculate_purchase_order_total(db, po)
-    fresh = await po_repo.get_with_items_and_vendor(po.id)
     await db.commit()
+    fresh = await po_repo.get_with_items_and_vendor(po.id)
     if fresh is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to load PO")
     return PurchaseOrderResponse.model_validate(fresh)

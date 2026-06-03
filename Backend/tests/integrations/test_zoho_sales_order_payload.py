@@ -36,21 +36,21 @@ def _build_order(*, platform: OrderPlatform, source: str, tax_amount: str, shipp
     )
 
 
-def test_marketplace_shipstation_order_uses_platform_source_and_includes_tax_plus_handling():
+def test_marketplace_shipstation_order_uses_platform_source_and_excludes_tax_from_zoho_total():
     order = _build_order(
         platform=OrderPlatform.AMAZON,
         source="SHIPSTATION_CSV",
         tax_amount="5.23",
         shipping_amount="37.10",
-        total_amount="173.71",
+        total_amount="165.98",
     )
 
     payload = order_to_zoho_payload(order)
 
     assert payload["custom_fields"] == [{"api_name": "cf_source", "value": "Amazon"}]
     assert payload["shipping_charge"] == 37.1
-    assert payload["adjustment"] == 7.73
-    assert payload["adjustment_description"] == "Tax + Handling fee"
+    assert payload["adjustment"] == 0.0
+    assert payload["adjustment_description"] == "Handling fee"
     assert payload["line_items"][0]["tax_percentage"] == 0.0
 
 

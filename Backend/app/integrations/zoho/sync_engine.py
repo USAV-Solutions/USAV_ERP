@@ -1996,14 +1996,21 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
     tax_amount = Decimal(str(getattr(order, "tax_amount", 0) or 0))
     shipping_amount = Decimal(str(getattr(order, "shipping_amount", 0) or 0))
     stored_platform_total = Decimal(str(getattr(order, "total_amount", 0) or 0))
-    inferred_handling = stored_platform_total - (line_total + tax_amount + shipping_amount)
+    if is_marketplace_order:
+        inferred_handling = stored_platform_total - (line_total + shipping_amount)
+    else:
+        inferred_handling = stored_platform_total - (line_total + tax_amount + shipping_amount)
     if inferred_handling < Decimal("0"):
         inferred_handling = Decimal("0")
 
     payload["shipping_charge"] = float(shipping_amount)
 
-    payload["adjustment"] = float(tax_amount + inferred_handling)
-    payload["adjustment_description"] = "Tax + Handling fee"
+    if is_marketplace_order:
+        payload["adjustment"] = float(inferred_handling)
+        payload["adjustment_description"] = "Handling fee"
+    else:
+        payload["adjustment"] = float(tax_amount + inferred_handling)
+        payload["adjustment_description"] = "Tax + Handling fee"
 
     return payload
 

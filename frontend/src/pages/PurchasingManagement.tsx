@@ -111,6 +111,15 @@ function formatUnitPrice(value: number): string {
   return numeric.toFixed(6).replace(/\.?0+$/, '')
 }
 
+function deriveUnitPrice(totalPrice: number, quantity: number): string {
+  const normalizedQuantity = Math.max(Number(quantity) || 0, 0)
+  const normalizedTotal = Math.max(Number(totalPrice) || 0, 0)
+  if (normalizedQuantity <= 0) {
+    return '0'
+  }
+  return formatUnitPrice(normalizedTotal / normalizedQuantity)
+}
+
 function getPurchaseImportSourceLabel(source: PurchaseFileImportSource): string {
   switch (source) {
     case 'goodwill':
@@ -170,12 +179,12 @@ function AddPurchaseOrderItemRow({ poId, onChanged, onNotify, onDone }: AddPurch
   const [externalItemName, setExternalItemName] = useState('')
   const [conditionNote, setConditionNote] = useState('')
   const [quantity, setQuantity] = useState('1')
-  const [unitPrice, setUnitPrice] = useState('0')
+  const [totalPrice, setTotalPrice] = useState('0')
   const [selectedVariant, setSelectedVariant] = useState<VariantSearchResult | null>(null)
 
   const parsedQuantity = Number(quantity) || 0
-  const parsedUnitPrice = Number(unitPrice) || 0
-  const computedTotal = Math.max(parsedQuantity, 0) * Math.max(parsedUnitPrice, 0)
+  const parsedTotalPrice = Number(totalPrice) || 0
+  const derivedUnitPrice = deriveUnitPrice(parsedTotalPrice, parsedQuantity)
 
   const addItemMutation = useMutation({
     mutationFn: () =>
@@ -184,8 +193,7 @@ function AddPurchaseOrderItemRow({ poId, onChanged, onNotify, onDone }: AddPurch
         condition_note: conditionNote.trim() || null,
         external_item_name: externalItemName.trim(),
         quantity: parsedQuantity,
-        unit_price: parsedUnitPrice,
-        total_price: computedTotal,
+        total_price: parsedTotalPrice,
         variant_id: selectedVariant?.id,
       }),
     onSuccess: async () => {
@@ -193,7 +201,7 @@ function AddPurchaseOrderItemRow({ poId, onChanged, onNotify, onDone }: AddPurch
       setExternalItemName('')
       setConditionNote('')
       setQuantity('1')
-      setUnitPrice('0')
+      setTotalPrice('0')
       setSelectedVariant(null)
       await onChanged()
       onNotify('Line item created.', 'success')
@@ -205,7 +213,7 @@ function AddPurchaseOrderItemRow({ poId, onChanged, onNotify, onDone }: AddPurch
   })
 
   const createDisabled =
-    addItemMutation.isPending || !externalItemName.trim() || parsedQuantity <= 0 || parsedUnitPrice < 0
+    addItemMutation.isPending || !externalItemName.trim() || parsedQuantity <= 0 || parsedTotalPrice < 0
 
   return (
     <>
@@ -244,9 +252,18 @@ function AddPurchaseOrderItemRow({ poId, onChanged, onNotify, onDone }: AddPurch
           <TextField
             size="small"
             type="number"
-            value={unitPrice}
-            onChange={(e) => setUnitPrice(e.target.value)}
-            inputProps={{ min: 0, step: 0.001 }}
+            value={derivedUnitPrice}
+            InputProps={{ readOnly: true }}
+            sx={{ width: 120 }}
+          />
+        </TableCell>
+        <TableCell align="right">
+          <TextField
+            size="small"
+            type="number"
+            value={totalPrice}
+            onChange={(e) => setTotalPrice(e.target.value)}
+            inputProps={{ min: 0, step: 0.01 }}
             sx={{ width: 120 }}
           />
         </TableCell>
@@ -270,7 +287,7 @@ function AddPurchaseOrderItemRow({ poId, onChanged, onNotify, onDone }: AddPurch
         </TableCell>
       </TableRow>
       <TableRow sx={{ backgroundColor: 'background.paper' }}>
-        <TableCell colSpan={7}>
+        <TableCell colSpan={8}>
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', md: 'center' }}>
             <VariantSearchAutocomplete value={selectedVariant} onChange={setSelectedVariant} />
             <TextField
@@ -284,7 +301,7 @@ function AddPurchaseOrderItemRow({ poId, onChanged, onNotify, onDone }: AddPurch
               sx={{ minWidth: { xs: '100%', md: 240 } }}
             />
             <Typography variant="body2" color="text.secondary">
-              Total Price (auto): {computedTotal.toFixed(2)}
+              Unit Price (auto): {derivedUnitPrice}
             </Typography>
           </Stack>
         </TableCell>
@@ -301,11 +318,11 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
   const [externalItemName, setExternalItemName] = useState(item.external_item_name)
   const [conditionNote, setConditionNote] = useState(item.condition_note || '')
   const [quantity, setQuantity] = useState(String(item.quantity))
-  const [unitPrice, setUnitPrice] = useState(String(item.unit_price))
+  const [totalPrice, setTotalPrice] = useState(String(item.total_price))
 
   const parsedQuantity = Number(quantity) || 0
-  const parsedUnitPrice = Number(unitPrice) || 0
-  const computedTotalPrice = Math.max(parsedQuantity, 0) * Math.max(parsedUnitPrice, 0)
+  const parsedTotalPrice = Number(totalPrice) || 0
+  const derivedUnitPrice = deriveUnitPrice(parsedTotalPrice, parsedQuantity)
 
   const saveMutation = useMutation({
     mutationFn: () =>
@@ -314,8 +331,7 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
         external_item_name: externalItemName.trim(),
         condition_note: conditionNote.trim() || null,
         quantity: parsedQuantity,
-        unit_price: parsedUnitPrice,
-        total_price: computedTotalPrice,
+        total_price: parsedTotalPrice,
         variant_id: selectedVariant ? selectedVariant.id : item.variant_id ?? undefined,
       }),
     onSuccess: async () => {
@@ -381,7 +397,7 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
     setExternalItemName(item.external_item_name)
     setConditionNote(item.condition_note || '')
     setQuantity(String(item.quantity))
-    setUnitPrice(String(item.unit_price))
+    setTotalPrice(String(item.total_price))
     setSelectedVariant(null)
     setPromptOpen(true)
   }
@@ -435,6 +451,7 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
         <TableCell>{item.variant_sku || '-'}</TableCell>
         <TableCell align="center">{item.quantity}</TableCell>
         <TableCell align="right">{formatUnitPrice(item.unit_price)}</TableCell>
+        <TableCell align="right">{Number(item.total_price || 0).toFixed(2)}</TableCell>
         <TableCell align="center">
           <Chip size="small" color={itemStatusColor[item.status]} label={item.status} />
         </TableCell>
@@ -497,7 +514,7 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
 
       {showMatch && (
         <TableRow>
-          <TableCell colSpan={7} sx={{ py: 1, backgroundColor: 'background.paper' }}>
+          <TableCell colSpan={8} sx={{ py: 1, backgroundColor: 'background.paper' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, pl: 1 }}>
               <VariantSearchAutocomplete value={selectedVariant} onChange={setSelectedVariant} />
               <Button
@@ -540,18 +557,18 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
           <TextField label="Condition Note" value={conditionNote} onChange={(e) => setConditionNote(e.target.value)} fullWidth multiline minRows={2} />
           <TextField label="Quantity" type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} fullWidth />
           <TextField
-            label="Unit Price"
+            label="Unit Price (Auto)"
             type="number"
-            value={unitPrice}
-            onChange={(e) => setUnitPrice(e.target.value)}
-            inputProps={{ min: 0, step: 0.001 }}
+            value={derivedUnitPrice}
+            InputProps={{ readOnly: true }}
             fullWidth
           />
           <TextField
-            label="Total Price (Auto)"
+            label="Total Price"
             type="number"
-            value={computedTotalPrice.toFixed(2)}
-            InputProps={{ readOnly: true }}
+            value={totalPrice}
+            onChange={(e) => setTotalPrice(e.target.value)}
+            inputProps={{ min: 0, step: 0.01 }}
             fullWidth
           />
           <VariantSearchAutocomplete value={selectedVariant} onChange={setSelectedVariant} />
@@ -1399,7 +1416,8 @@ export default function PurchasingManagement() {
                                         <TableCell>Item Name</TableCell>
                                         <TableCell>Item SKU</TableCell>
                                         <TableCell align="center">Qty</TableCell>
-                                        <TableCell align="right">Price</TableCell>
+                                        <TableCell align="right">Unit Price</TableCell>
+                                        <TableCell align="right">Total Price</TableCell>
                                         <TableCell align="center">Status</TableCell>
                                         <TableCell align="center">Actions</TableCell>
                                       </TableRow>
@@ -1414,7 +1432,7 @@ export default function PurchasingManagement() {
                                         />
                                       ))}
                                       <TableRow>
-                                        <TableCell colSpan={7}>
+                                        <TableCell colSpan={8}>
                                           <Button
                                             size="small"
                                             variant="outlined"
@@ -1436,7 +1454,7 @@ export default function PurchasingManagement() {
                                         />
                                       )}
                                       <TableRow>
-                                        <TableCell colSpan={4} />
+                                        <TableCell colSpan={5} />
                                         <TableCell align="right" sx={{ fontWeight: 600 }}>
                                           {(po.items || [])
                                             .reduce((sum, item) => sum + Number(item.total_price || 0), 0)
