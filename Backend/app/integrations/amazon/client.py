@@ -169,8 +169,8 @@ class AmazonClient(BasePlatformClient):
             ))
         
         # Calculate totals
-        order_total = float(amazon_order.get("OrderTotal", {}).get("Amount", 0))
-        
+        subtotal = sum(item.total_price for item in items)
+
         return ExternalOrder(
             platform_order_id=amazon_order.get("AmazonOrderId"),
             platform_order_number=amazon_order.get("AmazonOrderId"),
@@ -183,10 +183,10 @@ class AmazonClient(BasePlatformClient):
             ship_state=shipping.get("StateOrRegion"),
             ship_postal_code=shipping.get("PostalCode"),
             ship_country=shipping.get("CountryCode", "US"),
-            subtotal=order_total,  # Amazon doesn't always split these out
+            subtotal=subtotal,
             tax=0,
             shipping=0,
-            total=order_total,
+            total=subtotal,
             currency=amazon_order.get("OrderTotal", {}).get("CurrencyCode", "USD"),
             ordered_at=datetime.fromisoformat(
                 amazon_order.get("PurchaseDate", "").replace("Z", "+00:00")

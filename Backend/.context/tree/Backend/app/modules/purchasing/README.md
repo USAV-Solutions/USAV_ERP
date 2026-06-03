@@ -16,7 +16,7 @@ Purchase order domain: import pipelines, vendor workflows, receiving, matching, 
 - Mixing dependency styles in route signatures; prefer `Annotated[..., Depends(...)]` and `Annotated[..., Query(...)]` for maintainable, consistent FastAPI typing.
 - In Python signatures, non-default dependency params must come before optional/default query params to avoid `SyntaxError: parameter without a default follows parameter with a default`.
 - Purchase-order deletes are blocked when any line item is already `RECEIVED`; frontend should surface API detail text for this guardrail.
-- Purchase item `unit_price` now supports precision beyond 2 decimals; keep UI/editor inputs and import paths from coercing prices to cent precision when quantity-split totals require fractional cents.
+- Purchase item `unit_price` is derived storage only: backend recalculates it from `total_price / quantity` (up to 6 decimals) on create/update/import and raises if the derived value cannot round-trip back to the line total at cent precision. Do not treat request/import `unit_price` as the source of truth.
 - Purchase list endpoint supports approximate total search (`total_amount` with optional `total_amount_range`); frontend and backend must stay aligned on inclusive bounds (`total_amount - range` through `total_amount + range`).
 - Delivery-status backfill (`POST /purchases/backfill-delivery-status`) scans Zoho purchase orders in the requested date window (defaults: `2026-01-01` through today) and marks local POs as `DELIVERED` only when Zoho `received_status` is `received`; it does not auto-downgrade orders with other statuses.
 

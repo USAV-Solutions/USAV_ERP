@@ -64,7 +64,60 @@ _ORDER_TO_ENTITY_PLATFORM: dict[OrderPlatform, Platform] = {
     OrderPlatform.WALMART: Platform.WALMART,
 }
 
+_MARKETPLACE_ORDER_PLATFORMS: set[OrderPlatform] = {
+    OrderPlatform.AMAZON,
+    OrderPlatform.EBAY_MEKONG,
+    OrderPlatform.EBAY_USAV,
+    OrderPlatform.EBAY_DRAGON,
+    OrderPlatform.WALMART,
+}
+
 SYNC_BUFFER_MINUTES = 10
+
+
+def _to_decimal(value: object) -> Decimal:
+    try:
+        return Decimal(str(value or 0))
+    except Exception:
+        return Decimal("0")
+
+
+def _normalized_item_total(ext_item: ExternalOrderItem, platform: OrderPlatform) -> Decimal:
+    unit_price = _to_decimal(ext_item.unit_price)
+    quantity = Decimal(int(getattr(ext_item, "quantity", 0) or 0))
+    raw_total = _to_decimal(ext_item.total_price)
+    computed_total = unit_price * quantity if quantity > 0 else Decimal("0")
+
+    if platform in _MARKETPLACE_ORDER_PLATFORMS and computed_total > Decimal("0"):
+        return computed_total
+    if raw_total > Decimal("0"):
+        return raw_total
+    if computed_total > Decimal("0"):
+        return computed_total
+    return Decimal("0")
+
+
+def _normalized_order_amounts(ext: ExternalOrder, platform: OrderPlatform) -> tuple[Decimal, Decimal, Decimal, Decimal]:
+    item_subtotal = sum((_normalized_item_total(item, platform) for item in ext.items or []), Decimal("0"))
+    raw_subtotal = _to_decimal(ext.subtotal)
+    tax_amount = _to_decimal(ext.tax)
+    shipping_amount = _to_decimal(ext.shipping)
+    raw_total = _to_decimal(ext.total)
+
+    if platform in _MARKETPLACE_ORDER_PLATFORMS:
+        subtotal = item_subtotal if item_subtotal > Decimal("0") else raw_subtotal
+        handling_candidates = []
+        if raw_total > Decimal("0"):
+            base_without_tax = raw_total - (subtotal + shipping_amount)
+            base_with_tax = raw_total - (subtotal + shipping_amount + tax_amount)
+            handling_candidates = [candidate for candidate in (base_with_tax, base_without_tax) if candidate >= Decimal("0")]
+        handling_amount = min(handling_candidates) if handling_candidates else Decimal("0")
+        total_amount = subtotal + shipping_amount + handling_amount
+        return subtotal, tax_amount, shipping_amount, total_amount
+
+    subtotal = raw_subtotal if raw_subtotal > Decimal("0") else item_subtotal
+    total_amount = raw_total if raw_total > Decimal("0") else (subtotal + tax_amount + shipping_amount)
+    return subtotal, tax_amount, shipping_amount, total_amount
 
 
 class OrderSyncService:
@@ -445,6 +498,8 @@ class OrderSyncService:
         # Upsert/lookup Customer (if any data is available)
         customer_id = await self._get_or_create_customer(ext, source=source)
 
+        incoming_subtotal, incoming_tax, incoming_shipping, incoming_total = _normalized_order_amounts(ext, platform)
+
         # Build the Order header
         order_data = {
             "platform": platform,
@@ -453,10 +508,10 @@ class OrderSyncService:
             "external_order_number": ext.platform_order_number,
             "status": OrderStatus.PENDING,
             "customer_id": customer_id,
-            "subtotal_amount": Decimal(str(ext.subtotal)),
-            "tax_amount": Decimal(str(ext.tax)),
-            "shipping_amount": Decimal(str(ext.shipping)),
-            "total_amount": Decimal(str(ext.total)),
+            "subtotal_amount": incoming_subtotal,
+            "tax_amount": incoming_tax,
+            "shipping_amount": incoming_shipping,
+            "total_amount": incoming_total,
             "currency": ext.currency or "USD",
             "ordered_at": ext.ordered_at,
             "tracking_number": self._extract_tracking_number(ext),
@@ -512,10 +567,7 @@ class OrderSyncService:
             existing.tracking_number = incoming_tracking
             changed = True
 
-        incoming_subtotal = Decimal(str(ext.subtotal))
-        incoming_tax = Decimal(str(ext.tax))
-        incoming_shipping = Decimal(str(ext.shipping))
-        incoming_total = Decimal(str(ext.total))
+        incoming_subtotal, incoming_tax, incoming_shipping, incoming_total = _normalized_order_amounts(ext, platform)
         incoming_currency = ext.currency or "USD"
 
         if existing.subtotal_amount != incoming_subtotal:
@@ -630,8 +682,8 @@ class OrderSyncService:
             item.quantity = ext_item.quantity
             changed = True
 
-        incoming_unit = Decimal(str(ext_item.unit_price))
-        incoming_total = Decimal(str(ext_item.total_price))
+        incoming_unit = _to_decimal(ext_item.unit_price)
+        incoming_total = _normalized_item_total(ext_item, platform)
         if item.unit_price != incoming_unit:
             item.unit_price = incoming_unit
             changed = True
@@ -866,8 +918,8 @@ class OrderSyncService:
             "status": item_status,
             "item_name": ext_item.title,
             "quantity": ext_item.quantity,
-            "unit_price": Decimal(str(ext_item.unit_price)),
-            "total_price": Decimal(str(ext_item.total_price)),
+            "unit_price": _to_decimal(ext_item.unit_price),
+            "total_price": _normalized_item_total(ext_item, platform),
             "item_metadata": ext_item.raw_data,
         }
         await self.order_item_repo.create(item_data)

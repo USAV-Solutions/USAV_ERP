@@ -1403,14 +1403,16 @@ class EbayClient(BasePlatformClient):
         # Convert line items. Prefer explicit item/listing ids when present
         items = []
         for item in ebay_order.get("lineItems", []):
+            quantity = int(item.get("quantity", 1))
+            unit_price = float(item.get("lineItemCost", {}).get("value", 0))
             items.append(ExternalOrderItem(
                 platform_item_id=(item.get("legacyItemId") or item.get("itemId") or item.get("listingId") or item.get("lineItemId")),
                 platform_sku=item.get("sku"),
                 asin=None,  # eBay doesn't have ASIN
                 title=item.get("title", "Unknown Item"),
-                quantity=int(item.get("quantity", 1)),
-                unit_price=float(item.get("lineItemCost", {}).get("value", 0)),
-                total_price=float(item.get("total", {}).get("value", 0)),
+                quantity=quantity,
+                unit_price=unit_price,
+                total_price=unit_price * quantity,
                 raw_data=item,
             ))
         
@@ -1434,7 +1436,7 @@ class EbayClient(BasePlatformClient):
             subtotal=float(pricing.get("priceSubtotal", {}).get("value", 0)),
             tax=float(pricing.get("tax", {}).get("value", 0)),
             shipping=float(pricing.get("deliveryCost", {}).get("value", 0)),
-            total=float(pricing.get("total", {}).get("value", 0)),
+            total=float(pricing.get("priceSubtotal", {}).get("value", 0)) + float(pricing.get("deliveryCost", {}).get("value", 0)),
             currency=pricing.get("total", {}).get("currency", "USD"),
             ordered_at=datetime.fromisoformat(
                 ebay_order.get("creationDate", "").replace("Z", "+00:00")

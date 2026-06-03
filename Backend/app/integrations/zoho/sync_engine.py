@@ -19,7 +19,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Optional
 
 from sqlalchemy import event
@@ -66,6 +66,7 @@ VALID_ZOHO_SO_SOURCE_VALUES = {
     "ECWID",
     "Amazon",
     "Other",
+    "Shopify",
     "Walmart",
 }
 
@@ -121,11 +122,14 @@ EXACT_ZOHO_SO_SOURCE_MAP = {
     "ECWID_API": "ECWID",
     "AMAZON": "Amazon",
     "AMAZON_API": "Amazon",
+    "SHOPIFY": "Shopify",
+    "SHOPIFY_API": "Shopify",
     "MANUAL": "Other",
     "ZOHO_IMPORT": "Other",
 }
 
 _UNMATCHED_PLACEHOLDER_ITEM_ID_CACHE: Optional[str] = None
+_MONEY_QUANTUM = Decimal("0.01")
 
 
 # =========================================================================
@@ -324,6 +328,8 @@ def _normalize_so_source_to_zoho_dropdown(source: str) -> str:
         return "ECWID"
     if "AMAZON" in text:
         return "Amazon"
+    if "SHOPIFY" in text:
+        return "Shopify"
     if "WALMART" in text:
         return "Walmart"
     return "Other"
@@ -339,6 +345,16 @@ def _resolve_so_source_to_zoho_dropdown(source: str) -> str:
     if fallback in VALID_ZOHO_SO_SOURCE_VALUES:
         return fallback
     return "Other"
+
+
+def _resolve_order_so_source_to_zoho_dropdown(order: Order) -> str:
+    platform_value = getattr(getattr(order, "platform", None), "value", getattr(order, "platform", None))
+    platform_source = _resolve_so_source_to_zoho_dropdown(str(platform_value or ""))
+    if platform_source != "Other":
+        return platform_source
+
+    source_raw = str(getattr(order, "source", "") or "").strip()
+    return _resolve_so_source_to_zoho_dropdown(source_raw)
 
 
 def _extract_contact_source_custom_field(data: dict[str, Any]) -> Optional[str]:
@@ -432,22 +448,16 @@ def purchase_order_to_zoho_payload(
     if po.expected_delivery_date:
         payload["delivery_date"] = po.expected_delivery_date.strftime("%Y-%m-%d")
 
-    def _to_float(value: Any) -> float:
-        try:
-            return float(value or 0)
-        except Exception:
-            return 0.0
-
-    def _compute_po_line_rate(item: Any) -> float:
+    def _compute_po_line_total(item: Any) -> Decimal:
         quantity = int(getattr(item, "quantity", 0) or 0)
         total_price = _to_decimal(getattr(item, "total_price", 0), default="0")
         if quantity > 0 and total_price > Decimal("0"):
-            return float(total_price / Decimal(quantity))
-        return _to_float(getattr(item, "unit_price", 0))
+            return total_price
+        return _to_decimal(getattr(item, "unit_price", 0), default="0") * Decimal(quantity)
 
-    tax_amount = _to_float(getattr(po, "tax_amount", 0))
-    shipping_amount = _to_float(getattr(po, "shipping_amount", 0))
-    handling_amount = _to_float(getattr(po, "handling_amount", 0))
+    tax_amount = _to_decimal(getattr(po, "tax_amount", 0), default="0")
+    shipping_amount = _to_decimal(getattr(po, "shipping_amount", 0), default="0")
+    handling_amount = _to_decimal(getattr(po, "handling_amount", 0), default="0")
 
     custom_fields: list[dict[str, Any]] = []
     tax_field: dict[str, Any] = {"api_name": "cf_tax", "value": f"{tax_amount:.2f}"}
@@ -497,20 +507,43 @@ def purchase_order_to_zoho_payload(
                 "address": settings.zoho_po_stationery_delivery_address,
             }
 
-    # Keep legacy adjustment populated, but include tax in the rollup.
-    payload["adjustment"] = tax_amount + shipping_amount + handling_amount
-    payload["adjustment_description"] = "Shipping Fee + Tax + Handling Fee"
-
     line_items: list[dict[str, Any]] = []
-    for item in po.items or []:
+    po_items = list(po.items or [])
+    adjustment_total = tax_amount + shipping_amount + handling_amount
+    line_item_adjustment = (
+        adjustment_total / Decimal(len(po_items))
+        if po_items
+        else Decimal("0")
+    )
+    remaining_adjustment = adjustment_total
+
+    for idx, item in enumerate(po_items):
         variant = getattr(item, "variant", None)
         variant_sku = str(getattr(variant, "full_sku", "") or "").upper()
         is_stationery_line = variant_sku.startswith("STAT-")
+        quantity = int(getattr(item, "quantity", 0) or 0)
+        base_line_total = _compute_po_line_total(item)
+        line_adjustment = (
+            remaining_adjustment
+            if idx == len(po_items) - 1
+            else line_item_adjustment
+        )
+        remaining_adjustment -= line_adjustment
+        adjusted_line_total = base_line_total + line_adjustment
+        if quantity <= 0:
+            if adjusted_line_total == Decimal("0"):
+                line_rate = Decimal("0")
+            else:
+                raise ValueError(
+                    f"Cannot distribute purchase-order adjustments to zero-quantity line {item.external_item_name!r}"
+                )
+        else:
+            line_rate = adjusted_line_total / Decimal(quantity)
 
         li: dict[str, Any] = {
             "name": item.external_item_name,
-            "quantity": item.quantity,
-            "rate": _compute_po_line_rate(item),
+            "quantity": quantity,
+            "rate": float(line_rate),
         }
         if variant and variant.zoho_item_id:
             li["item_id"] = variant.zoho_item_id
@@ -778,6 +811,58 @@ def _to_decimal(value: object, default: str = "0") -> Decimal:
 
 def _to_float_money(value: object) -> float:
     return float(_to_decimal(value, default="0"))
+
+
+def _quantize_money(value: Decimal) -> Decimal:
+    return value.quantize(_MONEY_QUANTUM, rounding=ROUND_HALF_UP)
+
+
+def _get_purchase_order_expected_total(po: PurchaseOrder) -> Decimal:
+    stored_total = _quantize_money(_to_decimal(getattr(po, "total_amount", 0), default="0"))
+    if stored_total > Decimal("0"):
+        return stored_total
+
+    line_total = Decimal("0")
+    for item in po.items or []:
+        quantity = int(getattr(item, "quantity", 0) or 0)
+        if quantity <= 0:
+            continue
+        item_total = _to_decimal(getattr(item, "total_price", 0), default="0")
+        if item_total <= Decimal("0"):
+            item_total = _to_decimal(getattr(item, "unit_price", 0), default="0") * Decimal(quantity)
+        line_total += item_total
+
+    charges_total = (
+        _to_decimal(getattr(po, "tax_amount", 0), default="0")
+        + _to_decimal(getattr(po, "shipping_amount", 0), default="0")
+        + _to_decimal(getattr(po, "handling_amount", 0), default="0")
+    )
+    return _quantize_money(line_total + charges_total)
+
+
+def _extract_purchase_order_remote_total(remote_po: Optional[dict[str, Any]]) -> Decimal:
+    if not remote_po:
+        return Decimal("0")
+
+    for key in ("total", "total_amount"):
+        total = _to_decimal(remote_po.get(key), default="0")
+        if total > Decimal("0"):
+            return _quantize_money(total)
+
+    return Decimal("0")
+
+
+def _estimate_purchase_order_payload_total(payload: dict[str, Any]) -> Decimal:
+    line_total = Decimal("0")
+    for line in payload.get("line_items") or []:
+        if not isinstance(line, dict):
+            continue
+        quantity = _to_decimal(line.get("quantity", 0), default="0")
+        rate = _to_decimal(line.get("rate", 0), default="0")
+        line_total += quantity * rate
+
+    adjustment_total = _to_decimal(payload.get("adjustment", 0), default="0")
+    return _quantize_money(line_total + adjustment_total)
 
 
 def _is_remote_purchase_order_billed(remote_po: Optional[dict[str, Any]]) -> bool:
@@ -1512,31 +1597,30 @@ async def sync_po_outbound(
                 po,
                 existing_notes=remote_notes,
             )
-            local_line_total = sum(
-                _to_float_money(getattr(item, "quantity", 0)) * _to_float_money(getattr(item, "unit_price", 0))
-                for item in (po.items or [])
+            expected_total = _get_purchase_order_expected_total(po)
+            local_adjustment_total = _quantize_money(
+                _to_decimal(getattr(po, "tax_amount", 0), default="0")
+                + _to_decimal(getattr(po, "shipping_amount", 0), default="0")
+                + _to_decimal(getattr(po, "handling_amount", 0), default="0")
             )
-            local_adjustment_total = (
-                _to_float_money(getattr(po, "tax_amount", 0))
-                + _to_float_money(getattr(po, "shipping_amount", 0))
-                + _to_float_money(getattr(po, "handling_amount", 0))
-            )
-            payload_line_total = sum(
-                _to_float_money(line.get("quantity", 0)) * _to_float_money(line.get("rate", 0))
-                for line in (payload.get("line_items") or [])
-                if isinstance(line, dict)
-            )
-            payload_adjustment = _to_float_money(payload.get("adjustment", 0))
+            payload_total_estimate = _estimate_purchase_order_payload_total(payload)
+            payload_adjustment = _quantize_money(_to_decimal(payload.get("adjustment", 0), default="0"))
+            payload_line_total = _quantize_money(payload_total_estimate - payload_adjustment)
+            if payload_total_estimate != expected_total:
+                raise ValueError(
+                    "Purchase-order payload total mismatch before Zoho sync: "
+                    f"expected {expected_total:.2f}, payload {payload_total_estimate:.2f}"
+                )
             logger.info(
                 "sync_po_outbound: payload debug | po_id=%s po_number=%s local_line_total=%.2f local_adjustment=%.2f local_total_amount=%.2f payload_line_total=%.2f payload_adjustment=%.2f payload_total_estimate=%.2f payload=%s",
                 po_id,
                 po.po_number,
-                local_line_total,
-                local_adjustment_total,
-                _to_float_money(getattr(po, "total_amount", 0)),
-                payload_line_total,
-                payload_adjustment,
-                payload_line_total + payload_adjustment,
+                float(expected_total - local_adjustment_total),
+                float(local_adjustment_total),
+                float(expected_total),
+                float(payload_line_total),
+                float(payload_adjustment),
+                float(payload_total_estimate),
                 json.dumps(payload, default=str, sort_keys=True),
             )
             new_hash = generate_payload_hash(payload)
@@ -1664,6 +1748,16 @@ async def sync_po_outbound(
             zoho_po_id = str(zoho_po.get("purchaseorder_id", ""))
             if zoho_po_id:
                 po.zoho_id = zoho_po_id
+            remote_total = _extract_purchase_order_remote_total(zoho_po)
+            if remote_total <= Decimal("0") and zoho_po_id:
+                remote_total = _extract_purchase_order_remote_total(
+                    await zoho.get_purchase_order(zoho_po_id)
+                )
+            if remote_total != expected_total:
+                raise ValueError(
+                    "Purchase-order total mismatch after Zoho sync: "
+                    f"expected {expected_total:.2f}, Zoho returned {remote_total:.2f}"
+                )
 
             if enable_ebay_billing:
                 try:
@@ -1858,7 +1952,8 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
     if customer.email:
         payload["email"] = customer.email
 
-    platform_name = str(getattr(order, "platform", "") or "").strip().upper()
+    platform_value = getattr(getattr(order, "platform", None), "value", getattr(order, "platform", None))
+    platform_name = str(platform_value or "").strip().upper()
     is_marketplace_order = platform_name in _MARKETPLACE_ORDER_PLATFORMS
 
     # Line items
@@ -1886,12 +1981,11 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
         line_items.append(li)
     payload["line_items"] = line_items
 
-    source_raw = str(getattr(order, "source", "") or "").strip()
-    if source_raw:
+    if getattr(order, "platform", None) or getattr(order, "source", None):
         payload["custom_fields"] = [
             {
                 "api_name": "cf_source",
-                "value": _resolve_so_source_to_zoho_dropdown(source_raw),
+                "value": _resolve_order_so_source_to_zoho_dropdown(order),
             }
         ]
 
@@ -1903,7 +1997,10 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
     tax_amount = Decimal(str(getattr(order, "tax_amount", 0) or 0))
     shipping_amount = Decimal(str(getattr(order, "shipping_amount", 0) or 0))
     stored_platform_total = Decimal(str(getattr(order, "total_amount", 0) or 0))
-    inferred_handling = stored_platform_total - (line_total + tax_amount + shipping_amount)
+    if is_marketplace_order:
+        inferred_handling = stored_platform_total - (line_total + shipping_amount)
+    else:
+        inferred_handling = stored_platform_total - (line_total + tax_amount + shipping_amount)
     if inferred_handling < Decimal("0"):
         inferred_handling = Decimal("0")
 

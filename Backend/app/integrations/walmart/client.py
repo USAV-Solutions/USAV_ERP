@@ -165,6 +165,9 @@ class WalmartClient(BasePlatformClient):
 
         line_total = 0.0
         for charge in line.get("charges", {}).get("charge", []) or []:
+            charge_type = str(charge.get("chargeType") or "").upper()
+            if charge_type == "SHIPPING":
+                continue
             line_total += self._safe_float(
                 charge.get("chargeAmount", {}).get("amount"),
             )
@@ -200,9 +203,7 @@ class WalmartClient(BasePlatformClient):
                 if charge_type == "SHIPPING":
                     shipping += self._safe_float(charge.get("chargeAmount", {}).get("amount"))
 
-        total = subtotal + tax
-        if shipping:
-            total += shipping
+        total = subtotal + shipping
 
         purchase_order_id = order_data.get("purchaseOrderId")
         customer_order_id = order_data.get("customerOrderId")

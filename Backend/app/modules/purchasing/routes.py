@@ -4,7 +4,7 @@ import io
 import json
 import logging
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -54,6 +54,8 @@ from app.repositories.product import ProductVariantRepository
 
 router = APIRouter(tags=["Purchasing"])
 logger = logging.getLogger(__name__)
+_PO_ITEM_TOTAL_QUANTUM = Decimal("0.01")
+_PO_ITEM_UNIT_PRICE_QUANTUM = Decimal("0.000001")
 
 
 def _to_decimal(value: object, default: str = "0") -> Decimal:
@@ -65,6 +67,58 @@ def _to_decimal(value: object, default: str = "0") -> Decimal:
         return Decimal(normalized)
     except Exception:
         return Decimal(default)
+
+
+def _quantize_po_item_total(value: Decimal) -> Decimal:
+    return value.quantize(_PO_ITEM_TOTAL_QUANTUM, rounding=ROUND_HALF_UP)
+
+
+def _quantize_po_item_unit_price(value: Decimal) -> Decimal:
+    return value.quantize(_PO_ITEM_UNIT_PRICE_QUANTUM, rounding=ROUND_HALF_UP)
+
+
+def _normalize_purchase_order_item_prices(
+    *,
+    quantity: int,
+    total_price: object | None,
+    unit_price: object | None = None,
+) -> tuple[Decimal, Decimal]:
+    if quantity <= 0:
+        raise ValueError("quantity must be greater than 0")
+
+    total_missing = total_price is None or str(total_price).strip() == ""
+    normalized_total = _quantize_po_item_total(_to_decimal(total_price, default="0"))
+    if total_missing:
+        normalized_total = _quantize_po_item_total(
+            _to_decimal(unit_price, default="0") * Decimal(quantity)
+        )
+
+    normalized_unit_price = _quantize_po_item_unit_price(
+        normalized_total / Decimal(quantity)
+    )
+    recomputed_total = _quantize_po_item_total(
+        normalized_unit_price * Decimal(quantity)
+    )
+    if recomputed_total != normalized_total:
+        raise ValueError(
+            "unit_price guardrail failed: derived unit price does not reproduce line total"
+        )
+
+    return normalized_unit_price, normalized_total
+
+
+def _prepare_purchase_order_item_payload(item_payload: dict[str, object]) -> dict[str, object]:
+    payload = dict(item_payload)
+    quantity = _to_int(payload.get("quantity"), default=0)
+    unit_price, total_price = _normalize_purchase_order_item_prices(
+        quantity=quantity,
+        total_price=payload.get("total_price"),
+        unit_price=payload.get("unit_price"),
+    )
+    payload["quantity"] = quantity
+    payload["unit_price"] = unit_price
+    payload["total_price"] = total_price
+    return payload
 
 
 async def _recalculate_purchase_order_total(db: AsyncSession, po: PurchaseOrder) -> None:
@@ -477,14 +531,17 @@ async def create_purchase_order(
     po = await po_repo.create(po_payload)
 
     for item in body.items:
-        item_payload = item.model_dump()
+        try:
+            item_payload = _prepare_purchase_order_item_payload(item.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
         item_payload["purchase_order_id"] = po.id
         await po_item_repo.create(item_payload)
 
     await db.flush()
     await _recalculate_purchase_order_total(db, po)
-    fresh = await po_repo.get_with_items_and_vendor(po.id)
     await db.commit()
+    fresh = await po_repo.get_with_items_and_vendor(po.id)
     if fresh is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to load PO")
     return PurchaseOrderResponse.model_validate(fresh)
@@ -585,7 +642,10 @@ async def add_purchase_order_item(
     if po is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchase order not found")
 
-    payload = body.model_dump()
+    try:
+        payload = _prepare_purchase_order_item_payload(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
     payload["purchase_order_id"] = po_id
 
     created = await po_item_repo.create(payload)
@@ -632,6 +692,16 @@ async def update_purchase_order_item(
         )
 
     payload = body.model_dump(exclude_unset=True)
+    if "quantity" in payload or "unit_price" in payload or "total_price" in payload:
+        normalized_item_payload = {
+            "quantity": payload.get("quantity", item.quantity),
+            "unit_price": payload.get("unit_price", item.unit_price),
+            "total_price": payload.get("total_price", item.total_price),
+        }
+        try:
+            payload.update(_prepare_purchase_order_item_payload(normalized_item_payload))
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
 
     if "variant_id" in payload:
         variant_id = payload.get("variant_id")
@@ -922,7 +992,7 @@ async def import_purchasing_from_zoho(
             line_items = zoho_po_detail.get("line_items", []) or zoho_po.get("line_items", []) or []
             for line_index, line in enumerate(line_items):
                 qty = int(line.get("quantity") or 0)
-                unit_price = _to_decimal(line.get("rate") or line.get("item_total") or 0)
+                unit_price = _to_decimal(line.get("rate") or 0)
                 total_price = _to_decimal(line.get("item_total") or (unit_price * qty))
                 if qty <= 0:
                     continue
@@ -957,7 +1027,7 @@ async def import_purchasing_from_zoho(
                 if preserved_item_name is None and line_index < len(existing_item_names_by_position):
                     preserved_item_name = existing_item_names_by_position[line_index]
 
-                await po_item_repo.create(
+                item_payload = _prepare_purchase_order_item_payload(
                     {
                         "purchase_order_id": local_po.id,
                         "variant_id": matched_variant.id if matched_variant else None,
@@ -975,6 +1045,7 @@ async def import_purchasing_from_zoho(
                         ),
                     }
                 )
+                await po_item_repo.create(item_payload)
                 result.purchase_order_items_replaced += 1
 
         if len(purchase_orders) < per_page:
@@ -1125,7 +1196,8 @@ async def _upsert_purchase_item(
     purchase_item_link: str | None,
     item_name: str,
     quantity: int,
-    unit_price: Decimal,
+    unit_price: Decimal | None,
+    total_price: Decimal | None,
     po_item_repo: PurchaseOrderItemRepository,
     db: AsyncSession,
     result: PurchaseFileImportResponse,
@@ -1139,7 +1211,11 @@ async def _upsert_purchase_item(
         )
         existing_item = (await db.execute(stmt)).scalar_one_or_none()
 
-    line_total = unit_price * quantity
+    normalized_unit_price, normalized_total_price = _normalize_purchase_order_item_prices(
+        quantity=quantity,
+        total_price=total_price,
+        unit_price=unit_price,
+    )
     normalized_purchase_item_link = (purchase_item_link or "").strip() or None
     if normalized_purchase_item_link:
         normalized_purchase_item_link = normalized_purchase_item_link[:500]
@@ -1164,8 +1240,8 @@ async def _upsert_purchase_item(
         "purchase_item_link": normalized_purchase_item_link,
         "external_item_name": item_name[:255],
         "quantity": quantity,
-        "unit_price": unit_price,
-        "total_price": line_total,
+        "unit_price": normalized_unit_price,
+        "total_price": normalized_total_price,
     }
 
     if existing_item is None:
@@ -1301,7 +1377,8 @@ async def _import_goodwill_shipped_csv(
         handling_amount = _to_decimal(_pick(row, header_aliases["handling"]), default="0")
         order_date = _to_date(_pick(row, header_aliases["order_date"]))
         tracking_number = str(_pick(row, header_aliases["tracking_number"]) or "").strip() or None
-        total_amount = (unit_price * quantity) + tax_amount + shipping_amount + handling_amount
+        line_total = _quantize_po_item_total(unit_price * Decimal(quantity))
+        total_amount = line_total + tax_amount + shipping_amount + handling_amount
 
         existing_po = await _find_existing_po_by_external_id(db, po_number)
         import_mode_note = "open-orders" if only_view_order_status else "shipped-orders"
@@ -1344,6 +1421,7 @@ async def _import_goodwill_shipped_csv(
             item_name=item_name,
             quantity=quantity,
             unit_price=unit_price,
+            total_price=line_total,
             po_item_repo=po_item_repo,
             db=db,
             result=result,
@@ -1405,7 +1483,7 @@ async def _import_amazon_csv(
                 item_unit_price = subtotal_guess / quantity
         item_total = _to_decimal(row.get("Item Net Total") or row.get("Item Subtotal"), default="0")
         if item_total <= 0:
-            item_total = item_unit_price * quantity
+            item_total = _quantize_po_item_total(item_unit_price * Decimal(quantity))
 
         order_bucket = grouped_orders.setdefault(
             po_number,
@@ -1448,6 +1526,7 @@ async def _import_amazon_csv(
                 "external_item_name": item_name,
                 "quantity": quantity,
                 "unit_price": item_unit_price,
+                "total_price": item_total,
             }
         )
 
@@ -1458,7 +1537,7 @@ async def _import_amazon_csv(
 
         vendor_id = await _resolve_vendor_id(order_data["vendor_name"], vendor_repo, db, vendor_cache)
         computed_total = sum(
-            (item["unit_price"] * item["quantity"] for item in order_data["items"]),
+            (_to_decimal(item.get("total_price"), default="0") for item in order_data["items"]),
             Decimal("0"),
         ) + order_data["tax_amount"] + order_data["shipping_amount"] + order_data["handling_amount"]
         total_amount = order_data["total_amount"] if order_data["total_amount"] > 0 else computed_total
@@ -1504,6 +1583,7 @@ async def _import_amazon_csv(
                 item_name=item["external_item_name"],
                 quantity=item["quantity"],
                 unit_price=item["unit_price"],
+                total_price=item.get("total_price"),
                 po_item_repo=po_item_repo,
                 db=db,
                 result=result,
@@ -1584,6 +1664,7 @@ async def _import_aliexpress_json(
                     "external_item_name": external_item_name,
                     "quantity": quantity,
                     "unit_price": unit_price,
+                    "total_price": _quantize_po_item_total(unit_price * Decimal(quantity)),
                 }
             )
 
@@ -1591,7 +1672,7 @@ async def _import_aliexpress_json(
             result.source_rows_skipped += 1
             continue
 
-        items_total = sum((item["unit_price"] * item["quantity"] for item in parsed_items), Decimal("0"))
+        items_total = sum((_to_decimal(item.get("total_price"), default="0") for item in parsed_items), Decimal("0"))
         total_amount = _to_decimal(price_data.get("total"), default="0")
         if total_amount <= 0:
             total_amount = items_total + tax_amount + shipping_amount + handling_amount
@@ -1640,6 +1721,7 @@ async def _import_aliexpress_json(
                 item_name=item["external_item_name"],
                 quantity=item["quantity"],
                 unit_price=item["unit_price"],
+                total_price=item.get("total_price"),
                 po_item_repo=po_item_repo,
                 db=db,
                 result=result,
@@ -1765,6 +1847,7 @@ async def _import_aliexpress_csv(
                 "external_item_name": external_item_name,
                 "quantity": quantity,
                 "unit_price": item_unit_price,
+                "total_price": _quantize_po_item_total(item_unit_price * Decimal(quantity)),
             }
         )
 
@@ -1784,7 +1867,7 @@ async def _import_aliexpress_csv(
         total_amount = _to_decimal(order_data["total_amount"], default="0")
         if total_amount <= 0:
             total_amount = sum(
-                (_to_decimal(item.get("unit_price"), default="0") * _to_int(item.get("quantity"), default=0) for item in items),
+                (_to_decimal(item.get("total_price"), default="0") for item in items),
                 Decimal("0"),
             ) + tax_amount + shipping_amount + handling_amount
 
@@ -1834,6 +1917,7 @@ async def _import_aliexpress_csv(
                 item_name=item_name,
                 quantity=quantity,
                 unit_price=_to_decimal(item.get("unit_price"), default="0"),
+                total_price=_to_decimal(item.get("total_price"), default="0"),
                 po_item_repo=po_item_repo,
                 db=db,
                 result=result,
@@ -2078,7 +2162,7 @@ async def _import_ebay_purchase_api(
             handling_amount = _to_decimal(order.get("handling_amount"), default="0")
             if total_amount <= 0:
                 total_amount = sum(
-                    (_to_decimal(i.get("unit_price"), default="0") * _to_int(i.get("quantity"), default=0) for i in items),
+                    (_to_decimal(i.get("total_price"), default="0") for i in items),
                     Decimal("0"),
                 ) + tax_amount + shipping_amount + handling_amount
 
@@ -2142,6 +2226,7 @@ async def _import_ebay_purchase_api(
                 item_name = str(item.get("external_item_name") or "").strip()
                 quantity = _to_int(item.get("quantity"), default=0)
                 unit_price = _to_decimal(item.get("unit_price"), default="0")
+                total_price = _to_decimal(item.get("total_price"), default="0")
                 if not item_name or quantity <= 0:
                     result.source_rows_skipped += 1
                     logger.warning(
@@ -2160,6 +2245,7 @@ async def _import_ebay_purchase_api(
                     item_name=item_name,
                     quantity=quantity,
                     unit_price=unit_price,
+                    total_price=total_price,
                     po_item_repo=po_item_repo,
                     db=db,
                     result=result,

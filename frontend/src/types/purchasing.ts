@@ -46,7 +46,7 @@ export interface PurchaseOrderItemCreate {
   condition_note?: string | null
   external_item_name: string
   quantity: number
-  unit_price: number
+  unit_price?: number
   total_price: number
   status?: PurchaseOrderItemStatus
 }

@@ -87,7 +87,7 @@ class ZohoClient:
         if not all([self.client_id, self.client_secret, self.refresh_token]):
             raise ValueError("Zoho credentials not configured")
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 f"{self.accounts_url}/oauth/v2/token",
                 params={
@@ -171,7 +171,7 @@ class ZohoClient:
             payload_keys,
         )
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             # Retry once on 401 after a token refresh
             for attempt in range(2):
                 auth_headers = {
