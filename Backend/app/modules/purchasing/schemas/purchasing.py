@@ -52,7 +52,7 @@ class PurchaseOrderItemBase(BaseModel):
 
 
 class PurchaseOrderItemCreate(PurchaseOrderItemBase):
-    pass
+    unit_price: Decimal = Field(default=Decimal("0"), ge=0)
 
 
 class PurchaseOrderItemUpdate(BaseModel):
