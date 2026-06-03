@@ -68,6 +68,7 @@ interface EbayCategorySuggestion {
 }
 
 interface EbayCategorySuggestionsResponse {
+  query: string
   suggestions: EbayCategorySuggestion[]
 }
 
@@ -157,6 +158,7 @@ interface EbaySpecific {
   aspects: EbayAspectSuggestion[]
   valid_conditions: EbayValidCondition[]
   enrich_warnings: string[]
+  pending_ai_preview: EbayAiEnrichResponse | null
 }
 
 interface WizardState {
@@ -217,6 +219,7 @@ const INITIAL_STATE: WizardState = {
     aspects: [],
     valid_conditions: [],
     enrich_warnings: [],
+    pending_ai_preview: null,
   },
 }
 
@@ -240,6 +243,10 @@ function getCategoryTreeLabelById(
 ): string {
   const match = suggestions.find((s) => s.category_id === categoryId)
   return match ? formatCategoryLabel(match) : categoryId
+}
+
+function buildImageSignature(images: EbayAvailableImage[]): string {
+  return images.map((image) => image.image_id).join('|')
 }
 
 export default function CreateProductListing() {
@@ -320,6 +327,17 @@ export default function CreateProductListing() {
   const selectedPlatforms = useMemo<DestinationKey[]>(() => {
     return DESTINATION_OPTIONS.filter((p) => state.destinations[p.key]).map((p) => p.key)
   }, [state.destinations])
+  const listingImageSignature = useMemo(
+    () => buildImageSignature(state.ebay.listing_images),
+    [state.ebay.listing_images],
+  )
+  const imagesSubmittedForCurrentSelection = useMemo(() => {
+    return (
+      state.ebay.picture_urls.length > 0 &&
+      state.ebay.sent_image_signature.length > 0 &&
+      state.ebay.sent_image_signature === listingImageSignature
+    )
+  }, [listingImageSignature, state.ebay.picture_urls.length, state.ebay.sent_image_signature])
 
   useEffect(() => {
     if (selectedPlatforms.length > 0 && !selectedPlatforms.includes(activePlatformTab)) {
@@ -407,6 +425,7 @@ export default function CreateProductListing() {
             sent_image_signature: '',
             send_results: [],
             picture_urls: [],
+            pending_ai_preview: prev.ebay.pending_ai_preview,
           },
         }
       })
@@ -429,7 +448,7 @@ export default function CreateProductListing() {
       return response.data
     },
     onSuccess: (data) => {
-      const signature = state.ebay.listing_images.map((img) => img.image_id).join('|')
+      const signature = buildImageSignature(state.ebay.listing_images)
       setState((prev) => ({
         ...prev,
         ebay: {
@@ -475,24 +494,12 @@ export default function CreateProductListing() {
       return response.data
     },
     onSuccess: (data) => {
-      const validConditionIds = new Set(data.valid_conditions.map((entry) => entry.condition_id))
       setState((prev) => ({
         ...prev,
-        master_title: data.title || prev.master_title,
-        description: data.description || prev.description,
         ebay: {
           ...prev.ebay,
-          condition_text: validConditionIds.has(prev.ebay.condition_text)
-            ? prev.ebay.condition_text
-            : (data.valid_conditions[0]?.condition_id || prev.ebay.condition_text),
-          category_id: data.category_id || prev.ebay.category_id,
-          length: data.dimensions.length != null ? String(data.dimensions.length) : prev.ebay.length,
-          width: data.dimensions.width != null ? String(data.dimensions.width) : prev.ebay.width,
-          height: data.dimensions.height != null ? String(data.dimensions.height) : prev.ebay.height,
-          weight: data.dimensions.weight != null ? String(data.dimensions.weight) : prev.ebay.weight,
-          aspects: data.aspects,
-          valid_conditions: data.valid_conditions,
           enrich_warnings: data.warnings,
+          pending_ai_preview: data,
         },
       }))
     },
@@ -535,6 +542,7 @@ export default function CreateProductListing() {
           brand: prev.ebay.brand || draft.brand || '',
           mpn: prev.ebay.mpn || prev.master_sku || draft.sku || '',
           color: prev.ebay.color || draft.color || '',
+          pending_ai_preview: null,
         },
       }))
       return true
@@ -578,6 +586,71 @@ export default function CreateProductListing() {
         // non-blocking; user can still enter category manually
       })
   }, [step, activePlatformTab, state.variant_id, state.master_title, selectedEbayPlatform])
+
+  const handleRefreshCategorySuggestions = async () => {
+    if (!selectedEbayPlatform || !state.variant_id) {
+      setUiError('Variant and eBay platform are required before requesting category suggestions.')
+      return
+    }
+    setUiError(null)
+    try {
+      const response = await categorySuggestionMutation.mutateAsync({
+        platform: selectedEbayPlatform,
+        variant_id: state.variant_id,
+        title: state.master_title,
+      })
+      setState((prev) => {
+        const first = response.suggestions[0]
+        return {
+          ...prev,
+          ebay: {
+            ...prev.ebay,
+            suggested_categories: response.suggestions,
+            category_id: prev.ebay.category_id || first?.category_id || '',
+          },
+        }
+      })
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail
+      setUiError(typeof detail === 'string' ? detail : 'Failed to fetch eBay category suggestions.')
+    }
+  }
+
+  const handleApplyAiPreview = () => {
+    const preview = state.ebay.pending_ai_preview
+    if (!preview) return
+    const validConditionIds = new Set(preview.valid_conditions.map((entry) => entry.condition_id))
+    setState((prev) => ({
+      ...prev,
+      master_title: preview.title || prev.master_title,
+      description: preview.description || prev.description,
+      ebay: {
+        ...prev.ebay,
+        condition_text: validConditionIds.has(prev.ebay.condition_text)
+          ? prev.ebay.condition_text
+          : (preview.valid_conditions[0]?.condition_id || prev.ebay.condition_text),
+        category_id: preview.category_id || prev.ebay.category_id,
+        length: preview.dimensions.length != null ? String(preview.dimensions.length) : prev.ebay.length,
+        width: preview.dimensions.width != null ? String(preview.dimensions.width) : prev.ebay.width,
+        height: preview.dimensions.height != null ? String(preview.dimensions.height) : prev.ebay.height,
+        weight: preview.dimensions.weight != null ? String(preview.dimensions.weight) : prev.ebay.weight,
+        aspects: preview.aspects,
+        valid_conditions: preview.valid_conditions,
+        enrich_warnings: preview.warnings,
+        pending_ai_preview: null,
+      },
+    }))
+  }
+
+  const handleDiscardAiPreview = () => {
+    setState((prev) => ({
+      ...prev,
+      ebay: {
+        ...prev.ebay,
+        pending_ai_preview: null,
+      },
+    }))
+  }
 
   const stepValid = useMemo(() => {
     if (step === 0) return selectedPlatforms.length > 0
@@ -648,11 +721,11 @@ export default function CreateProductListing() {
       setUiError('Description is required before publish.')
       return
     }
-    const pictureUrls = state.ebay.listing_images
-      .map((img) => img.preview_url.trim())
+    const pictureUrls = state.ebay.picture_urls
+      .map((url) => url.trim())
       .filter((url) => url.length > 0)
-    if (pictureUrls.length === 0) {
-      setUiError('Select at least one listing image before publish.')
+    if (!imagesSubmittedForCurrentSelection || pictureUrls.length === 0) {
+      setUiError('Submit selected images to eBay before creating the listing.')
       return
     }
     const requiredAspects = state.ebay.aspects.filter((a) => a.required)
@@ -705,6 +778,7 @@ export default function CreateProductListing() {
           sent_image_signature: '',
           send_results: [],
           picture_urls: [],
+          pending_ai_preview: prev.ebay.pending_ai_preview,
         },
       }
     })
@@ -720,6 +794,7 @@ export default function CreateProductListing() {
         sent_image_signature: '',
         send_results: [],
         picture_urls: [],
+        pending_ai_preview: prev.ebay.pending_ai_preview,
       },
     }))
   }
@@ -824,6 +899,7 @@ export default function CreateProductListing() {
                         aspects: [],
                         valid_conditions: [],
                         enrich_warnings: [],
+                        pending_ai_preview: null,
                       },
                     }))
                     setDraftLoadedForPlatform(null)
@@ -923,17 +999,73 @@ export default function CreateProductListing() {
 
       {EBAY_KEYS.includes(activePlatformTab) ? (
         <Stack spacing={2}>
-          <Button
-            variant="outlined"
-            onClick={() => enrichMutation.mutate()}
-            disabled={!selectedEbayPlatform || !state.variant_id || enrichMutation.isPending}
-          >
-            {enrichMutation.isPending ? 'Enriching...' : 'Enrich Listing'}
-          </Button>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+            <Button
+              variant="outlined"
+              onClick={handleRefreshCategorySuggestions}
+              disabled={!selectedEbayPlatform || !state.variant_id || categorySuggestionMutation.isPending}
+            >
+              {categorySuggestionMutation.isPending ? 'Refreshing categories...' : 'Suggest Categories'}
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={() => enrichMutation.mutate()}
+              disabled={!selectedEbayPlatform || !state.variant_id || enrichMutation.isPending}
+            >
+              {enrichMutation.isPending ? 'Generating AI draft...' : 'Generate AI Additional Info'}
+            </Button>
+          </Stack>
           {state.ebay.enrich_warnings.length > 0 ? (
             <Alert severity="warning">
               {state.ebay.enrich_warnings.join(' | ')}
             </Alert>
+          ) : null}
+          {state.ebay.pending_ai_preview ? (
+            <Card variant="outlined">
+              <CardContent>
+                <Stack spacing={1.5}>
+                  <Typography variant="subtitle2">AI Draft Ready</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Review AI-generated title, category, description, aspects, and package estimates. Apply only if it looks right.
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Suggested title:</strong> {state.ebay.pending_ai_preview.title || 'No change'}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Suggested category:</strong> {state.ebay.pending_ai_preview.category_id || 'No change'}
+                  </Typography>
+                  <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                    <strong>Suggested description:</strong>{' '}
+                    {state.ebay.pending_ai_preview.description || 'No change'}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Suggested dimensions:</strong>{' '}
+                    L {state.ebay.pending_ai_preview.dimensions.length ?? '-'} / W {state.ebay.pending_ai_preview.dimensions.width ?? '-'} / H {state.ebay.pending_ai_preview.dimensions.height ?? '-'} / WT {state.ebay.pending_ai_preview.dimensions.weight ?? '-'}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Suggested aspects:</strong>{' '}
+                    {state.ebay.pending_ai_preview.aspects.length > 0
+                      ? state.ebay.pending_ai_preview.aspects
+                          .map((aspect) => `${aspect.name}: ${aspect.values.join(', ') || 'blank'}`)
+                          .join(' | ')
+                      : 'None'}
+                  </Typography>
+                  {state.ebay.pending_ai_preview.warnings.length > 0 ? (
+                    <Alert severity="warning">
+                      {state.ebay.pending_ai_preview.warnings.join(' | ')}
+                    </Alert>
+                  ) : null}
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                    <Button variant="contained" onClick={handleApplyAiPreview}>
+                      Apply AI Draft
+                    </Button>
+                    <Button variant="text" onClick={handleDiscardAiPreview}>
+                      Dismiss
+                    </Button>
+                  </Stack>
+                </Stack>
+              </CardContent>
+            </Card>
           ) : null}
           <TextField
             label="Description *"
@@ -1071,6 +1203,11 @@ export default function CreateProductListing() {
           {categorySuggestionMutation.isPending ? (
             <Alert severity="info">Loading category suggestions...</Alert>
           ) : null}
+          {state.ebay.suggested_categories.length > 0 ? (
+            <Alert severity="info">
+              {`Loaded ${state.ebay.suggested_categories.length} suggested categories for "${state.master_title}".`}
+            </Alert>
+          ) : null}
           <Stack spacing={1}>
             <Stack direction="row" justifyContent="space-between" alignItems="center">
               <Typography variant="subtitle2">Item Specifics</Typography>
@@ -1164,14 +1301,42 @@ export default function CreateProductListing() {
           ) : null}
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
             {state.ebay.available_images.map((image) => (
-              <Button
+              <Paper
                 key={image.image_id}
-                size="small"
-                variant={state.ebay.listing_images.some((x) => x.image_id === image.image_id) ? 'contained' : 'outlined'}
-                onClick={() => handleSelectListingImage(image)}
+                variant="outlined"
+                sx={{
+                  width: 160,
+                  p: 1,
+                  borderColor: state.ebay.listing_images.some((x) => x.image_id === image.image_id)
+                    ? 'primary.main'
+                    : 'divider',
+                }}
               >
-                {image.filename}
-              </Button>
+                <Box
+                  component="img"
+                  src={image.preview_url}
+                  alt={image.filename}
+                  sx={{
+                    width: '100%',
+                    height: 110,
+                    objectFit: 'cover',
+                    borderRadius: 1,
+                    bgcolor: 'grey.100',
+                    mb: 1,
+                  }}
+                />
+                <Typography variant="caption" sx={{ display: 'block', mb: 1 }}>
+                  {image.filename}
+                </Typography>
+                <Button
+                  size="small"
+                  variant={state.ebay.listing_images.some((x) => x.image_id === image.image_id) ? 'contained' : 'outlined'}
+                  onClick={() => handleSelectListingImage(image)}
+                  fullWidth
+                >
+                  {state.ebay.listing_images.some((x) => x.image_id === image.image_id) ? 'Selected' : 'Use Image'}
+                </Button>
+              </Paper>
             ))}
             {!availableImagesQuery.isLoading && state.ebay.available_images.length === 0 ? (
               <Typography variant="body2" color="text.secondary">No available images for this SKU.</Typography>
@@ -1184,11 +1349,37 @@ export default function CreateProductListing() {
           <Typography variant="subtitle2">Listing Images</Typography>
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
             {state.ebay.listing_images.map((image) => (
-              <Chip
+              <Paper
                 key={image.image_id}
-                label={image.filename}
-                onDelete={() => handleRemoveListingImage(image.image_id)}
-              />
+                variant="outlined"
+                sx={{ width: 160, p: 1 }}
+              >
+                <Box
+                  component="img"
+                  src={image.preview_url}
+                  alt={image.filename}
+                  sx={{
+                    width: '100%',
+                    height: 110,
+                    objectFit: 'cover',
+                    borderRadius: 1,
+                    bgcolor: 'grey.100',
+                    mb: 1,
+                  }}
+                />
+                <Typography variant="caption" sx={{ display: 'block', mb: 1 }}>
+                  {image.filename}
+                </Typography>
+                <Button
+                  size="small"
+                  color="error"
+                  variant="outlined"
+                  onClick={() => handleRemoveListingImage(image.image_id)}
+                  fullWidth
+                >
+                  Remove
+                </Button>
+              </Paper>
             ))}
             {state.ebay.listing_images.length === 0 ? (
               <Typography variant="body2" color="text.secondary">Select images from Available Images.</Typography>
@@ -1199,8 +1390,18 @@ export default function CreateProductListing() {
             onClick={() => sendImagesMutation.mutate()}
             disabled={sendImagesMutation.isPending || state.ebay.listing_images.length === 0 || !selectedEbayPlatform}
           >
-            {sendImagesMutation.isPending ? 'Sending image...' : 'Send image (optional)'}
+            {sendImagesMutation.isPending ? 'Submitting images to eBay...' : 'Submit Selected Images to eBay'}
           </Button>
+          {state.ebay.listing_images.length > 0 && !imagesSubmittedForCurrentSelection ? (
+            <Alert severity="warning">
+              Selected images changed or not yet submitted. Submit images to eBay before final listing creation.
+            </Alert>
+          ) : null}
+          {imagesSubmittedForCurrentSelection ? (
+            <Alert severity="success">
+              {`Submitted ${state.ebay.picture_urls.length} image(s) to eBay. Final create action will use hosted eBay image URLs.`}
+            </Alert>
+          ) : null}
           {state.ebay.send_results.length > 0 ? (
             <Box sx={{ display: 'grid', gap: 0.5 }}>
               {state.ebay.send_results.map((result) => (
@@ -1221,7 +1422,7 @@ export default function CreateProductListing() {
     const effectivePrice = parseNumber(state.ebay.price_override) ?? parseNumber(state.base_price)
     const requiredAspects = state.ebay.aspects.filter((a) => a.required)
     const canList =
-      state.ebay.listing_images.length > 0 &&
+      imagesSubmittedForCurrentSelection &&
       requiredAspects.every((a) => a.values.some((v) => v.trim().length > 0)) &&
       !publishMutation.isPending
     return (
@@ -1241,6 +1442,9 @@ export default function CreateProductListing() {
             <Typography variant="body2">Category: {state.ebay.category_id || 'N/A'}</Typography>
             <Typography variant="body2">Condition: {state.ebay.condition_text || 'N/A'}</Typography>
             <Typography variant="body2">Pictures: {state.ebay.listing_images.length}</Typography>
+            <Typography variant="body2">
+              Images submitted to eBay: {imagesSubmittedForCurrentSelection ? 'Yes' : 'No'}
+            </Typography>
           </CardContent>
         </Card>
 
@@ -1249,7 +1453,7 @@ export default function CreateProductListing() {
           onClick={handlePublish}
           disabled={!canList}
         >
-          {publishMutation.isPending ? 'Uploading...' : 'Validate & Upload'}
+          {publishMutation.isPending ? 'Creating listing...' : 'Create eBay Listing'}
         </Button>
       </Stack>
     )
