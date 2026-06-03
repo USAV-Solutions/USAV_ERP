@@ -66,6 +66,7 @@ VALID_ZOHO_SO_SOURCE_VALUES = {
     "ECWID",
     "Amazon",
     "Other",
+    "Shopify",
     "Walmart",
 }
 
@@ -121,6 +122,8 @@ EXACT_ZOHO_SO_SOURCE_MAP = {
     "ECWID_API": "ECWID",
     "AMAZON": "Amazon",
     "AMAZON_API": "Amazon",
+    "SHOPIFY": "Shopify",
+    "SHOPIFY_API": "Shopify",
     "MANUAL": "Other",
     "ZOHO_IMPORT": "Other",
 }
@@ -325,6 +328,8 @@ def _normalize_so_source_to_zoho_dropdown(source: str) -> str:
         return "ECWID"
     if "AMAZON" in text:
         return "Amazon"
+    if "SHOPIFY" in text:
+        return "Shopify"
     if "WALMART" in text:
         return "Walmart"
     return "Other"
@@ -340,6 +345,16 @@ def _resolve_so_source_to_zoho_dropdown(source: str) -> str:
     if fallback in VALID_ZOHO_SO_SOURCE_VALUES:
         return fallback
     return "Other"
+
+
+def _resolve_order_so_source_to_zoho_dropdown(order: Order) -> str:
+    platform_value = getattr(getattr(order, "platform", None), "value", getattr(order, "platform", None))
+    platform_source = _resolve_so_source_to_zoho_dropdown(str(platform_value or ""))
+    if platform_source != "Other":
+        return platform_source
+
+    source_raw = str(getattr(order, "source", "") or "").strip()
+    return _resolve_so_source_to_zoho_dropdown(source_raw)
 
 
 def _extract_contact_source_custom_field(data: dict[str, Any]) -> Optional[str]:
@@ -1965,12 +1980,11 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
         line_items.append(li)
     payload["line_items"] = line_items
 
-    source_raw = str(getattr(order, "source", "") or "").strip()
-    if source_raw:
+    if getattr(order, "platform", None) or getattr(order, "source", None):
         payload["custom_fields"] = [
             {
                 "api_name": "cf_source",
-                "value": _resolve_so_source_to_zoho_dropdown(source_raw),
+                "value": _resolve_order_so_source_to_zoho_dropdown(order),
             }
         ]
 
@@ -1988,12 +2002,8 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
 
     payload["shipping_charge"] = float(shipping_amount)
 
-    if is_marketplace_order:
-        payload["adjustment"] = float(inferred_handling)
-        payload["adjustment_description"] = "Handling fee"
-    else:
-        payload["adjustment"] = float(tax_amount + inferred_handling)
-        payload["adjustment_description"] = "Tax + Handling fee"
+    payload["adjustment"] = float(tax_amount + inferred_handling)
+    payload["adjustment_description"] = "Tax + Handling fee"
 
     return payload
 

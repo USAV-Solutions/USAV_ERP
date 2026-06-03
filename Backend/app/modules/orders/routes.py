@@ -313,20 +313,24 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
             _normalized(_pick(row_data, "Ship To - Postal Code", "shipping_postal_code")),
         )
 
+    def _platform_signal_text(row_data: dict[str, str]) -> str:
+        signal_parts = [
+            row_data.get("platform"),
+            row_data.get("order_platform"),
+            row_data.get("Platform"),
+            row_data.get("Source Platform"),
+            row_data.get("source"),
+            row_data.get("Source"),
+            row_data.get("order_source"),
+            row_data.get("Order Source"),
+            row_data.get("Store"),
+            row_data.get("Store Name"),
+            row_data.get("Advanced Options Source"),
+        ]
+        return " ".join(str(part or "").strip() for part in signal_parts).upper()
+
     def _detect_platform(row_data: dict[str, str]) -> str:
-        platform_raw = _coalesce(
-            row_data.get("platform")
-            or row_data.get("order_platform")
-            or row_data.get("Platform")
-            or row_data.get("Source Platform")
-        )
-        source_raw = _coalesce(
-            row_data.get("source")
-            or row_data.get("Source")
-            or row_data.get("order_source")
-            or row_data.get("Order Source")
-        )
-        text = f"{(platform_raw or '')} {(source_raw or '')}".upper()
+        text = _platform_signal_text(row_data)
         if "SHOPIFY" in text:
             return "SHOPIFY"
         if "ECWID" in text:
@@ -423,6 +427,10 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
                     ordered_at = None
 
         platform_name = _detect_platform(row)
+        if platform_name == "ECWID":
+            skipped += 1
+            continue
+
         group_key = order_number or ext_order_id
         order_entry = grouped.setdefault(
             group_key,
