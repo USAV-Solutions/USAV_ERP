@@ -468,6 +468,18 @@ class OrderSyncService:
     # PRIVATE – Ingestion helpers
     # ------------------------------------------------------------------
 
+    async def _is_tracking_duplicate(self, tracking_number: str, exclude_order_id: Optional[int] = None) -> bool:
+        if not tracking_number or not tracking_number.strip():
+            return False
+        val = tracking_number.strip()
+        stmt = select(Order).where(
+            func.lower(Order.tracking_number) == func.lower(val)
+        )
+        if exclude_order_id is not None:
+            stmt = stmt.where(Order.id != exclude_order_id)
+        duplicate = (await self.session.execute(stmt)).scalars().first()
+        return duplicate is not None
+
     async def _ingest_order(
         self,
         ext: ExternalOrder,
@@ -500,6 +512,14 @@ class OrderSyncService:
 
         incoming_subtotal, incoming_tax, incoming_shipping, incoming_total = _normalized_order_amounts(ext, platform)
 
+        tracking = self._extract_tracking_number(ext)
+        if tracking and await self._is_tracking_duplicate(tracking):
+            logger.warning(
+                f"Duplicate tracking number '{tracking}' found for incoming order '{ext.platform_order_id}'. "
+                f"Skipping tracking assignment to prevent duplicates."
+            )
+            tracking = None
+
         # Build the Order header
         order_data = {
             "platform": platform,
@@ -514,7 +534,7 @@ class OrderSyncService:
             "total_amount": incoming_total,
             "currency": ext.currency or "USD",
             "ordered_at": ext.ordered_at,
-            "tracking_number": self._extract_tracking_number(ext),
+            "tracking_number": tracking,
             "platform_data": ext.raw_data,
         }
 
@@ -564,8 +584,14 @@ class OrderSyncService:
 
         incoming_tracking = self._extract_tracking_number(ext)
         if incoming_tracking and existing.tracking_number != incoming_tracking:
-            existing.tracking_number = incoming_tracking
-            changed = True
+            if await self._is_tracking_duplicate(incoming_tracking, exclude_order_id=existing.id):
+                logger.warning(
+                    f"Duplicate tracking number '{incoming_tracking}' found for existing order '{existing.external_order_id}'. "
+                    f"Skipping tracking update to prevent duplicates."
+                )
+            else:
+                existing.tracking_number = incoming_tracking
+                changed = True
 
         incoming_subtotal, incoming_tax, incoming_shipping, incoming_total = _normalized_order_amounts(ext, platform)
         incoming_currency = ext.currency or "USD"

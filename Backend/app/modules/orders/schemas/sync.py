@@ -86,6 +86,7 @@ class SalesImportApiSource(str, Enum):
 class SalesImportFileSource(str, Enum):
     CSV_GENERIC = "CSV_GENERIC"
     SHIPSTATION_CUSTOMER_CSV = "SHIPSTATION_CUSTOMER_CSV"
+    TRACKING_CSV = "TRACKING_CSV"
 
 
 class SalesImportApiRequest(BaseModel):

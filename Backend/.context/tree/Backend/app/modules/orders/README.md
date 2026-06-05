@@ -1,4 +1,4 @@
-﻿# Backend\app\modules\orders
+# Backend\app\modules\orders
 
 ## What This Folder Does
 Sales orders domain: ingestion/import, listing-centric matching, filtering, customer CSV upsert, and order sync state.
@@ -30,6 +30,9 @@ Sales orders domain: ingestion/import, listing-centric matching, filtering, cust
 - Sales-order line items can now be added manually via `POST /orders/{order_id}/items`; new rows mark order `zoho_sync_status=DIRTY`, set item status from `variant_id` (`MATCHED` vs `UNMATCHED`), and recalculate order subtotal/total from line totals while preserving any previously inferred handling delta.
 - Sales-order line items now support inline maintenance via `PATCH /orders/items/{item_id}` and `DELETE /orders/items/{item_id}`; successful edits/deletes mark parent order `zoho_sync_status=DIRTY` and recalculate order subtotal/total from current line totals.
 - Admin can bulk re-check unmatched line items via `POST /orders/sync/refresh-matching`; it tries `external_item_id` → `platform_listing.external_ref_id` first, then normalized name matching (`lowercase` + punctuation/spacing removed) between `item_name` and `platform_listing.listed_name`, and auto-sets `order_item.variant_id/status` when a mapped active listing is found.
+- Tracking number uniqueness and validation: Tracking numbers are unique across all orders in the database. Manual updates attempting to assign duplicate tracking numbers will fail with 400 Bad Request. Background syncs and tracking CSV imports will log a warning and skip duplicates.
+- Order and shipping status constraints: Changing order status to `SHIPPED` or `DELIVERED`, or shipping status to `SHIPPING` or `DELIVERED`, requires a tracking number.
+- `TRACKING_CSV` file import source: Allows bulk updating order tracking details using daily Google Sheet summary files (Platform in Col A, Order Number in Col B, Tracking in Col I). Successful matches automatically update orders to `SHIPPED`/`SHIPPING`, auto-detect carrier, and mark Zoho sync status `DIRTY`. Missing orders or empty tracking numbers are ignored.
 
 ## Recent Behavior Change: Platform Listing mappings
 
