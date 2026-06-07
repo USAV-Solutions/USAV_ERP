@@ -809,6 +809,19 @@ def _is_salesorder_already_confirmed_error(exc: Exception) -> bool:
     return "confirmed" in message_lc and "already" in message_lc
 
 
+def _is_salesorder_transaction_level_location_error(exc: Exception) -> bool:
+    message = str(exc)
+    message_lc = message.lower()
+    return "27520" in message and "item-level location" in message_lc
+
+
+def _strip_salesorder_location_fields(payload: dict[str, Any]) -> dict[str, Any]:
+    sanitized = dict(payload)
+    sanitized.pop("location_id", None)
+    sanitized.pop("branch_id", None)
+    return sanitized
+
+
 def _strip_po_location_fields(payload: dict[str, Any]) -> dict[str, Any]:
     sanitized: dict[str, Any] = {k: v for k, v in payload.items() if k not in {"location_id", "branch_id"}}
     line_items = payload.get("line_items")
@@ -1986,8 +1999,9 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
     }
     if reference_number:
         payload["reference_number"] = reference_number
-    if getattr(order, "fulfillment_channel", None) == OrderFulfillmentChannel.AMAZON_FBA:
-        payload["location_id"] = AMAZON_FBA_SALESORDER_LOCATION_ID
+    is_amazon_fba_order = (
+        getattr(order, "fulfillment_channel", None) == OrderFulfillmentChannel.AMAZON_FBA
+    )
     if order.shipped_at:
         payload["shipment_date"] = order.shipped_at.strftime("%Y-%m-%d")
     if order.carrier:
@@ -2024,6 +2038,8 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
             li["item_id"] = variant.zoho_item_id
         if is_marketplace_order:
             li["tax_percentage"] = 0.0
+        if is_amazon_fba_order:
+            li["location_id"] = AMAZON_FBA_SALESORDER_LOCATION_ID
         line_items.append(li)
     payload["line_items"] = line_items
 
@@ -2258,6 +2274,18 @@ async def sync_order_outbound(order_id: int) -> None:
                     else:
                         so = await zoho.create_sales_order(payload_retry)
                     payload = payload_retry
+                elif _is_salesorder_transaction_level_location_error(so_exc) and payload.get("location_id"):
+                    logger.warning(
+                        "sync_order_outbound: retrying order %s without transaction-level location after Zoho 27520",
+                        order_id,
+                    )
+                    payload_retry = _strip_salesorder_location_fields(payload)
+                    if order.zoho_id:
+                        so = await zoho.update_salesorder(order.zoho_id, payload_retry)
+                    else:
+                        so = await zoho.create_sales_order(payload_retry)
+                    payload = payload_retry
+                    new_hash = generate_payload_hash(payload)
                 else:
                     raise
 
