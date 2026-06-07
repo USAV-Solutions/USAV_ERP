@@ -8,6 +8,7 @@
  *   - OrderSyncButton in the header
  */
 import { useState, Fragment } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Box,
   Typography,
@@ -70,6 +71,7 @@ import type {
   ShippingStatus,
   SyncStatusResponse,
   SyncResponse,
+  OrderFulfillmentChannel,
   ZohoSyncStatus,
 } from '../types/orders'
 
@@ -150,11 +152,19 @@ const ZOHO_SYNC_COLOR: Record<ZohoSyncStatus, 'default' | 'success' | 'error' | 
   ERROR: 'error',
 }
 
+const VIEW_TO_CHANNEL: Record<'self' | 'fba', OrderFulfillmentChannel> = {
+  self: 'SELF_FULFILLED',
+  fba: 'AMAZON_FBA',
+}
+
 // ── Component ────────────────────────────────────────────────────────
 
 export default function OrdersManagement() {
   const queryClient = useQueryClient()
   const { hasRole } = useAuth()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const orderView = searchParams.get('view') === 'fba' ? 'fba' : 'self'
+  const fulfillmentChannel = VIEW_TO_CHANNEL[orderView]
 
   // Pagination
   const [page, setPage] = useState(0)
@@ -216,8 +226,8 @@ export default function OrdersManagement() {
   const {
     data: syncStatus,
   } = useQuery<SyncStatusResponse>({
-    queryKey: ['syncStatus'],
-    queryFn: getSyncStatus,
+    queryKey: ['syncStatus', fulfillmentChannel],
+    queryFn: () => getSyncStatus(fulfillmentChannel),
     refetchInterval: 15_000,
   })
 
@@ -229,6 +239,7 @@ export default function OrdersManagement() {
       'orders',
       page,
       rowsPerPage,
+      fulfillmentChannel,
       platformFilter,
       statusFilter,
       itemStatusFilter,
@@ -245,6 +256,7 @@ export default function OrdersManagement() {
         skip: page * rowsPerPage,
         limit: rowsPerPage,
         platform: platformFilter || undefined,
+        fulfillment_channel: fulfillmentChannel,
         status: statusFilter || undefined,
         item_status: itemStatusFilter || undefined,
         zoho_sync_status: zohoSyncFilter || undefined,
@@ -260,6 +272,7 @@ export default function OrdersManagement() {
   const { data: orderSummary } = useQuery({
     queryKey: [
       'orders-summary',
+      fulfillmentChannel,
       platformFilter,
       statusFilter,
       itemStatusFilter,
@@ -271,6 +284,7 @@ export default function OrdersManagement() {
     ],
     queryFn: async () => {
       const params = {
+        fulfillment_channel: fulfillmentChannel,
         platform: platformFilter || undefined,
         status: statusFilter || undefined,
         item_status: itemStatusFilter || undefined,
@@ -515,6 +529,17 @@ export default function OrdersManagement() {
     trackingUploadMutation.reset()
   }
 
+  const handleViewChange = (nextView: 'self' | 'fba') => {
+    if (nextView === orderView) {
+      return
+    }
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.set('view', nextView)
+    setSearchParams(nextParams)
+    setPage(0)
+    setExpandedOrderId(null)
+  }
+
   const getErrorMessage = (error: unknown): string => {
     if (!error || typeof error !== 'object') {
       return 'Unknown error'
@@ -561,7 +586,7 @@ export default function OrdersManagement() {
 
       // eslint-disable-next-line no-constant-condition
       while (true) {
-        const batch = await listOrders({ skip, limit: pageSize })
+        const batch = await listOrders({ skip, limit: pageSize, fulfillment_channel: fulfillmentChannel })
         const matched = batch.items
           .filter((o) => {
             if (o.unmatched_count !== 0 || !o.ordered_at) {
@@ -683,8 +708,24 @@ export default function OrdersManagement() {
   return (
     <Box>
       {/* Header */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4">Orders Management</Typography>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, gap: 2, flexWrap: 'wrap' }}>
+        <Stack spacing={1}>
+          <Typography variant="h4">Orders Management</Typography>
+          <Stack direction="row" spacing={1}>
+            <Button
+              variant={orderView === 'self' ? 'contained' : 'outlined'}
+              onClick={() => handleViewChange('self')}
+            >
+              Self-fulfilled Orders
+            </Button>
+            <Button
+              variant={orderView === 'fba' ? 'contained' : 'outlined'}
+              onClick={() => handleViewChange('fba')}
+            >
+              FBA
+            </Button>
+          </Stack>
+        </Stack>
         <Stack direction="row" spacing={1}>
           <Tooltip title="Refresh">
             <IconButton
@@ -766,7 +807,7 @@ export default function OrdersManagement() {
               </MenuItem>
             )}
           </Menu>
-          {hasRole(['ADMIN', 'SALES_REP']) && <OrderImportButton />}
+          {hasRole(['ADMIN', 'SALES_REP']) && <OrderImportButton fulfillmentChannel={fulfillmentChannel} />}
         </Stack>
       </Box>
 

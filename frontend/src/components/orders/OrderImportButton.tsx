@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Alert,
   Box,
@@ -20,7 +20,7 @@ import { UploadFile } from '@mui/icons-material'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { importOrdersFromApi, importOrdersFromFile } from '../../api/orders'
-import type { SalesImportApiSource } from '../../types/orders'
+import type { OrderFulfillmentChannel, SalesImportApiSource } from '../../types/orders'
 
 const API_SOURCES: SalesImportApiSource[] = [
   'ECWID',
@@ -43,16 +43,28 @@ function toApiUntilIso(dateText: string): string {
   return new Date(`${dateText}T23:59:59.999`).toISOString()
 }
 
-export default function OrderImportButton() {
+type ImportMode = 'api' | 'csv' | 'fba'
+
+interface OrderImportButtonProps {
+  fulfillmentChannel: OrderFulfillmentChannel
+}
+
+export default function OrderImportButton({ fulfillmentChannel }: OrderImportButtonProps) {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
-  const [mode, setMode] = useState<'api' | 'csv'>('api')
+  const [mode, setMode] = useState<ImportMode>(
+    fulfillmentChannel === 'AMAZON_FBA' ? 'fba' : 'api',
+  )
   const [apiSource, setApiSource] = useState<SalesImportApiSource>('ECWID')
   const [since, setSince] = useState('')
   const [until, setUntil] = useState('')
   const [csvFile, setCsvFile] = useState<File | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setMode(fulfillmentChannel === 'AMAZON_FBA' ? 'fba' : 'api')
+  }, [fulfillmentChannel])
 
   const apiMutation = useMutation({
     mutationFn: () =>
@@ -76,7 +88,7 @@ export default function OrderImportButton() {
       if (!csvFile) {
         throw new Error('Please choose a CSV file.')
       }
-      return importOrdersFromFile('CSV_GENERIC', csvFile)
+      return importOrdersFromFile(mode === 'fba' ? 'AMAZON_FBA_CSV' : 'CSV_GENERIC', csvFile)
     },
     onSuccess: (data) => {
       setMessage(
@@ -121,14 +133,15 @@ export default function OrderImportButton() {
         Import Orders
       </Button>
       <Dialog open={open} onClose={closeDialog} fullWidth maxWidth="sm">
-        <DialogTitle>Import Sales Orders</DialogTitle>
+        <DialogTitle>{fulfillmentChannel === 'AMAZON_FBA' ? 'Import FBA Orders' : 'Import Sales Orders'}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <FormControl fullWidth size="small">
               <InputLabel>Mode</InputLabel>
-              <Select value={mode} label="Mode" onChange={(e) => setMode(e.target.value as 'api' | 'csv')}>
+              <Select value={mode} label="Mode" onChange={(e) => setMode(e.target.value as ImportMode)}>
                 <MenuItem value="api">API source</MenuItem>
                 <MenuItem value="csv">CSV file</MenuItem>
+                <MenuItem value="fba">FBA CSV</MenuItem>
               </Select>
             </FormControl>
 
@@ -168,7 +181,7 @@ export default function OrderImportButton() {
             ) : (
               <Box>
                 <Button component="label" variant="outlined">
-                  Choose CSV
+                  {mode === 'fba' ? 'Choose FBA CSV' : 'Choose CSV'}
                   <input
                     type="file"
                     hidden
@@ -177,7 +190,7 @@ export default function OrderImportButton() {
                   />
                 </Button>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                  {csvFile ? csvFile.name : 'No file selected'}
+                  {csvFile ? csvFile.name : mode === 'fba' ? 'No FBA CSV selected' : 'No file selected'}
                 </Typography>
               </Box>
             )}

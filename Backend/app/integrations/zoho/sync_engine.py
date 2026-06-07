@@ -30,7 +30,7 @@ from app.integrations.zoho.client import ZohoClient, RateLimitError
 from app.integrations.zoho.security import generate_payload_hash
 from app.models.entities import Customer, ProductVariant, ZohoSyncStatus
 from app.models.purchasing import PurchaseOrder, PurchaseOrderItem, Vendor
-from app.modules.orders.models import Order, OrderItem
+from app.modules.orders.models import Order, OrderFulfillmentChannel, OrderItem
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,7 @@ UNMATCHED_PLACEHOLDER_ITEM_SKU = "00000"
 EBAY_PO_SOURCE_PREFIX = "EBAY_"
 GOODWILL_SHIPPED_PO_SOURCE = "GOODWILL_SHIPPED"
 PAYMENT_TERMS_DUE_ON_RECEIPT = 0
+AMAZON_FBA_SALESORDER_LOCATION_ID = "5623409000001937413"
 
 VALID_ZOHO_PO_SOURCE_VALUES = {
     "Ebay",
@@ -1942,6 +1943,8 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
     }
     if reference_number:
         payload["reference_number"] = reference_number
+    if getattr(order, "fulfillment_channel", None) == OrderFulfillmentChannel.AMAZON_FBA:
+        payload["location_id"] = AMAZON_FBA_SALESORDER_LOCATION_ID
     if order.shipped_at:
         payload["shipment_date"] = order.shipped_at.strftime("%Y-%m-%d")
     if order.carrier:

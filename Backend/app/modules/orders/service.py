@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional, Sequence
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +25,7 @@ from app.models.entities import Platform, PlatformListing, Customer
 from app.modules.orders.models import (
     IntegrationSyncStatus,
     Order,
+    OrderFulfillmentChannel,
     OrderItem,
     OrderItemStatus,
     OrderPlatform,
@@ -152,6 +153,7 @@ class OrderSyncService:
         client: BasePlatformClient,
         *,
         source: Optional[str] = None,
+        fulfillment_channel: Optional[OrderFulfillmentChannel] = None,
     ) -> SyncResponse:
         """
         Execute the "Safe Sync" workflow for a single platform.
@@ -237,6 +239,7 @@ class OrderSyncService:
                     order_platform,
                     response,
                     source=source or self._platform_source(platform_name),
+                    fulfillment_channel=fulfillment_channel,
                 )
                 if ingest_state == "unchanged":
                     response.skipped_duplicates += 1
@@ -274,6 +277,7 @@ class OrderSyncService:
         until: datetime,
         *,
         source: Optional[str] = None,
+        fulfillment_channel: Optional[OrderFulfillmentChannel] = None,
     ) -> SyncResponse:
         """
         Fetch orders within an explicit date range.
@@ -304,6 +308,7 @@ class OrderSyncService:
                     order_platform,
                     response,
                     source=source or self._platform_source(platform_name),
+                    fulfillment_channel=fulfillment_channel,
                 )
                 if ingest_state == "unchanged":
                     response.skipped_duplicates += 1
@@ -487,6 +492,7 @@ class OrderSyncService:
         response: SyncResponse,
         *,
         source: str,
+        fulfillment_channel: Optional[OrderFulfillmentChannel] = None,
     ) -> str:
         """
         Insert or update a single external order + items.
@@ -504,6 +510,7 @@ class OrderSyncService:
                 platform=platform,
                 response=response,
                 source=source,
+                fulfillment_channel=fulfillment_channel,
             )
             return "updated" if changed else "unchanged"
 
@@ -513,6 +520,7 @@ class OrderSyncService:
         incoming_subtotal, incoming_tax, incoming_shipping, incoming_total = _normalized_order_amounts(ext, platform)
 
         tracking = self._extract_tracking_number(ext)
+        carrier = self._extract_carrier(ext)
         if tracking and await self._is_tracking_duplicate(tracking):
             logger.warning(
                 f"Duplicate tracking number '{tracking}' found for incoming order '{ext.platform_order_id}'. "
@@ -524,6 +532,7 @@ class OrderSyncService:
         order_data = {
             "platform": platform,
             "source": source,
+            "fulfillment_channel": fulfillment_channel or OrderFulfillmentChannel.SELF_FULFILLED,
             "external_order_id": ext.platform_order_id,
             "external_order_number": ext.platform_order_number,
             "status": OrderStatus.PENDING,
@@ -535,6 +544,7 @@ class OrderSyncService:
             "currency": ext.currency or "USD",
             "ordered_at": ext.ordered_at,
             "tracking_number": tracking,
+            "carrier": carrier,
             "platform_data": ext.raw_data,
         }
 
@@ -561,6 +571,7 @@ class OrderSyncService:
         platform: OrderPlatform,
         response: SyncResponse,
         source: str,
+        fulfillment_channel: Optional[OrderFulfillmentChannel] = None,
     ) -> bool:
         changed = False
 
@@ -571,6 +582,13 @@ class OrderSyncService:
 
         if source and existing.source != source:
             existing.source = source
+            changed = True
+
+        if (
+            fulfillment_channel == OrderFulfillmentChannel.AMAZON_FBA
+            and existing.fulfillment_channel != OrderFulfillmentChannel.AMAZON_FBA
+        ):
+            existing.fulfillment_channel = OrderFulfillmentChannel.AMAZON_FBA
             changed = True
 
         if ext.platform_order_number and existing.external_order_number != ext.platform_order_number:
@@ -592,6 +610,11 @@ class OrderSyncService:
             else:
                 existing.tracking_number = incoming_tracking
                 changed = True
+
+        incoming_carrier = self._extract_carrier(ext)
+        if incoming_carrier and existing.carrier != incoming_carrier:
+            existing.carrier = incoming_carrier
+            changed = True
 
         incoming_subtotal, incoming_tax, incoming_shipping, incoming_total = _normalized_order_amounts(ext, platform)
         incoming_currency = ext.currency or "USD"
@@ -782,6 +805,19 @@ class OrderSyncService:
             or self._coalesce(raw.get("tracking_number"))
             or self._coalesce(raw.get("Tracking Number"))
             or self._coalesce(raw.get("tracking"))
+        )
+
+    def _extract_carrier(self, ext: ExternalOrder) -> Optional[str]:
+        direct = self._coalesce(getattr(ext, "carrier", None))
+        if direct:
+            return direct
+        raw = getattr(ext, "raw_data", None) or {}
+        if not isinstance(raw, dict):
+            return None
+        return (
+            self._coalesce(raw.get("carrier"))
+            or self._coalesce(raw.get("Carrier"))
+            or self._coalesce(raw.get("shipping_carrier"))
         )
 
     def _merge_customer_fields(self, customer: Customer, ext: ExternalOrder, source: Optional[str]) -> bool:

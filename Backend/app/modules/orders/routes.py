@@ -47,7 +47,15 @@ from app.modules.orders.dependencies import (
     get_order_sync_service,
     get_sync_repo,
 )
-from app.modules.orders.models import Order, OrderItem, OrderItemStatus, OrderPlatform, OrderStatus, ShippingStatus
+from app.modules.orders.models import (
+    Order,
+    OrderFulfillmentChannel,
+    OrderItem,
+    OrderItemStatus,
+    OrderPlatform,
+    OrderStatus,
+    ShippingStatus,
+)
 from app.modules.orders.schemas.orders import (
     OrderBrief,
     OrderDetail,
@@ -529,6 +537,140 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
     return list(grouped.values()), seen, skipped
 
 
+def _parse_amazon_fba_csv(file_text: str) -> tuple[list[dict], int, int]:
+    reader = csv.DictReader(io.StringIO(file_text))
+    grouped: dict[str, dict] = {}
+    seen = 0
+    skipped = 0
+
+    def _pick(row_data: dict[str, str], *keys: str) -> str:
+        for key in keys:
+            value = (row_data.get(key) or "").strip()
+            if value:
+                return value
+        return ""
+
+    def _as_float(row_data: dict[str, str], *keys: str) -> float:
+        value = _pick(row_data, *keys)
+        if not value:
+            return 0.0
+        try:
+            return float(value)
+        except ValueError:
+            return 0.0
+
+    def _as_int(row_data: dict[str, str], *keys: str) -> int:
+        value = _pick(row_data, *keys)
+        if not value:
+            return 1
+        try:
+            parsed = int(float(value))
+            return parsed if parsed > 0 else 1
+        except ValueError:
+            return 1
+
+    def _parse_datetime(value: str) -> Optional[datetime]:
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    for raw_row in reader:
+        seen += 1
+        row = {key: (value or "").strip() for key, value in raw_row.items() if key}
+
+        order_id = _pick(row, "order-id")
+        title = _pick(row, "product-name", "shipment-product-name")
+        sku = _pick(row, "sku")
+        asin = _pick(row, "asin")
+        if not order_id or not any((title, sku)):
+            skipped += 1
+            continue
+
+        quantity = _as_int(row, "shipment-quantity", "quantity")
+        unit_price = _as_float(row, "shipment-item-price", "item-price")
+        item_tax = _as_float(row, "shipment-item-tax", "item-tax")
+        shipping_amount = _as_float(row, "shipment-shipping-price", "shipping-price")
+        item_total = unit_price * quantity
+        tracking_number = _pick(row, "tracking-number")
+        carrier = _pick(row, "carrier")
+
+        order_entry = grouped.get(order_id)
+        if order_entry is None:
+            order_entry = {
+                "platform_name": "AMAZON",
+                "platform_order_id": order_id,
+                "platform_order_number": _pick(row, "merchant-order-id", "order-id"),
+                "customer_name": _pick(row, "buyer-name", "buyer-id"),
+                "customer_email": _pick(row, "buyer-email"),
+                "ship_address_line1": None,
+                "ship_address_line2": None,
+                "ship_address_line3": None,
+                "ship_city": _pick(row, "ship-city") or None,
+                "ship_state": _pick(row, "ship-state") or None,
+                "ship_postal_code": _pick(row, "ship-postal-code") or None,
+                "ship_country": _pick(row, "ship-country") or None,
+                "subtotal": 0.0,
+                "tax": 0.0,
+                "shipping": 0.0,
+                "total": 0.0,
+                "currency": _pick(row, "currency") or "USD",
+                "ordered_at": _parse_datetime(_pick(row, "purchase-date")),
+                "tracking_number": tracking_number or None,
+                "carrier": carrier or None,
+                "raw_data": {"rows": [row]},
+                "items": [],
+                "_tracking_parts": [tracking_number] if tracking_number else [],
+            }
+            grouped[order_id] = order_entry
+        else:
+            order_entry["raw_data"]["rows"].append(row)
+            if tracking_number and tracking_number not in order_entry["_tracking_parts"]:
+                order_entry["_tracking_parts"].append(tracking_number)
+            if not order_entry.get("customer_name"):
+                order_entry["customer_name"] = _pick(row, "buyer-name", "buyer-id")
+            if not order_entry.get("customer_email"):
+                order_entry["customer_email"] = _pick(row, "buyer-email")
+            if not order_entry.get("carrier") and carrier:
+                order_entry["carrier"] = carrier
+
+        order_entry["subtotal"] += item_total
+        order_entry["tax"] += item_tax
+        order_entry["shipping"] += shipping_amount
+
+        order_entry["items"].append(
+            {
+                "platform_item_id": _pick(row, "order-item-id", "amazon-order-item-id") or None,
+                "platform_sku": sku or None,
+                "asin": asin or None,
+                "title": title or "Imported FBA order line",
+                "quantity": quantity,
+                "unit_price": unit_price,
+                "total_price": item_total,
+                "raw_data": row,
+            }
+        )
+
+    for order_entry in grouped.values():
+        order_entry["subtotal"] = round(float(order_entry.get("subtotal") or 0.0), 2)
+        order_entry["tax"] = round(float(order_entry.get("tax") or 0.0), 2)
+        order_entry["shipping"] = round(float(order_entry.get("shipping") or 0.0), 2)
+        order_entry["total"] = (
+            float(order_entry.get("subtotal") or 0.0)
+            + float(order_entry.get("tax") or 0.0)
+            + float(order_entry.get("shipping") or 0.0)
+        )
+        order_entry["total"] = round(order_entry["total"], 2)
+        tracking_parts = [part for part in order_entry.pop("_tracking_parts", []) if part]
+        if tracking_parts:
+            order_entry["tracking_number"] = " + ".join(tracking_parts)
+
+    return list(grouped.values()), seen, skipped
+
+
 def _write_unmatched_shipstation_exceptions(fieldnames: list[str], rows: list[dict[str, str]]) -> None:
     if not fieldnames:
         return
@@ -821,6 +963,7 @@ async def refresh_unmatched_item_matching(
 
 @router.get("/sync/status", response_model=SyncStatusResponse)
 async def sync_status(
+    fulfillment_channel: Annotated[Optional[OrderFulfillmentChannel], Query()] = None,
     sync_repo: SyncRepository = Depends(get_sync_repo),
     order_item_repo: OrderItemRepository = Depends(get_order_item_repo),
     order_repo: OrderRepository = Depends(get_order_repo),
@@ -829,11 +972,12 @@ async def sync_status(
     Dashboard overview: platform states + aggregate item counters.
     """
     states = await sync_repo.get_all_states()
-    status_counts = await order_item_repo.count_by_status()
-    _, total_orders = await order_repo.list_orders(limit=0)
+    status_counts = await order_item_repo.count_by_status(fulfillment_channel=fulfillment_channel)
+    _, total_orders = await order_repo.list_orders(limit=0, fulfillment_channel=fulfillment_channel)
 
     return SyncStatusResponse(
         platforms=[IntegrationStateResponse.model_validate(s) for s in states],
+        fulfillment_channel=fulfillment_channel,
         total_orders=total_orders,
         total_unmatched_items=status_counts.get("UNMATCHED", 0),
         total_matched_items=status_counts.get("MATCHED", 0),
@@ -890,7 +1034,12 @@ async def import_orders_from_file(
     service: OrderSyncService = Depends(get_order_sync_service),
     db: AsyncSession = Depends(get_db),
 ):
-    if source not in {SalesImportFileSource.CSV_GENERIC, SalesImportFileSource.SHIPSTATION_CUSTOMER_CSV, SalesImportFileSource.TRACKING_CSV}:
+    if source not in {
+        SalesImportFileSource.CSV_GENERIC,
+        SalesImportFileSource.AMAZON_FBA_CSV,
+        SalesImportFileSource.SHIPSTATION_CUSTOMER_CSV,
+        SalesImportFileSource.TRACKING_CSV,
+    }:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Unsupported import source",
@@ -1091,7 +1240,10 @@ async def import_orders_from_file(
             errors=[],
         )
 
-    rows, rows_seen, rows_skipped = _parse_order_csv(text)
+    if source == SalesImportFileSource.AMAZON_FBA_CSV:
+        rows, rows_seen, rows_skipped = _parse_amazon_fba_csv(text)
+    else:
+        rows, rows_seen, rows_skipped = _parse_order_csv(text)
     orders_by_platform: dict[str, list[ExternalOrder]] = {}
     for row in rows:
         items = [
@@ -1130,6 +1282,7 @@ async def import_orders_from_file(
             raw_data=row["raw_data"],
             customer_source=None,
             tracking_number=row.get("tracking_number"),
+            carrier=row.get("carrier"),
         )
         orders_by_platform.setdefault(platform_name, []).append(external_order)
     aggregate = {
@@ -1147,7 +1300,12 @@ async def import_orders_from_file(
             client,
             datetime(1970, 1, 1, tzinfo=timezone.utc),
             datetime.now(timezone.utc),
-            source="SHIPSTATION_CSV",
+            source="AMAZON_FBA_CSV" if source == SalesImportFileSource.AMAZON_FBA_CSV else "SHIPSTATION_CSV",
+            fulfillment_channel=(
+                OrderFulfillmentChannel.AMAZON_FBA
+                if source == SalesImportFileSource.AMAZON_FBA_CSV
+                else None
+            ),
         )
         aggregate["new_orders"] += result.new_orders
         aggregate["new_items"] += result.new_items
@@ -1179,6 +1337,7 @@ async def list_orders(
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
     platform: Annotated[Optional[OrderPlatform], Query()] = None,
+    fulfillment_channel: Annotated[Optional[OrderFulfillmentChannel], Query()] = None,
     status_filter: Annotated[Optional[str], Query(alias="status")] = None,
     item_status: Annotated[Optional[OrderItemStatus], Query()] = None,
     ordered_at_from: Annotated[Optional[datetime], Query()] = None,
@@ -1222,6 +1381,7 @@ async def list_orders(
         skip=skip,
         limit=limit,
         platform=platform,
+        fulfillment_channel=fulfillment_channel,
         status=os_filter,
         item_status=item_status,
         ordered_at_from=ordered_at_from,
@@ -1248,6 +1408,7 @@ async def list_orders(
                 id=o.id,
                 platform=o.platform,
                 source=o.source,
+                fulfillment_channel=o.fulfillment_channel,
                 external_order_id=o.external_order_id,
                 external_order_number=o.external_order_number,
                 status=o.status,

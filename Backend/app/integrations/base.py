@@ -52,6 +52,7 @@ class ExternalOrder:
     customer_company: Optional[str] = None
     customer_source: Optional[str] = None
     tracking_number: Optional[str] = None
+    carrier: Optional[str] = None
 
 
 @dataclass 

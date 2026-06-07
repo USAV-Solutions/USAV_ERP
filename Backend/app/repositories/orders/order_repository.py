@@ -14,6 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.models.entities import Customer, ProductVariant, ZohoSyncStatus
 from app.modules.orders.models import (
     Order,
+    OrderFulfillmentChannel,
     OrderItem,
     OrderItemStatus,
     OrderPlatform,
@@ -63,6 +64,7 @@ class OrderRepository(BaseRepository[Order]):
         skip: int = 0,
         limit: int = 50,
         platform: Optional[OrderPlatform] = None,
+        fulfillment_channel: Optional[OrderFulfillmentChannel] = None,
         status: Optional[OrderStatus] = None,
         item_status: Optional[OrderItemStatus] = None,
         ordered_at_from: Optional[datetime] = None,
@@ -86,6 +88,8 @@ class OrderRepository(BaseRepository[Order]):
 
         if platform is not None:
             stmt = stmt.where(Order.platform == platform)
+        if fulfillment_channel is not None:
+            stmt = stmt.where(Order.fulfillment_channel == fulfillment_channel)
         if status is not None:
             stmt = stmt.where(Order.status == status)
         if item_status is not None:
@@ -173,11 +177,16 @@ class OrderItemRepository(BaseRepository[OrderItem]):
         result = await self.session.execute(stmt)
         return result.scalars().all()
 
-    async def count_by_status(self) -> dict[str, int]:
+    async def count_by_status(
+        self,
+        *,
+        fulfillment_channel: Optional[OrderFulfillmentChannel] = None,
+    ) -> dict[str, int]:
         """Dashboard helper – count items grouped by status."""
-        stmt = (
-            select(OrderItem.status, func.count())
-            .group_by(OrderItem.status)
-        )
+        stmt = select(OrderItem.status, func.count()).group_by(OrderItem.status)
+        if fulfillment_channel is not None:
+            stmt = stmt.join(Order, Order.id == OrderItem.order_id).where(
+                Order.fulfillment_channel == fulfillment_channel
+            )
         rows = (await self.session.execute(stmt)).all()
         return {status.value: count for status, count in rows}
