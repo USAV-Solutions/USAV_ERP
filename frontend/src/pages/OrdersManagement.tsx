@@ -55,10 +55,11 @@ import {
   DateRange,
   CheckCircle,
   Error as ErrorIcon,
+  UploadFile,
 } from '@mui/icons-material'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 
-import { listOrders, getSyncStatus, refreshUnmatchedItemMatching, syncOrders, syncOrdersRange, updateOrderStatus, updateShippingStatus, deleteOrder } from '../api/orders'
+import { listOrders, getSyncStatus, refreshUnmatchedItemMatching, syncOrders, syncOrdersRange, updateOrderStatus, updateShippingStatus, deleteOrder, importOrdersFromFile } from '../api/orders'
 import { forceSyncOrder } from '../api/sync'
 import type {
   OrderBrief,
@@ -207,6 +208,8 @@ export default function OrdersManagement() {
   const [rangeSyncSince, setRangeSyncSince] = useState('')
   const [rangeSyncUntil, setRangeSyncUntil] = useState('')
   const [rangeSyncResults, setRangeSyncResults] = useState<SyncResponse[] | null>(null)
+  const [trackingUploadDialogOpen, setTrackingUploadDialogOpen] = useState(false)
+  const [trackingCsvFile, setTrackingCsvFile] = useState<File | null>(null)
 
   // ── Queries ──────────────────────────────────────────────────────
 
@@ -381,6 +384,38 @@ export default function OrdersManagement() {
     },
   })
 
+  const trackingUploadMutation = useMutation({
+    mutationFn: () => {
+      if (!trackingCsvFile) {
+        throw new Error('Please choose a CSV file.')
+      }
+      return importOrdersFromFile('TRACKING_CSV', trackingCsvFile)
+    },
+    onSuccess: async (data) => {
+      const summary = [
+        `Updated ${data.new_orders} order(s).`,
+        `Rows seen: ${data.source_rows_seen}.`,
+        `Skipped: ${data.source_rows_skipped}.`,
+      ]
+      if (data.skipped_duplicates > 0) {
+        summary.push(`Duplicate tracking skipped: ${data.skipped_duplicates}.`)
+      }
+      setSnackbarSeverity('success')
+      setSnackbarMessage(summary.join(' '))
+      setSnackbarOpen(true)
+      setTrackingUploadDialogOpen(false)
+      setTrackingCsvFile(null)
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      await queryClient.invalidateQueries({ queryKey: ['syncStatus'] })
+    },
+    onError: (error: { response?: { data?: { detail?: string } }; message?: string }) => {
+      const detail = error.response?.data?.detail || error.message || 'Tracking upload failed.'
+      setSnackbarSeverity('error')
+      setSnackbarMessage(detail)
+      setSnackbarOpen(true)
+    },
+  })
+
   const saveHoldOrderMutation = useMutation({
     mutationFn: async () => {
       if (!selectedOrder) {
@@ -469,6 +504,15 @@ export default function OrdersManagement() {
     setRangeSyncDialogOpen(false)
     setRangeSyncResults(null)
     rangeSyncMutation.reset()
+  }
+
+  const handleCloseTrackingUploadDialog = () => {
+    if (trackingUploadMutation.isPending) {
+      return
+    }
+    setTrackingUploadDialogOpen(false)
+    setTrackingCsvFile(null)
+    trackingUploadMutation.reset()
   }
 
   const getErrorMessage = (error: unknown): string => {
@@ -656,7 +700,7 @@ export default function OrdersManagement() {
             variant="outlined"
             onClick={handleOpenSaleActionsMenu}
             endIcon={<ArrowDropDown />}
-            disabled={bulkLoading || syncOrdersMutation.isPending || rangeSyncMutation.isPending || refreshMatchingMutation.isPending}
+            disabled={bulkLoading || syncOrdersMutation.isPending || rangeSyncMutation.isPending || refreshMatchingMutation.isPending || trackingUploadMutation.isPending}
           >
             Sale Actions
           </Button>
@@ -673,6 +717,16 @@ export default function OrdersManagement() {
             >
               Sync Orders
             </MenuItem>
+            {hasRole(['ADMIN', 'SALES_REP']) && (
+              <MenuItem
+                onClick={() => {
+                  handleCloseSaleActionsMenu()
+                  setTrackingUploadDialogOpen(true)
+                }}
+              >
+                Upload tracking CSV
+              </MenuItem>
+            )}
             {hasRole(['ADMIN']) && (
               <MenuItem
                 onClick={() => {
@@ -1118,6 +1172,53 @@ export default function OrdersManagement() {
               {rangeSyncMutation.isPending ? 'Syncing...' : 'Start Range Sync'}
             </Button>
           )}
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={trackingUploadDialogOpen} onClose={handleCloseTrackingUploadDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>Upload Tracking CSV</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <Typography variant="body2" color="text.secondary">
+              Upload order list CSV from commit `1819fee` flow to upsert tracking numbers on sales orders.
+            </Typography>
+            <Box>
+              <Button component="label" variant="outlined" startIcon={<UploadFile />} disabled={trackingUploadMutation.isPending}>
+                Choose CSV
+                <input
+                  type="file"
+                  hidden
+                  accept=".csv,text/csv"
+                  onChange={(e) => setTrackingCsvFile(e.target.files?.[0] ?? null)}
+                />
+              </Button>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                {trackingCsvFile ? trackingCsvFile.name : 'No file selected'}
+              </Typography>
+            </Box>
+            {trackingUploadMutation.isError && (
+              <Alert severity="error">
+                {(
+                  trackingUploadMutation.error as { response?: { data?: { detail?: string } }; message?: string }
+                ).response?.data?.detail
+                  || (trackingUploadMutation.error as Error)?.message
+                  || 'Tracking upload failed.'}
+              </Alert>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseTrackingUploadDialog} disabled={trackingUploadMutation.isPending}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => trackingUploadMutation.mutate()}
+            variant="contained"
+            disabled={!trackingCsvFile || trackingUploadMutation.isPending}
+            startIcon={trackingUploadMutation.isPending ? <CircularProgress size={18} /> : <UploadFile />}
+          >
+            {trackingUploadMutation.isPending ? 'Uploading...' : 'Upload'}
+          </Button>
         </DialogActions>
       </Dialog>
 
