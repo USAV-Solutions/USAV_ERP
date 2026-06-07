@@ -947,6 +947,11 @@ class Customer(Base, ZohoSyncMixin, TimestampMixin):
         nullable=True,
         comment="Company / organisation name.",
     )
+    amazon_buyer_id: Mapped[Optional[str]] = mapped_column(
+        String(120),
+        nullable=True,
+        comment="Stable Amazon FBA buyer identifier used for customer matching and Zoho contact naming.",
+    )
     source: Mapped[Optional[str]] = mapped_column(
         String(50),
         nullable=True,
@@ -978,11 +983,18 @@ class Customer(Base, ZohoSyncMixin, TimestampMixin):
     )
 
     __table_args__ = (
+        Index("ix_customer_amazon_buyer_id", "amazon_buyer_id"),
         Index("ix_customer_email", "email"),
         Index("ix_customer_name", "name"),
         Index("ix_customer_source", "source"),
         Index("ix_customer_zoho_id", "zoho_id"),
     )
+
+    @property
+    def zoho_contact_name(self) -> str:
+        if self.amazon_buyer_id:
+            return f"Amazon FBA - {self.amazon_buyer_id}"
+        return self.name
 
     def __repr__(self) -> str:
         return f"<Customer(id={self.id}, name='{self.name}')>"

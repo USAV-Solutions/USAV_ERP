@@ -21,6 +21,7 @@ import type {
   SyncResponse,
   SyncStatusResponse,
   RefreshMatchingResponse,
+  OrderFulfillmentChannel,
   IntegrationStateResponse,
   OrderPlatform,
   OrderStatus,
@@ -38,6 +39,7 @@ export interface ListOrdersParams {
   skip?: number
   limit?: number
   platform?: OrderPlatform
+  fulfillment_channel?: OrderFulfillmentChannel
   status?: OrderStatus
   item_status?: OrderItemStatus
   ordered_at_from?: string
@@ -54,6 +56,7 @@ export async function listOrders(params: ListOrdersParams = {}): Promise<OrderLi
   if (params.skip !== undefined) query.set('skip', String(params.skip))
   if (params.limit !== undefined) query.set('limit', String(params.limit))
   if (params.platform) query.set('platform', params.platform)
+  if (params.fulfillment_channel) query.set('fulfillment_channel', params.fulfillment_channel)
   if (params.status) query.set('status', params.status)
   if (params.item_status) query.set('item_status', params.item_status)
   if (params.ordered_at_from) query.set('ordered_at_from', params.ordered_at_from)
@@ -107,8 +110,14 @@ export async function syncOrdersRange(body: SyncRangeRequest): Promise<SyncRespo
   return data
 }
 
-export async function getSyncStatus(): Promise<SyncStatusResponse> {
-  const { data } = await axiosClient.get<SyncStatusResponse>(ORDERS.SYNC_STATUS)
+export async function getSyncStatus(
+  fulfillmentChannel?: OrderFulfillmentChannel,
+): Promise<SyncStatusResponse> {
+  const query = new URLSearchParams()
+  if (fulfillmentChannel) query.set('fulfillment_channel', fulfillmentChannel)
+  const qs = query.toString()
+  const url = qs ? `${ORDERS.SYNC_STATUS}?${qs}` : ORDERS.SYNC_STATUS
+  const { data } = await axiosClient.get<SyncStatusResponse>(url)
   return data
 }
 

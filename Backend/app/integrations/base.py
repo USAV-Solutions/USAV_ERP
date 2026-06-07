@@ -23,6 +23,7 @@ class ExternalOrder:
     # Customer
     customer_name: Optional[str]
     customer_email: Optional[str]
+    customer_external_id: Optional[str]
     
     # Shipping
     ship_address_line1: Optional[str]
@@ -52,6 +53,7 @@ class ExternalOrder:
     customer_company: Optional[str] = None
     customer_source: Optional[str] = None
     tracking_number: Optional[str] = None
+    carrier: Optional[str] = None
 
 
 @dataclass 

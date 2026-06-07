@@ -25,7 +25,12 @@ export type SalesImportApiSource =
   | 'EBAY_DRAGON'
   | 'WALMART'
 
-export type SalesImportFileSource = 'CSV_GENERIC' | 'SHIPSTATION_CUSTOMER_CSV' | 'TRACKING_CSV'
+export type SalesImportFileSource =
+  | 'CSV_GENERIC'
+  | 'AMAZON_FBA_CSV'
+  | 'SHIPSTATION_CUSTOMER_CSV'
+  | 'TRACKING_CSV'
+export type OrderFulfillmentChannel = 'SELF_FULFILLED' | 'AMAZON_FBA'
 
 export type OrderStatus =
   | 'PENDING'
@@ -128,6 +133,7 @@ export interface OrderBrief {
   id: number
   platform: OrderPlatform
   source: string
+  fulfillment_channel: OrderFulfillmentChannel
   external_order_id: string
   external_order_number: string | null
   status: OrderStatus
@@ -152,6 +158,7 @@ export interface OrderDetail {
   id: number
   platform: OrderPlatform
   source: string
+  fulfillment_channel: OrderFulfillmentChannel
   external_order_id: string
   external_order_number: string | null
   status: OrderStatus
@@ -260,6 +267,7 @@ export interface SalesImportFileResponse {
 
 export interface SyncStatusResponse {
   platforms: IntegrationStateResponse[]
+  fulfillment_channel: OrderFulfillmentChannel | null
   total_orders: number
   total_unmatched_items: number
   total_matched_items: number

@@ -30,7 +30,7 @@ from app.integrations.zoho.client import ZohoClient, RateLimitError
 from app.integrations.zoho.security import generate_payload_hash
 from app.models.entities import Customer, ProductVariant, ZohoSyncStatus
 from app.models.purchasing import PurchaseOrder, PurchaseOrderItem, Vendor
-from app.modules.orders.models import Order, OrderItem
+from app.modules.orders.models import Order, OrderFulfillmentChannel, OrderItem
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,8 @@ UNMATCHED_PLACEHOLDER_ITEM_SKU = "00000"
 EBAY_PO_SOURCE_PREFIX = "EBAY_"
 GOODWILL_SHIPPED_PO_SOURCE = "GOODWILL_SHIPPED"
 PAYMENT_TERMS_DUE_ON_RECEIPT = 0
+AMAZON_FBA_SALESORDER_LOCATION_ID = "5623409000001937413"
+AMAZON_FBA_CONTACT_NAME_PREFIX = "Amazon FBA - "
 
 VALID_ZOHO_PO_SOURCE_VALUES = {
     "Ebay",
@@ -132,6 +134,36 @@ _UNMATCHED_PLACEHOLDER_ITEM_ID_CACHE: Optional[str] = None
 _MONEY_QUANTUM = Decimal("0.01")
 
 
+def _resolve_customer_contact_name(customer: Customer) -> str:
+    return customer.zoho_contact_name
+
+
+def _extract_amazon_buyer_id_from_contact_name(contact_name: Any) -> Optional[str]:
+    text = str(contact_name or "").strip()
+    if not text.startswith(AMAZON_FBA_CONTACT_NAME_PREFIX):
+        return None
+    buyer_id = text.removeprefix(AMAZON_FBA_CONTACT_NAME_PREFIX).strip()
+    return buyer_id or None
+
+
+def _extract_primary_contact_person_name(data: dict[str, Any]) -> Optional[str]:
+    contact_people = data.get("contact_persons") or []
+    if isinstance(contact_people, list):
+        for person in contact_people:
+            if not isinstance(person, dict):
+                continue
+            first = str(person.get("first_name") or "").strip()
+            last = str(person.get("last_name") or "").strip()
+            full_name = " ".join(part for part in (first, last) if part).strip()
+            if full_name:
+                return full_name
+
+    first = str(data.get("first_name") or "").strip()
+    last = str(data.get("last_name") or "").strip()
+    full_name = " ".join(part for part in (first, last) if part).strip()
+    return full_name or None
+
+
 # =========================================================================
 # PAYLOAD MAPPERS  (USAV → Zoho)
 # =========================================================================
@@ -182,7 +214,7 @@ def variant_to_zoho_payload(variant: ProductVariant) -> dict[str, Any]:
 def customer_to_zoho_payload(customer: Customer) -> dict[str, Any]:
     """Build a Zoho *contact* payload from a local ``Customer``."""
     payload: dict[str, Any] = {
-        "contact_name": customer.name,
+        "contact_name": _resolve_customer_contact_name(customer),
         "contact_type": "customer",
     }
     if customer.email:
@@ -777,6 +809,19 @@ def _is_salesorder_already_confirmed_error(exc: Exception) -> bool:
     return "confirmed" in message_lc and "already" in message_lc
 
 
+def _is_salesorder_transaction_level_location_error(exc: Exception) -> bool:
+    message = str(exc)
+    message_lc = message.lower()
+    return "27520" in message and "item-level location" in message_lc
+
+
+def _strip_salesorder_location_fields(payload: dict[str, Any]) -> dict[str, Any]:
+    sanitized = dict(payload)
+    sanitized.pop("location_id", None)
+    sanitized.pop("branch_id", None)
+    return sanitized
+
+
 def _strip_po_location_fields(payload: dict[str, Any]) -> dict[str, Any]:
     sanitized: dict[str, Any] = {k: v for k, v in payload.items() if k not in {"location_id", "branch_id"}}
     line_items = payload.get("line_items")
@@ -1257,8 +1302,17 @@ async def _update_billed_purchase_order_with_unbill_rebill(
 def zoho_contact_to_customer_fields(data: dict) -> dict[str, Any]:
     """Extract Customer-relevant fields from a Zoho contact payload."""
     fields: dict[str, Any] = {}
-    if "contact_name" in data:
-        fields["name"] = data["contact_name"]
+    contact_name = str(data.get("contact_name") or "").strip()
+    amazon_buyer_id = _extract_amazon_buyer_id_from_contact_name(contact_name)
+    primary_contact_name = _extract_primary_contact_person_name(data)
+    if amazon_buyer_id:
+        fields["amazon_buyer_id"] = amazon_buyer_id
+        if primary_contact_name:
+            fields["name"] = primary_contact_name
+    elif contact_name:
+        fields["name"] = contact_name
+    elif primary_contact_name:
+        fields["name"] = primary_contact_name
     if "email" in data:
         fields["email"] = data["email"]
     if "phone" in data:
@@ -1430,11 +1484,12 @@ async def sync_customer_outbound(customer_id: int) -> None:
                     if existing:
                         resolved_id = str(existing.get("contact_id", ""))
 
-                if not resolved_id and customer.name:
+                contact_name = _resolve_customer_contact_name(customer)
+                if not resolved_id and contact_name:
                     # Fallback: scan first page of contacts for matching name
                     contacts = await zoho.list_contacts(page=1, per_page=200)
                     for c in contacts:
-                        if c.get("contact_name") == customer.name:
+                        if c.get("contact_name") == contact_name:
                             resolved_id = str(c.get("contact_id", ""))
                             break
 
@@ -1889,6 +1944,8 @@ async def process_contact_inbound(payload: dict) -> None:
         if customer is None:
             # New contact from Zoho — create locally
             fields = zoho_contact_to_customer_fields(contact_data)
+            if not fields.get("name"):
+                fields["name"] = str(contact_data.get("contact_name") or "").strip() or "Unknown"
             customer = Customer(
                 zoho_id=zoho_contact_id,
                 zoho_last_sync_hash=new_hash,
@@ -1942,6 +1999,9 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
     }
     if reference_number:
         payload["reference_number"] = reference_number
+    is_amazon_fba_order = (
+        getattr(order, "fulfillment_channel", None) == OrderFulfillmentChannel.AMAZON_FBA
+    )
     if order.shipped_at:
         payload["shipment_date"] = order.shipped_at.strftime("%Y-%m-%d")
     if order.carrier:
@@ -1978,6 +2038,8 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
             li["item_id"] = variant.zoho_item_id
         if is_marketplace_order:
             li["tax_percentage"] = 0.0
+        if is_amazon_fba_order:
+            li["location_id"] = AMAZON_FBA_SALESORDER_LOCATION_ID
         line_items.append(li)
     payload["line_items"] = line_items
 
@@ -2212,6 +2274,18 @@ async def sync_order_outbound(order_id: int) -> None:
                     else:
                         so = await zoho.create_sales_order(payload_retry)
                     payload = payload_retry
+                elif _is_salesorder_transaction_level_location_error(so_exc) and payload.get("location_id"):
+                    logger.warning(
+                        "sync_order_outbound: retrying order %s without transaction-level location after Zoho 27520",
+                        order_id,
+                    )
+                    payload_retry = _strip_salesorder_location_fields(payload)
+                    if order.zoho_id:
+                        so = await zoho.update_salesorder(order.zoho_id, payload_retry)
+                    else:
+                        so = await zoho.create_sales_order(payload_retry)
+                    payload = payload_retry
+                    new_hash = generate_payload_hash(payload)
                 else:
                     raise
 

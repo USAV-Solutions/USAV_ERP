@@ -1,7 +1,7 @@
 # Backend\app\modules\orders
 
 ## What This Folder Does
-Sales orders domain: ingestion/import, listing-centric matching, filtering, customer CSV upsert, and order sync state.
+Sales orders domain: ingestion/import, listing-centric matching, filtering, customer CSV upsert, order sync state, and the split between self-fulfilled orders vs Amazon FBA orders.
 
 ## Typical Contents
 - Python modules, schemas, or support assets scoped to this domain.
@@ -33,6 +33,11 @@ Sales orders domain: ingestion/import, listing-centric matching, filtering, cust
 - Tracking number uniqueness and validation: Tracking numbers are unique across all orders in the database. Manual updates attempting to assign duplicate tracking numbers will fail with 400 Bad Request. Background syncs and tracking CSV imports will log a warning and skip duplicates.
 - Order and shipping status constraints: Changing order status to `SHIPPED` or `DELIVERED`, or shipping status to `SHIPPING` or `DELIVERED`, requires a tracking number.
 - `TRACKING_CSV` file import source: Allows bulk updating order tracking details using daily Google Sheet summary files (Platform in Col A, Order Number in Col B, Tracking in Col I). Successful matches automatically update orders to `SHIPPED`/`SHIPPING`, auto-detect carrier, and mark Zoho sync status `DIRTY`. Missing orders or empty tracking numbers are ignored.
+- Orders now persist `fulfillment_channel` separately from `source`: use `source` for provenance (`*_API`, `SHIPSTATION_CSV`, `AMAZON_FBA_CSV`) and `fulfillment_channel` for the UI/business split (`SELF_FULFILLED`, `AMAZON_FBA`). Do not overload `source` when adding new views or sync rules.
+- `GET /orders` and `GET /orders/sync/status` accept `fulfillment_channel`; repository filtering is applied before search/count/pagination so search results only include the active view.
+- `AMAZON_FBA_CSV` imports `Backend/misc/weekly.csv`-style exports, groups rows by `order-id`, always ingests under platform `AMAZON`, and marks matching/new orders `fulfillment_channel=AMAZON_FBA`.
+- `AMAZON_FBA_CSV` customer handling now treats `buyer-id` as the stable identity key (fallback: marketplace-email local part), stores it on `Customer.amazon_buyer_id`, and keeps `buyer-name` as the local human-readable customer name. Matching now prefers `amazon_buyer_id` before email/name fallbacks.
+- Standard API / ShipStation CSV imports create new orders as `SELF_FULFILLED`; if an existing Amazon order was previously upgraded by FBA CSV import, later API syncs must not downgrade it back.
 
 ## Recent Behavior Change: Platform Listing mappings
 

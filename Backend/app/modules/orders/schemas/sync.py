@@ -7,7 +7,7 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.modules.orders.models import IntegrationSyncStatus
+from app.modules.orders.models import IntegrationSyncStatus, OrderFulfillmentChannel
 
 
 class IntegrationStateResponse(BaseModel):
@@ -70,6 +70,7 @@ class SyncResponse(BaseModel):
 class SyncStatusResponse(BaseModel):
     """Overview of all platform sync states + dashboard counters."""
     platforms: list[IntegrationStateResponse]
+    fulfillment_channel: Optional[OrderFulfillmentChannel] = None
     total_orders: int = 0
     total_unmatched_items: int = 0
     total_matched_items: int = 0
@@ -85,6 +86,7 @@ class SalesImportApiSource(str, Enum):
 
 class SalesImportFileSource(str, Enum):
     CSV_GENERIC = "CSV_GENERIC"
+    AMAZON_FBA_CSV = "AMAZON_FBA_CSV"
     SHIPSTATION_CUSTOMER_CSV = "SHIPSTATION_CUSTOMER_CSV"
     TRACKING_CSV = "TRACKING_CSV"
 

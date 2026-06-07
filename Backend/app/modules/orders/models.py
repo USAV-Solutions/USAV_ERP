@@ -69,6 +69,12 @@ class OrderStatus(str, enum.Enum):
     ERROR = "ERROR"
 
 
+class OrderFulfillmentChannel(str, enum.Enum):
+    """Fulfillment split used by the Orders UI and Zoho rules."""
+    SELF_FULFILLED = "SELF_FULFILLED"
+    AMAZON_FBA = "AMAZON_FBA"
+
+
 class OrderItemStatus(str, enum.Enum):
     """
     Line-item matching status.
@@ -181,6 +187,17 @@ class Order(Base, ZohoSyncMixin, TimestampMixin):
         default="MANUAL",
         server_default="MANUAL",
         comment="Order ingestion source (ECWID_API, WALMART_API, CSV_GENERIC, etc.).",
+    )
+    fulfillment_channel: Mapped[OrderFulfillmentChannel] = mapped_column(
+        Enum(
+            OrderFulfillmentChannel,
+            name="order_fulfillment_channel_enum",
+            create_constraint=False,
+        ),
+        nullable=False,
+        default=OrderFulfillmentChannel.SELF_FULFILLED,
+        server_default="SELF_FULFILLED",
+        comment="SELF_FULFILLED or AMAZON_FBA.",
     )
     external_order_id: Mapped[str] = mapped_column(
         String(100),
@@ -295,6 +312,7 @@ class Order(Base, ZohoSyncMixin, TimestampMixin):
         Index("ix_order_ordered_at", "ordered_at"),
         Index("ix_order_external_id", "external_order_id"),
         Index("ix_order_source", "source"),
+        Index("ix_order_fulfillment_channel", "fulfillment_channel"),
         Index("ix_order_customer_id", "customer_id"),
         Index("ix_order_zoho_id", "zoho_id"),
         Index("ix_orders_zoho_sync_status", "zoho_sync_status"),

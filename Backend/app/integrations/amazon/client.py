@@ -176,6 +176,7 @@ class AmazonClient(BasePlatformClient):
             platform_order_number=amazon_order.get("AmazonOrderId"),
             customer_name=shipping.get("Name"),
             customer_email=amazon_order.get("BuyerEmail"),
+            customer_external_id=None,
             ship_address_line1=shipping.get("AddressLine1"),
             ship_address_line2=shipping.get("AddressLine2"),
             ship_address_line3=shipping.get("AddressLine3"),

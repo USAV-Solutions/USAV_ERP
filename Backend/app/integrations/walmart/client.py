@@ -213,6 +213,7 @@ class WalmartClient(BasePlatformClient):
             platform_order_number=str(customer_order_id or purchase_order_id or ""),
             customer_name=shipping_address.get("name"),
             customer_email=order_data.get("customerEmailId"),
+            customer_external_id=None,
             customer_phone=shipping_info.get("phone"),
             customer_company=shipping_address.get("companyName") or shipping_address.get("company"),
             customer_source="WALMART_API",
