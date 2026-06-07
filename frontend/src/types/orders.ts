@@ -25,7 +25,7 @@ export type SalesImportApiSource =
   | 'EBAY_DRAGON'
   | 'WALMART'
 
-export type SalesImportFileSource = 'CSV_GENERIC'
+export type SalesImportFileSource = 'CSV_GENERIC' | 'SHIPSTATION_CUSTOMER_CSV' | 'TRACKING_CSV'
 
 export type OrderStatus =
   | 'PENDING'

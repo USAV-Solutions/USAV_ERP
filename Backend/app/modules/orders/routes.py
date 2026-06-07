@@ -47,7 +47,7 @@ from app.modules.orders.dependencies import (
     get_order_sync_service,
     get_sync_repo,
 )
-from app.modules.orders.models import Order, OrderItem, OrderItemStatus, OrderPlatform, ShippingStatus
+from app.modules.orders.models import Order, OrderItem, OrderItemStatus, OrderPlatform, OrderStatus, ShippingStatus
 from app.modules.orders.schemas.orders import (
     OrderBrief,
     OrderDetail,
@@ -623,6 +623,80 @@ def _parse_shipstation_customer_csv(file_text: str) -> tuple[list[dict], int, in
     return list(deduped.values()), seen, skipped
 
 
+def _detect_carrier(tracking_number: str) -> str:
+    """Smart carrier auto-detection based on length and patterns."""
+    t = tracking_number.strip().upper()
+    if t.startswith("1Z") and len(t) == 18:
+        return "UPS"
+    if len(t) == 22 and t.startswith(("91", "92", "93", "94", "95")):
+        return "USPS"
+    if len(t) == 12 or len(t) == 15:
+        return "FedEx"
+    return "USPS"  # default fallback
+
+
+def _parse_tracking_csv(file_text: str) -> tuple[list[dict], int, int]:
+    """
+    Parse daily Google Sheet tracking summary CSV.
+    Columns:
+      Col A: Platform
+      Col B: Order Number (external_order_id)
+      Col I: Tracking (tracking_number)
+    """
+    reader = csv.reader(io.StringIO(file_text))
+    rows_seen = 0
+    rows_skipped = 0
+    parsed_rows = []
+
+    try:
+        header = next(reader)
+    except StopIteration:
+        return [], 0, 0
+
+    # Locate column indexes by positional headers or fallback to defaults (A=0, B=1, I=8)
+    col_platform_idx = 0
+    col_order_num_idx = 1
+    col_tracking_idx = 8
+
+    # Double check if headers match to adjust indexes
+    for idx, col in enumerate(header):
+        col_clean = col.strip().lower()
+        if "platform" in col_clean:
+            col_platform_idx = idx
+        elif "order" in col_clean:
+            col_order_num_idx = idx
+        elif "tracking" in col_clean:
+            col_tracking_idx = idx
+
+    for row in reader:
+        rows_seen += 1
+        if len(row) <= max(col_platform_idx, col_order_num_idx, col_tracking_idx):
+            rows_skipped += 1
+            continue
+
+        platform = row[col_platform_idx].strip()
+        order_number = row[col_order_num_idx].strip()
+        tracking = row[col_tracking_idx].strip()
+
+        # Ignore rows that do not have tracking
+        if not tracking:
+            rows_skipped += 1
+            continue
+
+        # Ignore orders that are empty
+        if not order_number:
+            rows_skipped += 1
+            continue
+
+        parsed_rows.append({
+            "platform": platform,
+            "order_number": order_number,
+            "tracking": tracking,
+        })
+
+    return parsed_rows, rows_seen, rows_skipped
+
+
 # ============================================================================
 # SYNC ENDPOINTS
 # ============================================================================
@@ -816,7 +890,7 @@ async def import_orders_from_file(
     service: OrderSyncService = Depends(get_order_sync_service),
     db: AsyncSession = Depends(get_db),
 ):
-    if source not in {SalesImportFileSource.CSV_GENERIC, SalesImportFileSource.SHIPSTATION_CUSTOMER_CSV}:
+    if source not in {SalesImportFileSource.CSV_GENERIC, SalesImportFileSource.SHIPSTATION_CUSTOMER_CSV, SalesImportFileSource.TRACKING_CSV}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Unsupported import source",
@@ -836,6 +910,83 @@ async def import_orders_from_file(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="CSV must be UTF-8 encoded.",
         ) from exc
+
+    if source == SalesImportFileSource.TRACKING_CSV:
+        rows, rows_seen, rows_skipped = _parse_tracking_csv(text)
+        updated_count = 0
+        skipped_duplicates = 0
+        errors = []
+
+        for row in rows:
+            order_number = row["order_number"]
+            tracking = row["tracking"]
+            platform_str = row["platform"]
+
+            # Uniqueness check: is this tracking number already assigned to another order in the database?
+            val = tracking.strip()
+            # Fetch matching order(s) by external_order_id or external_order_number
+            stmt = select(Order).where(
+                (Order.external_order_id == order_number) | (Order.external_order_number == order_number)
+            )
+            orders = (await db.execute(stmt)).scalars().all()
+
+            if not orders:
+                # Silently ignore orders that cannot be found
+                rows_skipped += 1
+                continue
+
+            # If there are multiple matches (e.g. across platforms), try to match the platform string if available
+            order = None
+            if len(orders) > 1 and platform_str:
+                platform_lower = platform_str.strip().lower()
+                for o in orders:
+                    if platform_lower in o.platform.value.lower():
+                        order = o
+                        break
+            if not order:
+                order = orders[0]
+
+            # Verify tracking uniqueness
+            stmt_uniq = select(Order).where(
+                func.lower(Order.tracking_number) == func.lower(val),
+                Order.id != order.id
+            )
+            duplicate_order = (await db.execute(stmt_uniq)).scalars().first()
+            if duplicate_order:
+                # Skip duplicate and record error/warning to prevent 2 trackings in the system
+                msg = f"Tracking '{tracking}' for order '{order_number}' already assigned to order '{duplicate_order.external_order_id}'."
+                logger.warning(msg)
+                errors.append(msg)
+                skipped_duplicates += 1
+                continue
+
+            # Detect carrier
+            carrier = _detect_carrier(tracking)
+
+            # Update tracking and status
+            order.tracking_number = tracking
+            order.carrier = carrier
+            order.status = OrderStatus.SHIPPED
+            order.shipping_status = ShippingStatus.SHIPPING
+            order.zoho_sync_status = ZohoSyncStatus.DIRTY
+            db.add(order)
+            updated_count += 1
+
+        await db.commit()
+
+        return SalesImportFileResponse(
+            source=source,
+            source_rows_seen=rows_seen,
+            source_rows_skipped=rows_skipped,
+            customers_created=0,
+            customers_updated=0,
+            new_orders=updated_count,
+            new_items=0,
+            auto_matched=0,
+            skipped_duplicates=skipped_duplicates,
+            success=True,  # Return success True even if some are skipped/errors, matching sync behavior
+            errors=errors,
+        )
 
     if source == SalesImportFileSource.SHIPSTATION_CUSTOMER_CSV:
         customers, rows_seen, rows_skipped = _parse_shipstation_customer_csv(text)
@@ -1286,6 +1437,14 @@ async def update_order_status(
             detail=f"Order {order_id} not found.",
         )
 
+    # Enforce that any order marked as SHIPPED or DELIVERED must have a tracking number
+    if body.status in {OrderStatus.SHIPPED, OrderStatus.DELIVERED}:
+        if not order.tracking_number:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tracking number is required when setting status to SHIPPED or DELIVERED."
+            )
+
     update_data: dict = {"status": body.status}
     if body.notes is not None:
         update_data["processing_notes"] = body.notes
@@ -1321,6 +1480,30 @@ async def update_shipping_status(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Order {order_id} not found.",
+        )
+
+    # Enforce uniqueness of tracking number
+    if body.tracking_number is not None:
+        val = body.tracking_number.strip()
+        if val:
+            stmt = select(Order).where(
+                func.lower(Order.tracking_number) == func.lower(val),
+                Order.id != order_id
+            )
+            duplicate_order = (await db.execute(stmt)).scalars().first()
+            if duplicate_order:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Tracking number '{body.tracking_number}' is already assigned to order '{duplicate_order.external_order_id}'."
+                )
+
+    # Enforce tracking presence when setting shipping status to SHIPPING or DELIVERED
+    new_shipping_status = body.shipping_status
+    effective_tracking = (body.tracking_number or "").strip() or (order.tracking_number or "").strip()
+    if new_shipping_status in {ShippingStatus.SHIPPING, ShippingStatus.DELIVERED} and not effective_tracking:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tracking number is required when setting shipping status to SHIPPING or DELIVERED."
         )
 
     update_data: dict = {"shipping_status": body.shipping_status}
