@@ -825,6 +825,7 @@ class OrderSyncService:
 
         incoming_name = self._coalesce(ext.customer_name)
         incoming_email = self._coalesce(ext.customer_email)
+        incoming_external_id = self._coalesce(getattr(ext, "customer_external_id", None))
         incoming_phone = self._coalesce(ext.customer_phone)
         incoming_company = self._coalesce(ext.customer_company)
         incoming_source = self._coalesce(ext.customer_source) or self._coalesce(source)
@@ -840,6 +841,9 @@ class OrderSyncService:
             changed = True
         if incoming_company and not self._coalesce(customer.company_name):
             customer.company_name = incoming_company
+            changed = True
+        if incoming_external_id and not self._coalesce(customer.amazon_buyer_id):
+            customer.amazon_buyer_id = incoming_external_id
             changed = True
 
         if ext.ship_address_line1 and not self._coalesce(customer.address_line1):
@@ -876,6 +880,16 @@ class OrderSyncService:
         if not (ext.customer_name or ext.customer_email or ext.customer_phone):
             return None
 
+        if ext.customer_external_id:
+            existing = await self.session.execute(
+                select(Customer).where(Customer.amazon_buyer_id == ext.customer_external_id)
+            )
+            customer = existing.scalar_one_or_none()
+            if customer:
+                if self._merge_customer_fields(customer, ext, source):
+                    self.session.add(customer)
+                return customer.id
+
         # Prefer email for deterministic matching
         if ext.customer_email:
             existing = await self.session.execute(
@@ -903,6 +917,7 @@ class OrderSyncService:
         customer = Customer(
             name=ext.customer_name or "Unknown",
             email=ext.customer_email,
+            amazon_buyer_id=self._coalesce(getattr(ext, "customer_external_id", None)),
             phone=ext.customer_phone,
             company_name=ext.customer_company,
             address_line1=ext.ship_address_line1,

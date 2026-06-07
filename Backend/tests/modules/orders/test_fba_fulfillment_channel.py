@@ -27,6 +27,7 @@ def _build_external_order() -> ExternalOrder:
         platform_order_number="114-123",
         customer_name="Alice",
         customer_email="alice@example.com",
+        customer_external_id=None,
         ship_address_line1=None,
         ship_address_line2=None,
         ship_address_line3=None,

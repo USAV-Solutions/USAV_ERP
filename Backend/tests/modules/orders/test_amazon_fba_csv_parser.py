@@ -16,6 +16,7 @@ def test_amazon_fba_csv_groups_rows_and_uses_weekly_columns():
     assert rows[0]["platform_order_id"] == "114-1"
     assert rows[0]["platform_order_number"] == "MERCHANT-114"
     assert rows[0]["customer_name"] == "Alice"
+    assert rows[0]["customer_external_id"] == "buyer-1"
     assert rows[0]["ship_city"] == "Dallas"
     assert rows[0]["tracking_number"] == "TBA123 + TBA456"
     assert rows[0]["carrier"] == "AMZN_US"
@@ -38,3 +39,15 @@ def test_amazon_fba_csv_skips_rows_missing_required_identifiers():
     assert seen == 2
     assert skipped == 2
     assert rows == []
+
+
+def test_amazon_fba_csv_derives_buyer_id_from_marketplace_email_when_column_blank():
+    csv_text = """order-id,purchase-date,buyer-id,buyer-name,buyer-email,product-name,sku,asin,quantity,item-price
+114-3,2026-06-04T04:00:11+00:00,,Alice,buyer-3@marketplace.amazon.com,Widget One,SKU-1,ASIN-1,1,27.88
+"""
+
+    rows, seen, skipped = _parse_amazon_fba_csv(csv_text)
+
+    assert seen == 1
+    assert skipped == 0
+    assert rows[0]["customer_external_id"] == "buyer-3"

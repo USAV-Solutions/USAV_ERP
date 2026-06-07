@@ -318,6 +318,7 @@ class EcwidClient(BasePlatformClient):
             platform_order_number=order_number,
             customer_name=shipping.get("name"),
             customer_email=order_data.get("email"),
+            customer_external_id=None,
             customer_phone=shipping.get("phone") or order_data.get("customerPhone"),
             customer_company=shipping.get("companyName") or shipping.get("company"),
             customer_source="ECWID_API",

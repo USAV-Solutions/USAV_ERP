@@ -36,6 +36,7 @@ Sales orders domain: ingestion/import, listing-centric matching, filtering, cust
 - Orders now persist `fulfillment_channel` separately from `source`: use `source` for provenance (`*_API`, `SHIPSTATION_CSV`, `AMAZON_FBA_CSV`) and `fulfillment_channel` for the UI/business split (`SELF_FULFILLED`, `AMAZON_FBA`). Do not overload `source` when adding new views or sync rules.
 - `GET /orders` and `GET /orders/sync/status` accept `fulfillment_channel`; repository filtering is applied before search/count/pagination so search results only include the active view.
 - `AMAZON_FBA_CSV` imports `Backend/misc/weekly.csv`-style exports, groups rows by `order-id`, always ingests under platform `AMAZON`, and marks matching/new orders `fulfillment_channel=AMAZON_FBA`.
+- `AMAZON_FBA_CSV` customer handling now treats `buyer-id` as the stable identity key (fallback: marketplace-email local part), stores it on `Customer.amazon_buyer_id`, and keeps `buyer-name` as the local human-readable customer name. Matching now prefers `amazon_buyer_id` before email/name fallbacks.
 - Standard API / ShipStation CSV imports create new orders as `SELF_FULFILLED`; if an existing Amazon order was previously upgraded by FBA CSV import, later API syncs must not downgrade it back.
 
 ## Recent Behavior Change: Platform Listing mappings

@@ -578,6 +578,17 @@ def _parse_amazon_fba_csv(file_text: str) -> tuple[list[dict], int, int]:
         except ValueError:
             return None
 
+    def _extract_buyer_id(row_data: dict[str, str]) -> Optional[str]:
+        buyer_id = _pick(row_data, "buyer-id")
+        if buyer_id:
+            return buyer_id
+        buyer_email = _pick(row_data, "buyer-email").lower()
+        suffix = "@marketplace.amazon.com"
+        if buyer_email.endswith(suffix):
+            local_part = buyer_email[: -len(suffix)].strip()
+            return local_part or None
+        return None
+
     for raw_row in reader:
         seen += 1
         row = {key: (value or "").strip() for key, value in raw_row.items() if key}
@@ -597,6 +608,7 @@ def _parse_amazon_fba_csv(file_text: str) -> tuple[list[dict], int, int]:
         item_total = unit_price * quantity
         tracking_number = _pick(row, "tracking-number")
         carrier = _pick(row, "carrier")
+        buyer_id = _extract_buyer_id(row)
 
         order_entry = grouped.get(order_id)
         if order_entry is None:
@@ -606,6 +618,7 @@ def _parse_amazon_fba_csv(file_text: str) -> tuple[list[dict], int, int]:
                 "platform_order_number": _pick(row, "merchant-order-id", "order-id"),
                 "customer_name": _pick(row, "buyer-name", "buyer-id"),
                 "customer_email": _pick(row, "buyer-email"),
+                "customer_external_id": buyer_id,
                 "ship_address_line1": None,
                 "ship_address_line2": None,
                 "ship_address_line3": None,
@@ -634,6 +647,8 @@ def _parse_amazon_fba_csv(file_text: str) -> tuple[list[dict], int, int]:
                 order_entry["customer_name"] = _pick(row, "buyer-name", "buyer-id")
             if not order_entry.get("customer_email"):
                 order_entry["customer_email"] = _pick(row, "buyer-email")
+            if not order_entry.get("customer_external_id") and buyer_id:
+                order_entry["customer_external_id"] = buyer_id
             if not order_entry.get("carrier") and carrier:
                 order_entry["carrier"] = carrier
 
@@ -1265,6 +1280,7 @@ async def import_orders_from_file(
             platform_order_number=row["platform_order_number"],
             customer_name=row["customer_name"],
             customer_email=row["customer_email"],
+            customer_external_id=row.get("customer_external_id"),
             ship_address_line1=row["ship_address_line1"],
             ship_address_line2=row["ship_address_line2"],
             ship_address_line3=row["ship_address_line3"],
