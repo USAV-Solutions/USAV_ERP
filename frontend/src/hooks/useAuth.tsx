@@ -15,7 +15,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 // Decode JWT to extract user info
-function decodeToken(token: string): { sub: string; role: UserRole; username?: string } | null {
+function decodeToken(token: string): { sub: string; role: UserRole; username?: string; exp?: number } | null {
   try {
     const base64Url = token.split('.')[1]
     const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/')
@@ -35,20 +35,73 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
+  const clearAuth = () => {
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('user')
+    setUser(null)
+  }
+
+  const persistDecodedUser = (token: string) => {
+    const decoded = decodeToken(token)
+    if (!decoded) {
+      return false
+    }
+
+    const userData: User = {
+      id: parseInt(decoded.sub) || 0,
+      username: decoded.username || decoded.sub,
+      role: decoded.role,
+      is_active: true,
+    }
+    setUser(userData)
+    localStorage.setItem('user', JSON.stringify(userData))
+    return true
+  }
+
   useEffect(() => {
-    // Check for existing token on mount
-    const token = localStorage.getItem('access_token')
-    const savedUser = localStorage.getItem('user')
-    
-    if (token && savedUser) {
+    const bootstrapAuth = async () => {
+      const token = localStorage.getItem('access_token')
+
+      if (!token) {
+        setIsLoading(false)
+        return
+      }
+
+      const decoded = decodeToken(token)
+      const nowInSeconds = Math.floor(Date.now() / 1000)
+      if (!decoded?.exp || decoded.exp <= nowInSeconds) {
+        clearAuth()
+        setIsLoading(false)
+        return
+      }
+
+      const savedUser = localStorage.getItem('user')
+      if (savedUser) {
+        try {
+          setUser(JSON.parse(savedUser))
+        } catch {
+          localStorage.removeItem('user')
+        }
+      } else {
+        persistDecodedUser(token)
+      }
+
       try {
-        setUser(JSON.parse(savedUser))
+        const response = await axios.get<User>('/api/v1/auth/me', {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        })
+        setUser(response.data)
+        localStorage.setItem('user', JSON.stringify(response.data))
       } catch {
-        localStorage.removeItem('access_token')
-        localStorage.removeItem('user')
+        clearAuth()
+      } finally {
+        setIsLoading(false)
       }
     }
-    setIsLoading(false)
+
+    void bootstrapAuth()
   }, [])
 
   const login = async (credentials: LoginCredentials) => {
@@ -65,42 +118,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { access_token } = response.data
     localStorage.setItem('access_token', access_token)
-
-    // Decode token to get user info
-    const decoded = decodeToken(access_token)
-    if (decoded) {
-      const userData: User = {
-        id: parseInt(decoded.sub) || 0,
-        username: decoded.username || decoded.sub,
-        role: decoded.role,
-        is_active: true,
-      }
-      setUser(userData)
-      localStorage.setItem('user', JSON.stringify(userData))
-    }
+    persistDecodedUser(access_token)
   }
 
   const loginWithToken = async (token: string) => {
     localStorage.setItem('access_token', token)
-
-    // Decode token to get user info
-    const decoded = decodeToken(token)
-    if (decoded) {
-      const userData: User = {
-        id: parseInt(decoded.sub) || 0,
-        username: decoded.username || decoded.sub,
-        role: decoded.role,
-        is_active: true,
-      }
-      setUser(userData)
-      localStorage.setItem('user', JSON.stringify(userData))
-    }
+    persistDecodedUser(token)
   }
 
   const logout = () => {
-    localStorage.removeItem('access_token')
-    localStorage.removeItem('user')
-    setUser(null)
+    clearAuth()
   }
 
   const hasRole = (roles: UserRole[]) => {
