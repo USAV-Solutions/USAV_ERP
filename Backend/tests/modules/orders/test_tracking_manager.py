@@ -157,3 +157,52 @@ async def test_update_shipping_status_raises_on_duplicate_tracking():
 
     assert exc_info.value.status_code == 400
     assert "already assigned to order" in exc_info.value.detail
+
+
+def test_ebay_client_convert_order_extracts_tracking():
+    """Verify that EbayClient._convert_order extracts tracking number and carrier from fulfillments."""
+    from app.integrations.ebay.client import EbayClient
+
+    client = EbayClient(store_name="USAV", app_id="app", cert_id="cert", refresh_token="refresh")
+    mock_payload = {
+        "orderId": "11-222-333",
+        "legacyOrderId": "11-222-333",
+        "fulfillmentStartInstructions": [
+            {
+                "shippingStep": {
+                    "shipTo": {
+                        "fullName": "John Doe",
+                        "contactAddress": {
+                            "addressLine1": "123 Main St",
+                            "city": "San Jose",
+                            "stateOrProvince": "CA",
+                            "postalCode": "95125",
+                            "countryCode": "US"
+                        }
+                    }
+                }
+            }
+        ],
+        "lineItems": [
+            {
+                "quantity": 1,
+                "lineItemCost": {"value": "49.99"},
+                "title": "Bose Speaker"
+            }
+        ],
+        "pricingSummary": {
+            "priceSubtotal": {"value": "49.99"},
+            "deliveryCost": {"value": "0.00"}
+        },
+        "creationDate": "2026-06-08T10:00:00.000Z",
+        "fulfillments": [
+            {
+                "shipmentTrackingNumber": "1Z999XX00123456789",
+                "shippingCarrierCode": "UPS"
+            }
+        ]
+    }
+
+    order = client._convert_order(mock_payload)
+    assert order.tracking_number == "1Z999XX00123456789"
+    assert order.carrier == "UPS"
