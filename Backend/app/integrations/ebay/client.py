@@ -765,6 +765,36 @@ class EbayClient(BasePlatformClient):
                 exc_info=True,
             )
             return None
+
+    async def fetch_return_requests(
+        self,
+        since: Optional[datetime] = None,
+        until: Optional[datetime] = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Fetch raw Post-Order return cases for Returns dashboard normalization.
+        """
+        if not self.is_configured:
+            raise RuntimeError(f"eBay {self.store_name} credentials not configured")
+
+        params: dict[str, Any] = {"limit": 100, "offset": 0}
+        if since:
+            params["creation_date_range_from"] = since.strftime(EBAY_ISO_DATE_FORMAT)
+        if until:
+            params["creation_date_range_to"] = until.strftime(EBAY_ISO_DATE_FORMAT)
+
+        results: list[dict[str, Any]] = []
+        while True:
+            payload = await self._rest_get("/post-order/v2/return/search", params=params)
+            batch = payload.get("members") or payload.get("returns") or payload.get("returnRequests") or []
+            batch = [entry for entry in batch if isinstance(entry, dict)]
+            if not batch:
+                break
+            results.extend(batch)
+            if len(batch) < int(params["limit"]):
+                break
+            params["offset"] = int(params["offset"]) + len(batch)
+        return results
     
     async def update_stock(self, updates: List[StockUpdate]) -> List[StockUpdateResult]:
         """

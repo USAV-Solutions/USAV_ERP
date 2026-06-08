@@ -49,6 +49,17 @@ except ImportError as e:
     raise
 
 try:
+    from app.modules.returns.models import (
+        ReturnItem,
+        ReturnNormalizedStatus,
+        ReturnRecord,
+        ReturnSyncState,
+    )
+except ImportError as e:
+    print(f"Failed to import from returns: {e}")
+    raise
+
+try:
     from app.models.purchasing import (
         PurchaseDeliverStatus,
         PurchaseOrder,
@@ -97,6 +108,10 @@ __all__ = [
     "OrderPlatform",
     "OrderStatus",
     "OrderItemStatus",
+    "ReturnNormalizedStatus",
+    "ReturnSyncState",
+    "ReturnRecord",
+    "ReturnItem",
     # Purchasing Models
     "PurchaseDeliverStatus",
     "PurchaseOrderItemStatus",

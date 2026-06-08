@@ -122,6 +122,14 @@ export const ORDERS = {
   REJECT_ITEM: (itemId: number) => `/orders/items/${itemId}/reject`,
 }
 
+export const RETURNS = {
+  LIST: '/returns',
+  RECORD: (id: number) => `/returns/${id}`,
+  SYNC: '/returns/sync',
+  SYNC_RANGE: '/returns/sync/range',
+  SYNC_STATUS: '/returns/sync/status',
+}
+
 // Purchasing endpoints
 export const PURCHASING = {
   VENDORS: '/vendors',
