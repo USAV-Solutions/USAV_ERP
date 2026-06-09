@@ -56,6 +56,13 @@ def normalize_asin(value: object) -> str:
     return str(value or "").strip().upper()
 
 
+def detect_asin_column(fieldnames: list[str]) -> str:
+    for candidate in ("asin", "ASIN"):
+        if candidate in fieldnames:
+            return candidate
+    raise ValueError("Input CSV must contain an 'asin' or 'ASIN' column.")
+
+
 def default_output_path(input_path: Path) -> Path:
     suffix = "".join(input_path.suffixes) or ".csv"
     stem = input_path.name[: -len(suffix)] if suffix else input_path.name
@@ -116,15 +123,14 @@ def write_rows(
 
 async def run(input_path: Path, output_path: Path) -> None:
     rows, fieldnames = read_rows(input_path)
-    if "asin" not in fieldnames:
-        raise ValueError("Input CSV must contain an 'asin' column.")
+    asin_column = detect_asin_column(fieldnames)
     if "inventory_sku" not in fieldnames:
         fieldnames.append("inventory_sku")
 
     asins = {
-        normalize_asin(row.get("asin"))
+        normalize_asin(row.get(asin_column))
         for row in rows
-        if normalize_asin(row.get("asin"))
+        if normalize_asin(row.get(asin_column))
     }
 
     async with async_session_factory() as session:
@@ -137,7 +143,7 @@ async def run(input_path: Path, output_path: Path) -> None:
     unmatched_rows = 0
 
     for row in rows:
-        asin = normalize_asin(row.get("asin"))
+        asin = normalize_asin(row.get(asin_column))
         if not asin:
             row["inventory_sku"] = ""
             missing_asin_rows += 1
