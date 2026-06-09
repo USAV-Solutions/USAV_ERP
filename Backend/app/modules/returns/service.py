@@ -11,7 +11,7 @@ from typing import Any, Optional, Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.integrations.base import BasePlatformClient, ExternalOrder
+from app.integrations.base import BasePlatformClient
 from app.modules.orders.models import IntegrationSyncStatus, Order, OrderItem, OrderPlatform
 from app.modules.returns.models import ReturnItem, ReturnNormalizedStatus, ReturnRecord, ReturnSyncState
 from app.modules.returns.schemas.sync import ReturnSyncResponse
@@ -435,7 +435,16 @@ class ReturnSyncService:
         until: Optional[datetime],
         source: str,
     ) -> list[NormalizedReturnRecord]:
-        orders = await client.fetch_orders(since=since, until=until)
+        raw_orders: list[dict[str, Any]] = []
+        if hasattr(client, "fetch_orders_raw"):
+            raw_orders = await client.fetch_orders_raw(
+                since=since,
+                until=until,
+                date_field="lastmodifieddate",
+            )
+        else:
+            orders = await client.fetch_orders(since=since, until=until)
+            raw_orders = [ext_order.raw_data or {} for ext_order in orders if isinstance(ext_order.raw_data, dict)]
         return_requests = []
         if hasattr(client, "fetch_return_requests"):
             return_requests = await client.fetch_return_requests(since=since, until=until)
@@ -446,10 +455,24 @@ class ReturnSyncService:
             for req in return_requests
             if isinstance(req, dict)
         }
-        for ext_order in orders:
-            normalized = self._normalize_ebay_order_record(platform, source, ext_order)
+        for raw_order in raw_orders:
+            if not self._is_ebay_order_candidate(raw_order):
+                continue
+            normalized = self._normalize_ebay_order_record(platform, source, raw_order)
             if normalized is None:
                 continue
+            if self._ebay_order_needs_detail(raw_order) and hasattr(client, "get_order"):
+                order_id = str(raw_order.get("orderId") or "").strip()
+                if order_id:
+                    detailed_order = await client.get_order(order_id)
+                    if detailed_order is not None and isinstance(detailed_order.raw_data, dict):
+                        detailed_normalized = self._normalize_ebay_order_record(
+                            platform,
+                            source,
+                            detailed_order.raw_data,
+                        )
+                        if detailed_normalized is not None:
+                            normalized = detailed_normalized
             if normalized.normalized_status in {
                 ReturnNormalizedStatus.REFUNDED,
                 ReturnNormalizedStatus.PARTIALLY_REFUNDED,
@@ -533,9 +556,8 @@ class ReturnSyncService:
         self,
         platform: OrderPlatform,
         source: str,
-        ext_order: ExternalOrder,
+        raw: dict[str, Any],
     ) -> Optional[NormalizedReturnRecord]:
-        raw = ext_order.raw_data or {}
         cancel_status = raw.get("cancelStatus") or {}
         cancel_state = str(cancel_status.get("cancelState") or "").upper()
         cancel_requests = _coerce_list(cancel_status.get("cancelRequests"))
@@ -550,6 +572,16 @@ class ReturnSyncService:
         ).upper()
         line_items = _coerce_list(raw.get("lineItems"))
         refunded_amount = self._extract_ebay_refunded_amount(raw)
+        order_id = str(raw.get("orderId") or raw.get("legacyOrderId") or "").strip()
+        if not order_id:
+            return None
+        customer_name = (
+            raw.get("buyer", {}).get("username")
+            or raw.get("buyer", {}).get("buyerRegistrationAddress", {}).get("fullName")
+            or raw.get("fulfillmentStartInstructions", [{}])[0].get("shippingStep", {}).get("shipTo", {}).get("fullName")
+        )
+        customer_email = raw.get("buyer", {}).get("email")
+        ordered_at = _parse_datetime(raw.get("creationDate"))
 
         items: list[NormalizedReturnItem] = []
         total_qty = 0
@@ -580,23 +612,23 @@ class ReturnSyncService:
                 else ReturnNormalizedStatus.CANCELLED
             )
             return NormalizedReturnRecord(
-                external_record_key=f"order:{ext_order.platform_order_id}",
-                external_order_id=ext_order.platform_order_id,
+                external_record_key=f"order:{order_id}",
+                external_order_id=order_id,
                 platform=platform,
                 source=source,
                 external_return_id=None,
-                customer_name=ext_order.customer_name,
-                customer_email=ext_order.customer_email,
-                ordered_at=ext_order.ordered_at,
-                event_at=_parse_datetime(cancel_status.get("cancelledDate") or raw.get("cancelledDate")) or ext_order.ordered_at,
+                customer_name=customer_name,
+                customer_email=customer_email,
+                ordered_at=ordered_at,
+                event_at=_parse_datetime(cancel_status.get("cancelledDate") or raw.get("cancelledDate")) or ordered_at,
                 last_source_updated_at=_parse_datetime(cancel_status.get("cancelledDate") or raw.get("lastModifiedDate") or raw.get("modificationDate")),
                 normalized_status=status,
                 source_status=cancel_state,
                 source_substatus=cancel_reason,
                 reason=cancel_reason,
-                order_total_amount=_to_decimal(raw.get("pricingSummary", {}).get("total", {}).get("value") or ext_order.total),
+                order_total_amount=_to_decimal(raw.get("pricingSummary", {}).get("total", {}).get("value") or 0),
                 refunded_amount=refunded_amount,
-                currency=raw.get("pricingSummary", {}).get("total", {}).get("currency") or ext_order.currency or "USD",
+                currency=raw.get("pricingSummary", {}).get("total", {}).get("currency") or "USD",
                 raw_payload=raw,
                 items=items,
             )
@@ -608,24 +640,66 @@ class ReturnSyncService:
                 else ReturnNormalizedStatus.REFUNDED
             )
             return NormalizedReturnRecord(
-                external_record_key=f"refund:{ext_order.platform_order_id}",
-                external_order_id=ext_order.platform_order_id,
+                external_record_key=f"refund:{order_id}",
+                external_order_id=order_id,
                 platform=platform,
                 source=source,
-                customer_name=ext_order.customer_name,
-                customer_email=ext_order.customer_email,
-                ordered_at=ext_order.ordered_at,
-                event_at=_parse_datetime(raw.get("lastModifiedDate") or raw.get("modificationDate")) or ext_order.ordered_at,
+                customer_name=customer_name,
+                customer_email=customer_email,
+                ordered_at=ordered_at,
+                event_at=_parse_datetime(raw.get("lastModifiedDate") or raw.get("modificationDate")) or ordered_at,
                 last_source_updated_at=_parse_datetime(raw.get("lastModifiedDate") or raw.get("modificationDate")),
                 normalized_status=status,
                 source_status=payment_status or None,
-                order_total_amount=_to_decimal(raw.get("pricingSummary", {}).get("total", {}).get("value") or ext_order.total),
+                order_total_amount=_to_decimal(raw.get("pricingSummary", {}).get("total", {}).get("value") or 0),
                 refunded_amount=refunded_amount,
-                currency=raw.get("pricingSummary", {}).get("total", {}).get("currency") or ext_order.currency or "USD",
+                currency=raw.get("pricingSummary", {}).get("total", {}).get("currency") or "USD",
                 raw_payload=raw,
                 items=items,
             )
         return None
+
+    @staticmethod
+    def _is_ebay_order_candidate(raw: dict[str, Any]) -> bool:
+        cancel_state = str(raw.get("cancelStatus", {}).get("cancelState") or "").upper()
+        refunds = _coerce_list(raw.get("paymentSummary", {}).get("refunds"))
+        payment_status = str(
+            raw.get("orderPaymentStatus")
+            or raw.get("paymentSummary", {}).get("paymentStatus")
+            or raw.get("paymentStatus")
+            or ""
+        ).upper()
+        return (
+            (cancel_state and cancel_state != "NONE_REQUESTED")
+            or bool(refunds)
+            or payment_status in {"FULLY_REFUNDED", "PARTIALLY_REFUNDED", "REFUNDED"}
+        )
+
+    @staticmethod
+    def _ebay_order_needs_detail(raw: dict[str, Any]) -> bool:
+        cancel_state = str(raw.get("cancelStatus", {}).get("cancelState") or "").upper()
+        refunds = _coerce_list(raw.get("paymentSummary", {}).get("refunds"))
+        payment_status = str(
+            raw.get("orderPaymentStatus")
+            or raw.get("paymentSummary", {}).get("paymentStatus")
+            or raw.get("paymentStatus")
+            or ""
+        ).upper()
+        order_total = _to_decimal(raw.get("pricingSummary", {}).get("total", {}).get("value") or 0)
+        refund_total = Decimal("0")
+        for refund in refunds:
+            if isinstance(refund, dict):
+                refund_total += _to_decimal(
+                    refund.get("amount", {}).get("value")
+                    or refund.get("refundAmount", {}).get("value")
+                    or refund.get("amount")
+                )
+        return (
+            not _coerce_list(raw.get("lineItems"))
+            or (cancel_state == "NONE_REQUESTED" and bool(refunds))
+            or (payment_status in {"FULLY_REFUNDED", "REFUNDED"} and not refunds)
+            or (refund_total > Decimal("0") and order_total > Decimal("0") and refund_total > order_total)
+        )
 
     def _normalize_ebay_return_case(
         self,

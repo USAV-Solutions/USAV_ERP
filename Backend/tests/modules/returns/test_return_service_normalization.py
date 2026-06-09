@@ -1,9 +1,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from app.integrations.base import ExternalOrder
 from app.modules.orders.models import OrderPlatform
 from app.modules.returns.models import ReturnNormalizedStatus
 from app.modules.returns.service import ReturnSyncService
@@ -18,34 +16,9 @@ def _build_service() -> ReturnSyncService:
     )
 
 
-def _external_order(raw_data: dict) -> ExternalOrder:
-    return ExternalOrder(
-        platform_order_id=str(raw_data.get("orderId") or raw_data.get("legacyOrderId") or "ORDER-1"),
-        platform_order_number=str(raw_data.get("legacyOrderId") or raw_data.get("orderId") or "ORDER-1"),
-        customer_name="Alice",
-        customer_email="alice@example.com",
-        customer_external_id=None,
-        ship_address_line1=None,
-        ship_address_line2=None,
-        ship_address_line3=None,
-        ship_city=None,
-        ship_state=None,
-        ship_postal_code=None,
-        ship_country="US",
-        subtotal=10,
-        tax=0,
-        shipping=0,
-        total=10,
-        currency="USD",
-        ordered_at=datetime(2026, 6, 8, tzinfo=timezone.utc),
-        items=[],
-        raw_data=raw_data,
-    )
-
-
 def test_normalize_ebay_cancellation_only():
     service = _build_service()
-    ext_order = _external_order(
+    raw_order = (
         {
             "orderId": "EB-1",
             "cancelStatus": {"cancelState": "CANCELED", "cancelledDate": "2026-06-08T10:00:00Z"},
@@ -56,7 +29,7 @@ def test_normalize_ebay_cancellation_only():
         }
     )
 
-    record = service._normalize_ebay_order_record(OrderPlatform.EBAY_USAV, "EBAY_USAV_API", ext_order)
+    record = service._normalize_ebay_order_record(OrderPlatform.EBAY_USAV, "EBAY_USAV_API", raw_order)
 
     assert record is not None
     assert record.normalized_status == ReturnNormalizedStatus.CANCELLED
@@ -87,7 +60,7 @@ def test_normalize_ebay_return_case_partial_quantity():
 
 def test_normalize_ebay_refund_without_return_case():
     service = _build_service()
-    ext_order = _external_order(
+    raw_order = (
         {
             "orderId": "EB-2",
             "paymentSummary": {
@@ -98,11 +71,57 @@ def test_normalize_ebay_refund_without_return_case():
         }
     )
 
-    record = service._normalize_ebay_order_record(OrderPlatform.EBAY_USAV, "EBAY_USAV_API", ext_order)
+    record = service._normalize_ebay_order_record(OrderPlatform.EBAY_USAV, "EBAY_USAV_API", raw_order)
 
     assert record is not None
     assert record.normalized_status == ReturnNormalizedStatus.PARTIALLY_REFUNDED
     assert record.refunded_amount == Decimal("4.50")
+
+
+def test_ebay_order_candidate_filter_uses_list_payload_fields():
+    service = _build_service()
+
+    assert service._is_ebay_order_candidate(
+        {
+            "cancelStatus": {"cancelState": "CANCELED"},
+            "paymentSummary": {"refunds": []},
+        }
+    )
+    assert service._is_ebay_order_candidate(
+        {
+            "cancelStatus": {"cancelState": "NONE_REQUESTED"},
+            "paymentSummary": {"refunds": [{"amount": {"value": "1.00"}}]},
+        }
+    )
+    assert not service._is_ebay_order_candidate(
+        {
+            "cancelStatus": {"cancelState": "NONE_REQUESTED"},
+            "paymentSummary": {"refunds": []},
+            "orderPaymentStatus": "PAID",
+        }
+    )
+
+
+def test_ebay_order_detail_only_needed_for_suspicious_payloads():
+    service = _build_service()
+
+    assert service._ebay_order_needs_detail(
+        {
+            "cancelStatus": {"cancelState": "NONE_REQUESTED"},
+            "paymentSummary": {"refunds": [{"amount": {"value": "2.00"}}]},
+            "pricingSummary": {"total": {"value": "10.00"}},
+            "lineItems": [{"quantity": 1}],
+        }
+    )
+    assert not service._ebay_order_needs_detail(
+        {
+            "cancelStatus": {"cancelState": "CANCELED"},
+            "paymentSummary": {"refunds": [{"amount": {"value": "10.00"}}]},
+            "pricingSummary": {"total": {"value": "10.00"}},
+            "lineItems": [{"quantity": 1, "cancelledQuantity": 1}],
+            "orderPaymentStatus": "FULLY_REFUNDED",
+        }
+    )
 
 
 def test_merge_ecwid_returned_over_refunded():
