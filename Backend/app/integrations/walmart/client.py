@@ -6,7 +6,7 @@ the shared OrderSyncService pipeline.
 """
 import base64
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import Any, List, Optional
 import logging
 from uuid import uuid4
 
@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 _TOKEN_PATH = "/v3/token"
 _ORDERS_PATH = "/v3/orders"
+_RETURNS_PATH = "/v3/returns"
 _TOKEN_EXPIRY_BUFFER_SECONDS = 30
 
 
@@ -334,6 +335,57 @@ class WalmartClient(BasePlatformClient):
         except httpx.HTTPError as exc:
             logger.error("Walmart get_order failed for %s: %s", order_id, exc)
             return None
+
+    async def fetch_returns(
+        self,
+        since: Optional[datetime] = None,
+        until: Optional[datetime] = None,
+    ) -> list[dict[str, Any]]:
+        if not self.is_configured:
+            raise RuntimeError("Walmart credentials are not configured")
+
+        access_token = await self._get_access_token()
+        if not access_token:
+            raise RuntimeError("Walmart unable to obtain access token")
+
+        params: dict[str, Any] = {"limit": 100}
+        if since:
+            params["createdStartDate"] = self._format_walmart_datetime(since)
+        if until:
+            params["createdEndDate"] = self._format_walmart_datetime(until)
+
+        results: list[dict[str, Any]] = []
+        next_path: Optional[str] = _RETURNS_PATH
+        request_params: Optional[dict[str, Any]] = params
+
+        async with httpx.AsyncClient(base_url=self.api_base_url, timeout=30.0) as client:
+            while next_path:
+                response = await client.get(
+                    next_path,
+                    headers=self._auth_headers(access_token),
+                    params=request_params,
+                )
+                response.raise_for_status()
+                payload = response.json()
+
+                batch = (
+                    payload.get("returns")
+                    or payload.get("list", {}).get("elements", {}).get("returnOrder")
+                    or payload.get("list", {}).get("elements", {}).get("returns")
+                    or []
+                )
+                batch = [entry for entry in batch if isinstance(entry, dict)]
+                if not batch:
+                    break
+                results.extend(batch)
+
+                next_cursor = payload.get("list", {}).get("meta", {}).get("nextCursor")
+                if not next_cursor:
+                    break
+                next_path = f"{_RETURNS_PATH}{next_cursor}" if str(next_cursor).startswith("?") else str(next_cursor)
+                request_params = None
+
+        return results
 
     async def update_stock(self, updates: List[StockUpdate]) -> List[StockUpdateResult]:
         _ = updates

@@ -738,6 +738,108 @@ class EbayClient(BasePlatformClient):
             message = f"eBay {self.store_name}: Error fetching orders: {e}"
             logger.error(message, exc_info=True)
             raise RuntimeError(message) from e
+
+    async def fetch_orders_raw(
+        self,
+        since: Optional[datetime] = None,
+        until: Optional[datetime] = None,
+        status: Optional[str] = None,
+        *,
+        date_field: str = "creationdate",
+    ) -> list[dict[str, Any]]:
+        """
+        Fetch raw eBay order list payloads without hydrating per-order detail.
+
+        Used by Returns sync so we can filter candidate orders cheaply before
+        deciding whether a detail call is necessary.
+        """
+        logger.debug(
+            "[DEBUG.EXTERNAL_API] eBay %s fetch_orders_raw called: since=%s until=%s status=%s date_field=%s",
+            self.store_name,
+            since,
+            until,
+            status,
+            date_field,
+        )
+
+        if not self.is_configured:
+            message = f"eBay {self.store_name} credentials not configured"
+            logger.error(message)
+            raise RuntimeError(message)
+
+        access_token = await self._get_access_token()
+        if not access_token:
+            message = f"eBay {self.store_name} unable to obtain access token"
+            logger.error(message)
+            raise RuntimeError(message)
+
+        try:
+            filters = []
+            if since:
+                since_str = since.strftime(EBAY_ISO_DATE_FORMAT)
+                if until:
+                    until_str = until.strftime(EBAY_ISO_DATE_FORMAT)
+                    filters.append(f"{date_field}:[{since_str}..{until_str}]")
+                else:
+                    filters.append(f"{date_field}:[{since_str}..]")
+
+            if status:
+                filters.append(f"orderfulfillmentstatus:{{{status}}}")
+
+            filter_param = ",".join(filters) if filters else None
+
+            transport = httpx.AsyncHTTPTransport(retries=_TRANSPORT_RETRIES)
+            async with httpx.AsyncClient(transport=transport, timeout=30.0) as client:
+                headers = {
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                }
+
+                params: dict[str, Any] = {"limit": 200}
+                if filter_param:
+                    params["filter"] = filter_param
+
+                orders: list[dict[str, Any]] = []
+                offset = 0
+
+                while True:
+                    params["offset"] = offset
+                    response = await client.get(
+                        f"{self.base_url}/sell/fulfillment/v1/order",
+                        headers=headers,
+                        params=params,
+                    )
+                    response.raise_for_status()
+
+                    data = response.json()
+                    page_orders = [entry for entry in data.get("orders", []) if isinstance(entry, dict)]
+                    if not page_orders:
+                        break
+
+                    orders.extend(page_orders)
+                    total = data.get("total", 0)
+                    offset += len(page_orders)
+                    if offset >= total:
+                        break
+
+                logger.debug(
+                    "[DEBUG.EXTERNAL_API] eBay %s fetched %d raw orders via list endpoint",
+                    self.store_name,
+                    len(orders),
+                )
+                return orders
+
+        except httpx.HTTPStatusError as e:
+            message = (
+                f"eBay {self.store_name}: HTTP error {e.response.status_code} - {e.response.text}"
+            )
+            logger.error(message, exc_info=True)
+            raise RuntimeError(message) from e
+        except Exception as e:
+            message = f"eBay {self.store_name}: Error fetching raw orders: {e}"
+            logger.error(message, exc_info=True)
+            raise RuntimeError(message) from e
     
     async def get_order(self, order_id: str) -> Optional[ExternalOrder]:
         """
@@ -765,6 +867,36 @@ class EbayClient(BasePlatformClient):
                 exc_info=True,
             )
             return None
+
+    async def fetch_return_requests(
+        self,
+        since: Optional[datetime] = None,
+        until: Optional[datetime] = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Fetch raw Post-Order return cases for Returns dashboard normalization.
+        """
+        if not self.is_configured:
+            raise RuntimeError(f"eBay {self.store_name} credentials not configured")
+
+        params: dict[str, Any] = {"limit": 100, "offset": 0}
+        if since:
+            params["creation_date_range_from"] = since.strftime(EBAY_ISO_DATE_FORMAT)
+        if until:
+            params["creation_date_range_to"] = until.strftime(EBAY_ISO_DATE_FORMAT)
+
+        results: list[dict[str, Any]] = []
+        while True:
+            payload = await self._rest_get("/post-order/v2/return/search", params=params)
+            batch = payload.get("members") or payload.get("returns") or payload.get("returnRequests") or []
+            batch = [entry for entry in batch if isinstance(entry, dict)]
+            if not batch:
+                break
+            results.extend(batch)
+            if len(batch) < int(params["limit"]):
+                break
+            params["offset"] = int(params["offset"]) + len(batch)
+        return results
     
     async def update_stock(self, updates: List[StockUpdate]) -> List[StockUpdateResult]:
         """

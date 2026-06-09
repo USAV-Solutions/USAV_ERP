@@ -32,6 +32,7 @@ import {
   AccountBalance,
   Assessment,
   Transform,
+  AssignmentReturn,
   ExpandLess,
   ExpandMore,
   PlaylistAdd,
@@ -62,6 +63,7 @@ const navItems: NavItem[] = [
     ],
   },
   { title: 'Orders', path: '/orders', icon: <ShoppingCart />, roles: ['ADMIN', 'SALES_REP', 'WAREHOUSE_OP'] },
+  { title: 'Returns', path: '/returns', icon: <AssignmentReturn />, roles: ['ADMIN', 'SALES_REP', 'WAREHOUSE_OP'] },
   { title: 'Purchasing', path: '/purchasing', icon: <LocalShipping />, roles: ['ADMIN', 'SALES_REP', 'WAREHOUSE_OP'] },
   {
     title: 'Accounting',
