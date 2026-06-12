@@ -1,4 +1,4 @@
-﻿# Backend\app\integrations\ebay
+# Backend\app\integrations\ebay
 
 ## What This Folder Does
 eBay integration client and API-specific transport/auth/order normalization behaviors.
@@ -19,6 +19,7 @@ eBay integration client and API-specific transport/auth/order normalization beha
 - Store defaults now include extended per-store listing config (warehouse address fields, heavy-item threshold, no-returns policy ID, and light/heavy/free fulfillment policy IDs) consumed by inventory publish logic.
 - Store defaults policy mapping now prefers `ebay_*_policy_id_<store>` setting names and falls back to legacy `*_profile_id_*` names; missing one of payment/return/fulfillment still triggers "incomplete business policy IDs" errors at route layer.
 - Trading XML helpers are still present for compatibility/tests, but eBay listing wizard publish path should not call `AddFixedPriceItem`.
+- `_convert_order` now automatically extracts the `tracking_number` and `carrier` from the `fulfillments` array of the eBay REST API order payload, allowing order tracking information to be pulled dynamically during platform sync.
 
 ## Child Folders
 - (No child folders)

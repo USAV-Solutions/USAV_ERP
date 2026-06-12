@@ -157,3 +157,84 @@ async def test_update_shipping_status_raises_on_duplicate_tracking():
 
     assert exc_info.value.status_code == 400
     assert "already assigned to order" in exc_info.value.detail
+
+
+def test_ebay_client_convert_order_extracts_tracking():
+    """Verify that EbayClient._convert_order extracts tracking number and carrier from fulfillments."""
+    from app.integrations.ebay.client import EbayClient
+
+    client = EbayClient(store_name="USAV", app_id="app", cert_id="cert", refresh_token="refresh")
+    mock_payload = {
+        "orderId": "11-222-333",
+        "legacyOrderId": "11-222-333",
+        "fulfillmentStartInstructions": [
+            {
+                "shippingStep": {
+                    "shipTo": {
+                        "fullName": "John Doe",
+                        "contactAddress": {
+                            "addressLine1": "123 Main St",
+                            "city": "San Jose",
+                            "stateOrProvince": "CA",
+                            "postalCode": "95125",
+                            "countryCode": "US"
+                        }
+                    }
+                }
+            }
+        ],
+        "lineItems": [
+            {
+                "quantity": 1,
+                "lineItemCost": {"value": "49.99"},
+                "title": "Bose Speaker"
+            }
+        ],
+        "pricingSummary": {
+            "priceSubtotal": {"value": "49.99"},
+            "deliveryCost": {"value": "0.00"}
+        },
+        "creationDate": "2026-06-08T10:00:00.000Z",
+        "fulfillments": [
+            {
+                "shipmentTrackingNumber": "1Z999XX00123456789",
+                "shippingCarrierCode": "UPS"
+            }
+        ]
+    }
+
+    order = client._convert_order(mock_payload)
+    assert order.tracking_number == "1Z999XX00123456789"
+    assert order.carrier == "UPS"
+
+
+def test_parse_tracking_csv_excluding_fba():
+    """Verify daily tracking CSV parsing excluding FBA orders section."""
+    from app.modules.orders.routes import _parse_tracking_csv_excluding_fba
+    
+    csv_text = """Platform,Order Number,Buyer Name,Item Title,USAV SKU,Quantity,Ship by date,Item Number,Tracking,Condition,Note
+Amazon,113-0720540-1242637,cheddunbar,Bose Radio,,,6/15/2026,,381981758231,USED,
+eBay,21-14736-94321,Randas Computer,Bose Radio,,,6/12/2026,,9400108106245253747367,USED,
+Walmart,200014728167003,Tiffany Mays,Bose Radio,,,6/11/2026,,940015010615125685366,USED,
+--- FBA Orders ---
+Amazon,113-9832410-7680208,Sergio Minervini,Bose Solo,,,6/11/2026,,381981750779,USED,
+"""
+    rows, seen, skipped, skipped_fba = _parse_tracking_csv_excluding_fba(csv_text)
+    
+    # Matches first 3 rows. The 4th row (FBA divider) triggers section end and breaks the parsing.
+    assert seen == 4
+    assert len(rows) == 3
+    assert skipped == 0
+    
+    assert rows[0]["platform"] == "Amazon"
+    assert rows[0]["order_number"] == "113-0720540-1242637"
+    assert rows[0]["tracking"] == "381981758231"
+    
+    assert rows[1]["platform"] == "eBay"
+    assert rows[1]["order_number"] == "21-14736-94321"
+    assert rows[1]["tracking"] == "9400108106245253747367"
+    
+    assert rows[2]["platform"] == "Walmart"
+    assert rows[2]["order_number"] == "200014728167003"
+    assert rows[2]["tracking"] == "940015010615125685366"
+
