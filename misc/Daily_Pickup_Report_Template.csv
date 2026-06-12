@@ -1,0 +1,4 @@
+Date (Ngày),Carrier (Vận chuyển),Total Boxes Picked Up (Tổng số thùng đếm thực tế),Total Scanned Tracking Numbers (Tổng tracking scan hệ thống),Customer Orders Count (Đơn khách lẻ),FBA Orders Count (Đơn FBA),Checked By (Người đếm),Confirmation Photo / Signature (Ảnh xác nhận),Notes (Ghi chú)
+2026-06-12,UPS,12,12,10,2,John Doe,Signature on file,Picked up on time
+2026-06-12,USPS,8,7,7,0,John Doe,Label photo attached,Mismatch: 1 missing scan!
+2026-06-12,FedEx,3,3,2,1,Jane Smith,Signature on file,

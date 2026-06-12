@@ -1,0 +1,3 @@
+Date Verified (Ngày kiểm tra),Tracking Number (Số Tracking),Carrier (Vận chuyển),Order / Shipment ID (Mã Đơn hàng),Scanned in System? (Có trong HT?),Physical Box Count Match? (Khớp SL thùng?),Verified By (Người kiểm tra),Verification Status / Discrepancy Notes
+2026-06-12,1Z999AA10123456784,UPS,13-14737-94831,YES,YES,Alice White,Verified
+2026-06-12,420123459205590123456789012345,USPS,4785,YES,NO,Alice White,Alert: Box was physically picked up but tracking number not marked shipped!
