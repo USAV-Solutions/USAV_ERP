@@ -156,3 +156,11 @@ export const ACCOUNTING = {
   SALES_ORDER_REPORTS_EXPORT: '/accounting/reports/sales-orders/export',
   SALES_ORDER_REPORT_FILTER_OPTIONS: '/accounting/reports/sales-orders/filter-options',
 }
+
+export const BEST_SELLING_DASHBOARD = {
+  SUMMARY: '/dashboard/best-selling/summary',
+  PRODUCTS: '/dashboard/best-selling/products',
+  TRENDS: '/dashboard/best-selling/trends',
+  PLATFORM_BREAKDOWN: '/dashboard/best-selling/platform-breakdown',
+  PRODUCT: (sku: string) => `/dashboard/best-selling/products/${encodeURIComponent(sku)}`,
+}
