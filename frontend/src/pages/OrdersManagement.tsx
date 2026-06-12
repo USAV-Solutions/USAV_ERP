@@ -60,7 +60,7 @@ import {
 } from '@mui/icons-material'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 
-import { listOrders, getSyncStatus, refreshUnmatchedItemMatching, syncOrders, syncOrdersRange, updateOrderStatus, updateShippingStatus, deleteOrder, importOrdersFromFile } from '../api/orders'
+import { listOrders, getSyncStatus, refreshUnmatchedItemMatching, syncOrders, syncOrdersRange, updateOrderStatus, updateShippingStatus, deleteOrder, importOrdersFromFile, importTrackingFromLink } from '../api/orders'
 import { forceSyncOrder } from '../api/sync'
 import type {
   OrderBrief,
@@ -219,7 +219,7 @@ export default function OrdersManagement() {
   const [rangeSyncUntil, setRangeSyncUntil] = useState('')
   const [rangeSyncResults, setRangeSyncResults] = useState<SyncResponse[] | null>(null)
   const [trackingUploadDialogOpen, setTrackingUploadDialogOpen] = useState(false)
-  const [trackingCsvFile, setTrackingCsvFile] = useState<File | null>(null)
+  const [trackingSheetUrl, setTrackingSheetUrl] = useState<string>('')
 
   // ── Queries ──────────────────────────────────────────────────────
 
@@ -400,10 +400,10 @@ export default function OrdersManagement() {
 
   const trackingUploadMutation = useMutation({
     mutationFn: () => {
-      if (!trackingCsvFile) {
-        throw new Error('Please choose a CSV file.')
+      if (!trackingSheetUrl) {
+        throw new Error('Please enter the Google Sheets link.')
       }
-      return importOrdersFromFile('TRACKING_CSV', trackingCsvFile)
+      return importTrackingFromLink(trackingSheetUrl)
     },
     onSuccess: async (data) => {
       const summary = [
@@ -418,12 +418,12 @@ export default function OrdersManagement() {
       setSnackbarMessage(summary.join(' '))
       setSnackbarOpen(true)
       setTrackingUploadDialogOpen(false)
-      setTrackingCsvFile(null)
+      setTrackingSheetUrl('')
       await queryClient.invalidateQueries({ queryKey: ['orders'] })
       await queryClient.invalidateQueries({ queryKey: ['syncStatus'] })
     },
     onError: (error: { response?: { data?: { detail?: string } }; message?: string }) => {
-      const detail = error.response?.data?.detail || error.message || 'Tracking upload failed.'
+      const detail = error.response?.data?.detail || error.message || 'Tracking sync failed.'
       setSnackbarSeverity('error')
       setSnackbarMessage(detail)
       setSnackbarOpen(true)
@@ -525,7 +525,7 @@ export default function OrdersManagement() {
       return
     }
     setTrackingUploadDialogOpen(false)
-    setTrackingCsvFile(null)
+    setTrackingSheetUrl('')
     trackingUploadMutation.reset()
   }
 
@@ -765,7 +765,7 @@ export default function OrdersManagement() {
                   setTrackingUploadDialogOpen(true)
                 }}
               >
-                Upload tracking CSV
+                Sync tracking from Google Sheet
               </MenuItem>
             )}
             {hasRole(['ADMIN']) && (
@@ -1217,33 +1217,28 @@ export default function OrdersManagement() {
       </Dialog>
 
       <Dialog open={trackingUploadDialogOpen} onClose={handleCloseTrackingUploadDialog} maxWidth="sm" fullWidth>
-        <DialogTitle>Upload Tracking CSV</DialogTitle>
+        <DialogTitle>Sync Tracking from Google Sheet</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <Typography variant="body2" color="text.secondary">
-              Upload order list CSV from commit `1819fee` flow to upsert tracking numbers on sales orders.
+              Paste the Google Sheets URL to automatically sync and match tracking numbers for standard orders (FBA orders will be ignored).
             </Typography>
-            <Box>
-              <Button component="label" variant="outlined" startIcon={<UploadFile />} disabled={trackingUploadMutation.isPending}>
-                Choose CSV
-                <input
-                  type="file"
-                  hidden
-                  accept=".csv,text/csv"
-                  onChange={(e) => setTrackingCsvFile(e.target.files?.[0] ?? null)}
-                />
-              </Button>
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                {trackingCsvFile ? trackingCsvFile.name : 'No file selected'}
-              </Typography>
-            </Box>
+            <TextField
+              fullWidth
+              label="Google Sheets URL"
+              variant="outlined"
+              placeholder="https://docs.google.com/spreadsheets/d/..."
+              value={trackingSheetUrl}
+              onChange={(e) => setTrackingSheetUrl(e.target.value)}
+              disabled={trackingUploadMutation.isPending}
+            />
             {trackingUploadMutation.isError && (
               <Alert severity="error">
                 {(
                   trackingUploadMutation.error as { response?: { data?: { detail?: string } }; message?: string }
                 ).response?.data?.detail
                   || (trackingUploadMutation.error as Error)?.message
-                  || 'Tracking upload failed.'}
+                  || 'Tracking sync failed.'}
               </Alert>
             )}
           </Stack>
@@ -1255,10 +1250,10 @@ export default function OrdersManagement() {
           <Button
             onClick={() => trackingUploadMutation.mutate()}
             variant="contained"
-            disabled={!trackingCsvFile || trackingUploadMutation.isPending}
-            startIcon={trackingUploadMutation.isPending ? <CircularProgress size={18} /> : <UploadFile />}
+            disabled={!trackingSheetUrl.trim() || trackingUploadMutation.isPending}
+            startIcon={trackingUploadMutation.isPending ? <CircularProgress size={18} /> : <Sync />}
           >
-            {trackingUploadMutation.isPending ? 'Uploading...' : 'Upload'}
+            {trackingUploadMutation.isPending ? 'Syncing...' : 'Sync'}
           </Button>
         </DialogActions>
       </Dialog>
