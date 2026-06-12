@@ -2,8 +2,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from unittest.mock import MagicMock
 
-from app.modules.orders.models import OrderPlatform
-from app.modules.returns.models import ReturnNormalizedStatus
+from app.models import OrderPlatform, ReturnNormalizedStatus
 from app.modules.returns.service import ReturnSyncService
 
 

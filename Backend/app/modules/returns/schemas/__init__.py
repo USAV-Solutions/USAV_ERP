@@ -6,6 +6,11 @@ from app.modules.returns.schemas.returns import (
 )
 from app.modules.returns.schemas.sync import (
     ReturnSyncRangeRequest,
+    ReturnZohoLineValidationResponse,
+    ReturnZohoSyncRangeRequest,
+    ReturnZohoSyncRangeResponse,
+    ReturnZohoSyncStatusResponse,
+    ReturnZohoValidationResponse,
     ReturnSyncRequest,
     ReturnSyncResponse,
     ReturnSyncStateResponse,
@@ -18,6 +23,11 @@ __all__ = [
     "ReturnRecordBrief",
     "ReturnRecordDetail",
     "ReturnSyncRangeRequest",
+    "ReturnZohoLineValidationResponse",
+    "ReturnZohoSyncRangeRequest",
+    "ReturnZohoSyncRangeResponse",
+    "ReturnZohoSyncStatusResponse",
+    "ReturnZohoValidationResponse",
     "ReturnSyncRequest",
     "ReturnSyncResponse",
     "ReturnSyncStateResponse",

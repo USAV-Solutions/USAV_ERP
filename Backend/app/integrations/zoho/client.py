@@ -676,6 +676,43 @@ class ZohoClient:
         """Mark a sales order as *confirmed* in Zoho."""
         return await self._request("POST", f"/salesorders/{salesorder_id}/status/confirmed")
 
+    async def search_salesorder_by_reference(self, reference: str) -> Optional[dict]:
+        """Find a sales order by salesorder_number or legacy reference_number."""
+        target = str(reference or "").strip()
+        if not target:
+            return None
+
+        for page in range(1, 4):
+            salesorders = await self.list_salesorders(page=page, per_page=200)
+            match = next(
+                (
+                    so
+                    for so in salesorders
+                    if str(so.get("salesorder_number", "")).strip() == target
+                    or str(so.get("reference_number", "")).strip() == target
+                ),
+                None,
+            )
+            if match:
+                return match
+            if len(salesorders) < 200:
+                break
+        return None
+
+    async def create_sales_return(self, sales_return_data: dict) -> dict:
+        """Create a sales return in Zoho."""
+        result = await self._request(
+            "POST",
+            "/salesreturns",
+            data={"JSONString": json.dumps(sales_return_data)},
+        )
+        return result.get("salesreturn", {})
+
+    async def get_sales_return(self, salesreturn_id: str) -> dict:
+        """Fetch a single sales return by ID."""
+        result = await self._request("GET", f"/salesreturns/{salesreturn_id}")
+        return result.get("salesreturn", {})
+
     # =========================================================================
     # PACKAGES (marks a sales order as "packed" in Zoho)
     # =========================================================================
@@ -1136,4 +1173,3 @@ class ZohoClient:
         except Exception as e:
             logger.error(f"Zoho health check failed: {e}")
             return False
-
