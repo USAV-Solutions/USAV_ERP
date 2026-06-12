@@ -152,6 +152,16 @@ export async function importOrdersFromFile(
   return data
 }
 
+export async function importTrackingFromLink(
+  sheetUrl: string,
+): Promise<SalesImportFileResponse> {
+  const { data } = await axiosClient.post<SalesImportFileResponse>(
+    ORDERS.IMPORT_TRACKING_LINK,
+    { sheet_url: sheetUrl },
+  )
+  return data
+}
+
 // ── SKU Resolution ───────────────────────────────────────────────────
 
 export async function matchItem(

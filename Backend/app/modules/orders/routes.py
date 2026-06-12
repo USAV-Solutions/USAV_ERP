@@ -792,6 +792,86 @@ def _detect_carrier(tracking_number: str) -> str:
     return "USPS"  # default fallback
 
 
+async def _process_tracking_import_rows(
+    db: AsyncSession,
+    rows: list[dict]
+) -> tuple[int, int, list[str]]:
+    """
+    Process parsed tracking rows, match them to order records in the database,
+    verify tracking uniqueness to prevent duplicate assignments, detect carriers,
+    and update matching orders to SHIPPED/SHIPPING state.
+    
+    Args:
+        db: AsyncSession database connection
+        rows: List of dicts representing parsed rows containing:
+              - 'order_number': str (External order identifier)
+              - 'tracking': str (Cleaned tracking number string)
+              - 'platform': str (Source platform e.g., Amazon, eBay)
+              
+    Returns:
+        tuple[int, int, list[str]]:
+            - updated_count: Number of successfully updated order records
+            - skipped_duplicates: Number of rows skipped due to duplicate tracking numbers
+            - errors: List of error messages for warnings or duplicate logs
+    """
+    updated_count = 0
+    skipped_duplicates = 0
+    errors = []
+
+    for row in rows:
+        order_number = row["order_number"]
+        tracking = row["tracking"]
+        platform_str = row["platform"]
+
+        # Clean check: query order by either external_order_id or external_order_number
+        val = tracking.strip()
+        stmt = select(Order).where(
+            (Order.external_order_id == order_number) | (Order.external_order_number == order_number)
+        )
+        orders = (await db.execute(stmt)).scalars().all()
+
+        if not orders:
+            # Silently ignore orders that cannot be found
+            continue
+
+        # For ambiguous matches (e.g. same order ID on different platforms), map via platform string
+        order = None
+        if len(orders) > 1 and platform_str:
+            platform_lower = platform_str.strip().lower()
+            for o in orders:
+                if platform_lower in o.platform.value.lower():
+                    order = o
+                    break
+        if not order:
+            order = orders[0]
+
+        # Verify uniqueness of the tracking number across other orders to prevent duplicate assignment
+        stmt_uniq = select(Order).where(
+            func.lower(Order.tracking_number) == func.lower(val),
+            Order.id != order.id
+        )
+        duplicate_order = (await db.execute(stmt_uniq)).scalars().first()
+        if duplicate_order:
+            msg = f"Tracking '{tracking}' for order '{order_number}' already assigned to order '{duplicate_order.external_order_id}'."
+            logger.warning(msg)
+            errors.append(msg)
+            skipped_duplicates += 1
+            continue
+
+        # Detect carrier and update order status flags to SHIPPED and SHIPPING respectively
+        carrier = _detect_carrier(tracking)
+        order.tracking_number = tracking
+        order.carrier = carrier
+        order.status = OrderStatus.SHIPPED
+        order.shipping_status = ShippingStatus.SHIPPING
+        order.zoho_sync_status = ZohoSyncStatus.DIRTY
+        db.add(order)
+        updated_count += 1
+
+    return updated_count, skipped_duplicates, errors
+
+
+
 def _parse_tracking_csv(file_text: str) -> tuple[list[dict], int, int]:
     """
     Parse daily Google Sheet tracking summary CSV.
@@ -1076,72 +1156,20 @@ async def import_orders_from_file(
         ) from exc
 
     if source == SalesImportFileSource.TRACKING_CSV:
-        rows, rows_seen, rows_skipped = _parse_tracking_csv(text)
-        updated_count = 0
-        skipped_duplicates = 0
-        errors = []
-
-        for row in rows:
-            order_number = row["order_number"]
-            tracking = row["tracking"]
-            platform_str = row["platform"]
-
-            # Uniqueness check: is this tracking number already assigned to another order in the database?
-            val = tracking.strip()
-            # Fetch matching order(s) by external_order_id or external_order_number
-            stmt = select(Order).where(
-                (Order.external_order_id == order_number) | (Order.external_order_number == order_number)
-            )
-            orders = (await db.execute(stmt)).scalars().all()
-
-            if not orders:
-                # Silently ignore orders that cannot be found
-                rows_skipped += 1
-                continue
-
-            # If there are multiple matches (e.g. across platforms), try to match the platform string if available
-            order = None
-            if len(orders) > 1 and platform_str:
-                platform_lower = platform_str.strip().lower()
-                for o in orders:
-                    if platform_lower in o.platform.value.lower():
-                        order = o
-                        break
-            if not order:
-                order = orders[0]
-
-            # Verify tracking uniqueness
-            stmt_uniq = select(Order).where(
-                func.lower(Order.tracking_number) == func.lower(val),
-                Order.id != order.id
-            )
-            duplicate_order = (await db.execute(stmt_uniq)).scalars().first()
-            if duplicate_order:
-                # Skip duplicate and record error/warning to prevent 2 trackings in the system
-                msg = f"Tracking '{tracking}' for order '{order_number}' already assigned to order '{duplicate_order.external_order_id}'."
-                logger.warning(msg)
-                errors.append(msg)
-                skipped_duplicates += 1
-                continue
-
-            # Detect carrier
-            carrier = _detect_carrier(tracking)
-
-            # Update tracking and status
-            order.tracking_number = tracking
-            order.carrier = carrier
-            order.status = OrderStatus.SHIPPED
-            order.shipping_status = ShippingStatus.SHIPPING
-            order.zoho_sync_status = ZohoSyncStatus.DIRTY
-            db.add(order)
-            updated_count += 1
-
+        rows, rows_seen, initial_rows_skipped = _parse_tracking_csv(text)
+        
+        # Process the database updates and validations using the shared helper
+        updated_count, skipped_duplicates, errors = await _process_tracking_import_rows(db, rows)
+        
         await db.commit()
+
+        # Calculate final skipped rows (initial skips + orders not found in database)
+        final_rows_skipped = initial_rows_skipped + (len(rows) - updated_count - skipped_duplicates)
 
         return SalesImportFileResponse(
             source=source,
             source_rows_seen=rows_seen,
-            source_rows_skipped=rows_skipped,
+            source_rows_skipped=final_rows_skipped,
             customers_created=0,
             customers_updated=0,
             new_orders=updated_count,
@@ -1151,6 +1179,7 @@ async def import_orders_from_file(
             success=True,  # Return success True even if some are skipped/errors, matching sync behavior
             errors=errors,
         )
+
 
     if source == SalesImportFileSource.SHIPSTATION_CUSTOMER_CSV:
         customers, rows_seen, rows_skipped = _parse_shipstation_customer_csv(text)
@@ -1344,9 +1373,160 @@ async def import_orders_from_file(
     )
 
 
+from pydantic import BaseModel, HttpUrl
+
+class TrackingLinkImportRequest(BaseModel):
+    sheet_url: HttpUrl
+
+def _parse_tracking_csv_excluding_fba(file_text: str) -> tuple[list[dict], int, int, int]:
+    """
+    Parse daily Google Sheet tracking summary CSV.
+    Stops parsing when FBA divider section is encountered, or skips FBA rows.
+    """
+    import re
+    reader = csv.reader(io.StringIO(file_text))
+    rows_seen = 0
+    rows_skipped = 0
+    skipped_fba = 0
+    parsed_rows = []
+
+    try:
+        header = next(reader)
+    except StopIteration:
+        return [], 0, 0, 0
+
+    col_platform_idx = 0
+    col_order_num_idx = 1
+    col_tracking_idx = 8
+
+    # Double check if headers match to adjust indexes
+    for idx, col in enumerate(header):
+        col_clean = col.strip().lower()
+        if "platform" in col_clean:
+            col_platform_idx = idx
+        elif "order" in col_clean:
+            col_order_num_idx = idx
+        elif "tracking" in col_clean:
+            col_tracking_idx = idx
+
+    is_fba_section = False
+
+    for row in reader:
+        rows_seen += 1
+        if not any(cell.strip() for cell in row):
+            continue
+
+        row_str = " ".join(row).lower()
+        # Detect FBA section divider
+        if "fba" in row_str and len([c for c in row if c.strip()]) <= 2:
+            is_fba_section = True
+            break
+
+        if is_fba_section:
+            skipped_fba += 1
+            continue
+
+        if len(row) <= max(col_platform_idx, col_order_num_idx, col_tracking_idx):
+            rows_skipped += 1
+            continue
+
+        platform = row[col_platform_idx].strip()
+        order_number = row[col_order_num_idx].strip()
+        tracking = row[col_tracking_idx].strip()
+
+        # Double check if platform itself is FBA
+        if "fba" in platform.lower() or "fba" in order_number.lower():
+            skipped_fba += 1
+            continue
+
+        if not tracking or tracking.strip() in {"", "-", "—"}:
+            rows_skipped += 1
+            continue
+
+        if not order_number:
+            rows_skipped += 1
+            continue
+
+        # Clean tracking number (remove spaces)
+        tracking_clean = re.sub(r"\s+", "", tracking)
+
+        parsed_rows.append({
+            "platform": platform,
+            "order_number": order_number,
+            "tracking": tracking_clean,
+        })
+
+    return parsed_rows, rows_seen, rows_skipped, skipped_fba
+
+@router.post("/import/tracking-link", response_model=SalesImportFileResponse)
+async def import_tracking_from_link(
+    _staff: AdminOrSalesUser,
+    body: TrackingLinkImportRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Import tracking numbers directly from a Google Sheets URL.
+    Converts sheet view URL to CSV export format, downloads, and parses it.
+    """
+    import httpx
+    import re
+
+    sheet_url = str(body.sheet_url)
+    # Convert standard Google Sheets URL to CSV export URL
+    match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", sheet_url)
+    if not match:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid Google Sheets URL format.",
+        )
+    
+    spreadsheet_id = match.group(1)
+    gid_match = re.search(r"[#&]gid=([0-9]+)", sheet_url)
+    gid_param = f"&gid={gid_match.group(1)}" if gid_match else ""
+    csv_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=csv{gid_param}"
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            response = await client.get(csv_url, headers=headers, follow_redirects=True)
+            response.raise_for_status()
+            file_text = response.text
+    except Exception as e:
+        logger.error(f"Failed to fetch Google Sheet: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to download Google Sheet: {str(e)}",
+        )
+
+    rows, rows_seen, initial_rows_skipped, skipped_fba = _parse_tracking_csv_excluding_fba(file_text)
+    
+    # Process the database updates and validations using the shared helper
+    updated_count, skipped_duplicates, errors = await _process_tracking_import_rows(db, rows)
+
+    await db.commit()
+
+    # Calculate final skipped rows (initial skips + orders not found + FBA skips)
+    final_rows_skipped = initial_rows_skipped + (len(rows) - updated_count - skipped_duplicates) + skipped_fba
+
+    return SalesImportFileResponse(
+        source=SalesImportFileSource.TRACKING_CSV,
+        source_rows_seen=rows_seen,
+        source_rows_skipped=final_rows_skipped,
+        customers_created=0,
+        customers_updated=0,
+        new_orders=updated_count,
+        new_items=0,
+        auto_matched=0,
+        skipped_duplicates=skipped_duplicates,
+        success=True,
+        errors=errors,
+    )
+
+
 # ============================================================================
 # ORDER CRUD ENDPOINTS
 # ============================================================================
+
 
 @router.get("", response_model=OrderListResponse)
 async def list_orders(

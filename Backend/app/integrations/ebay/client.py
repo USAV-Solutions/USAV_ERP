@@ -1551,6 +1551,14 @@ class EbayClient(BasePlatformClient):
         # Calculate totals
         pricing = ebay_order.get("pricingSummary", {})
         
+        # Extract tracking and carrier from REST API fulfillments
+        tracking_number = None
+        carrier = None
+        fulfillments = ebay_order.get("fulfillments") or []
+        if fulfillments:
+            tracking_number = fulfillments[0].get("shipmentTrackingNumber")
+            carrier = fulfillments[0].get("shippingCarrierCode")
+
         return ExternalOrder(
             platform_order_id=ebay_order.get("orderId"),
             platform_order_number=ebay_order.get("legacyOrderId"),
@@ -1576,4 +1584,6 @@ class EbayClient(BasePlatformClient):
             ) if ebay_order.get("creationDate") else None,
             items=items,
             raw_data=ebay_order,
+            tracking_number=tracking_number,
+            carrier=carrier,
         )
