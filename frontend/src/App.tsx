@@ -8,6 +8,7 @@ import InventoryManagement from './pages/InventoryManagement'
 import ProductListings from './pages/ProductListings'
 import CreateProductListing from './pages/CreateProductListing'
 import OrdersManagement from './pages/OrdersManagement'
+import ReturnsManagement from './pages/ReturnsManagement'
 import PurchasingManagement from './pages/PurchasingManagement'
 import AccountingReports from './pages/accounting/AccountingReports'
 import BankConversion from './pages/accounting/BankConversion'
@@ -53,6 +54,7 @@ function App() {
         {/* Orders Routes */}
         <Route element={<RoleGuard allowedRoles={['ADMIN', 'SALES_REP', 'WAREHOUSE_OP']} />}>
           <Route path="/orders" element={<OrdersManagement />} />
+          <Route path="/returns" element={<ReturnsManagement />} />
           <Route path="/purchasing" element={<PurchasingManagement />} />
         </Route>
 
