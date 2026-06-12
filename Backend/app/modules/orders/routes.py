@@ -792,6 +792,86 @@ def _detect_carrier(tracking_number: str) -> str:
     return "USPS"  # default fallback
 
 
+async def _process_tracking_import_rows(
+    db: AsyncSession,
+    rows: list[dict]
+) -> tuple[int, int, list[str]]:
+    """
+    Process parsed tracking rows, match them to order records in the database,
+    verify tracking uniqueness to prevent duplicate assignments, detect carriers,
+    and update matching orders to SHIPPED/SHIPPING state.
+    
+    Args:
+        db: AsyncSession database connection
+        rows: List of dicts representing parsed rows containing:
+              - 'order_number': str (External order identifier)
+              - 'tracking': str (Cleaned tracking number string)
+              - 'platform': str (Source platform e.g., Amazon, eBay)
+              
+    Returns:
+        tuple[int, int, list[str]]:
+            - updated_count: Number of successfully updated order records
+            - skipped_duplicates: Number of rows skipped due to duplicate tracking numbers
+            - errors: List of error messages for warnings or duplicate logs
+    """
+    updated_count = 0
+    skipped_duplicates = 0
+    errors = []
+
+    for row in rows:
+        order_number = row["order_number"]
+        tracking = row["tracking"]
+        platform_str = row["platform"]
+
+        # Clean check: query order by either external_order_id or external_order_number
+        val = tracking.strip()
+        stmt = select(Order).where(
+            (Order.external_order_id == order_number) | (Order.external_order_number == order_number)
+        )
+        orders = (await db.execute(stmt)).scalars().all()
+
+        if not orders:
+            # Silently ignore orders that cannot be found
+            continue
+
+        # For ambiguous matches (e.g. same order ID on different platforms), map via platform string
+        order = None
+        if len(orders) > 1 and platform_str:
+            platform_lower = platform_str.strip().lower()
+            for o in orders:
+                if platform_lower in o.platform.value.lower():
+                    order = o
+                    break
+        if not order:
+            order = orders[0]
+
+        # Verify uniqueness of the tracking number across other orders to prevent duplicate assignment
+        stmt_uniq = select(Order).where(
+            func.lower(Order.tracking_number) == func.lower(val),
+            Order.id != order.id
+        )
+        duplicate_order = (await db.execute(stmt_uniq)).scalars().first()
+        if duplicate_order:
+            msg = f"Tracking '{tracking}' for order '{order_number}' already assigned to order '{duplicate_order.external_order_id}'."
+            logger.warning(msg)
+            errors.append(msg)
+            skipped_duplicates += 1
+            continue
+
+        # Detect carrier and update order status flags to SHIPPED and SHIPPING respectively
+        carrier = _detect_carrier(tracking)
+        order.tracking_number = tracking
+        order.carrier = carrier
+        order.status = OrderStatus.SHIPPED
+        order.shipping_status = ShippingStatus.SHIPPING
+        order.zoho_sync_status = ZohoSyncStatus.DIRTY
+        db.add(order)
+        updated_count += 1
+
+    return updated_count, skipped_duplicates, errors
+
+
+
 def _parse_tracking_csv(file_text: str) -> tuple[list[dict], int, int]:
     """
     Parse daily Google Sheet tracking summary CSV.
@@ -1076,72 +1156,20 @@ async def import_orders_from_file(
         ) from exc
 
     if source == SalesImportFileSource.TRACKING_CSV:
-        rows, rows_seen, rows_skipped = _parse_tracking_csv(text)
-        updated_count = 0
-        skipped_duplicates = 0
-        errors = []
-
-        for row in rows:
-            order_number = row["order_number"]
-            tracking = row["tracking"]
-            platform_str = row["platform"]
-
-            # Uniqueness check: is this tracking number already assigned to another order in the database?
-            val = tracking.strip()
-            # Fetch matching order(s) by external_order_id or external_order_number
-            stmt = select(Order).where(
-                (Order.external_order_id == order_number) | (Order.external_order_number == order_number)
-            )
-            orders = (await db.execute(stmt)).scalars().all()
-
-            if not orders:
-                # Silently ignore orders that cannot be found
-                rows_skipped += 1
-                continue
-
-            # If there are multiple matches (e.g. across platforms), try to match the platform string if available
-            order = None
-            if len(orders) > 1 and platform_str:
-                platform_lower = platform_str.strip().lower()
-                for o in orders:
-                    if platform_lower in o.platform.value.lower():
-                        order = o
-                        break
-            if not order:
-                order = orders[0]
-
-            # Verify tracking uniqueness
-            stmt_uniq = select(Order).where(
-                func.lower(Order.tracking_number) == func.lower(val),
-                Order.id != order.id
-            )
-            duplicate_order = (await db.execute(stmt_uniq)).scalars().first()
-            if duplicate_order:
-                # Skip duplicate and record error/warning to prevent 2 trackings in the system
-                msg = f"Tracking '{tracking}' for order '{order_number}' already assigned to order '{duplicate_order.external_order_id}'."
-                logger.warning(msg)
-                errors.append(msg)
-                skipped_duplicates += 1
-                continue
-
-            # Detect carrier
-            carrier = _detect_carrier(tracking)
-
-            # Update tracking and status
-            order.tracking_number = tracking
-            order.carrier = carrier
-            order.status = OrderStatus.SHIPPED
-            order.shipping_status = ShippingStatus.SHIPPING
-            order.zoho_sync_status = ZohoSyncStatus.DIRTY
-            db.add(order)
-            updated_count += 1
-
+        rows, rows_seen, initial_rows_skipped = _parse_tracking_csv(text)
+        
+        # Process the database updates and validations using the shared helper
+        updated_count, skipped_duplicates, errors = await _process_tracking_import_rows(db, rows)
+        
         await db.commit()
+
+        # Calculate final skipped rows (initial skips + orders not found in database)
+        final_rows_skipped = initial_rows_skipped + (len(rows) - updated_count - skipped_duplicates)
 
         return SalesImportFileResponse(
             source=source,
             source_rows_seen=rows_seen,
-            source_rows_skipped=rows_skipped,
+            source_rows_skipped=final_rows_skipped,
             customers_created=0,
             customers_updated=0,
             new_orders=updated_count,
@@ -1151,6 +1179,7 @@ async def import_orders_from_file(
             success=True,  # Return success True even if some are skipped/errors, matching sync behavior
             errors=errors,
         )
+
 
     if source == SalesImportFileSource.SHIPSTATION_CUSTOMER_CSV:
         customers, rows_seen, rows_skipped = _parse_shipstation_customer_csv(text)
@@ -1469,65 +1498,20 @@ async def import_tracking_from_link(
             detail=f"Failed to download Google Sheet: {str(e)}",
         )
 
-    rows, rows_seen, rows_skipped, skipped_fba = _parse_tracking_csv_excluding_fba(file_text)
-    updated_count = 0
-    skipped_duplicates = 0
-    errors = []
-
-    for row in rows:
-        order_number = row["order_number"]
-        tracking = row["tracking"]
-        platform_str = row["platform"]
-
-        val = tracking.strip()
-        stmt = select(Order).where(
-            (Order.external_order_id == order_number) | (Order.external_order_number == order_number)
-        )
-        orders = (await db.execute(stmt)).scalars().all()
-
-        if not orders:
-            rows_skipped += 1
-            continue
-
-        order = None
-        if len(orders) > 1 and platform_str:
-            platform_lower = platform_str.strip().lower()
-            for o in orders:
-                if platform_lower in o.platform.value.lower():
-                    order = o
-                    break
-        if not order:
-            order = orders[0]
-
-        # Verify tracking uniqueness
-        stmt_uniq = select(Order).where(
-            func.lower(Order.tracking_number) == func.lower(val),
-            Order.id != order.id
-        )
-        duplicate_order = (await db.execute(stmt_uniq)).scalars().first()
-        if duplicate_order:
-            msg = f"Tracking '{tracking}' for order '{order_number}' already assigned to order '{duplicate_order.external_order_id}'."
-            logger.warning(msg)
-            errors.append(msg)
-            skipped_duplicates += 1
-            continue
-
-        carrier = _detect_carrier(tracking)
-
-        order.tracking_number = tracking
-        order.carrier = carrier
-        order.status = OrderStatus.SHIPPED
-        order.shipping_status = ShippingStatus.SHIPPING
-        order.zoho_sync_status = ZohoSyncStatus.DIRTY
-        db.add(order)
-        updated_count += 1
+    rows, rows_seen, initial_rows_skipped, skipped_fba = _parse_tracking_csv_excluding_fba(file_text)
+    
+    # Process the database updates and validations using the shared helper
+    updated_count, skipped_duplicates, errors = await _process_tracking_import_rows(db, rows)
 
     await db.commit()
+
+    # Calculate final skipped rows (initial skips + orders not found + FBA skips)
+    final_rows_skipped = initial_rows_skipped + (len(rows) - updated_count - skipped_duplicates) + skipped_fba
 
     return SalesImportFileResponse(
         source=SalesImportFileSource.TRACKING_CSV,
         source_rows_seen=rows_seen,
-        source_rows_skipped=rows_skipped + skipped_fba,
+        source_rows_skipped=final_rows_skipped,
         customers_created=0,
         customers_updated=0,
         new_orders=updated_count,
