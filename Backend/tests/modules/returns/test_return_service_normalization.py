@@ -158,6 +158,30 @@ def test_merge_ecwid_returned_over_refunded():
     assert merged.refunded_amount == Decimal("12")
 
 
+def test_normalize_ecwid_single_line_refund_sets_return_quantity():
+    service = _build_service()
+    record = service._normalize_ecwid_order_record(
+        OrderPlatform.ECWID,
+        "ECWID_API",
+        {
+            "id": 4718,
+            "paymentStatus": "PARTIALLY_REFUNDED",
+            "fulfillmentStatus": "SHIPPED",
+            "currency": "USD",
+            "total": 120,
+            "refundedAmount": 20,
+            "items": [{"productId": "1", "sku": "01658", "name": "Bose 301 Series IV", "quantity": 1}],
+        },
+    )
+
+    assert record is not None
+    assert record.normalized_status == ReturnNormalizedStatus.PARTIALLY_REFUNDED
+    assert record.refunded_amount == Decimal("20")
+    assert record.items[0].returned_qty == 1
+    assert record.items[0].cancelled_qty == 0
+    assert record.items[0].refunded_amount == Decimal("20")
+
+
 def test_normalize_walmart_partial_cancellation():
     service = _build_service()
     record = service._normalize_walmart_order_record(

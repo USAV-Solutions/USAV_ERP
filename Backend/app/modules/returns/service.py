@@ -796,9 +796,16 @@ class ReturnSyncService:
         payment_status = str(raw.get("paymentStatus") or "").upper()
         fulfillment_status = str(raw.get("fulfillmentStatus") or "").upper()
         refunded_amount = _to_decimal(raw.get("refundedAmount") or 0)
+        is_refund_only = (
+            payment_status in {"REFUNDED", "PARTIALLY_REFUNDED"}
+            and fulfillment_status != "RETURNED"
+            and refunded_amount > Decimal("0")
+        )
+        raw_items = _coerce_list(raw.get("items"))
+        allocate_refund_to_single_line = is_refund_only and len(raw_items) == 1
         items: list[NormalizedReturnItem] = []
         total_qty = 0
-        for item in _coerce_list(raw.get("items")):
+        for item in raw_items:
             qty = int(item.get("quantity") or 0)
             total_qty += qty
             items.append(
@@ -807,9 +814,9 @@ class ReturnSyncService:
                     external_sku=item.get("sku"),
                     item_name=item.get("name") or "Unknown Item",
                     ordered_qty=qty,
-                    returned_qty=qty if fulfillment_status == "RETURNED" else 0,
+                    returned_qty=qty if fulfillment_status == "RETURNED" or allocate_refund_to_single_line else 0,
                     cancelled_qty=qty if payment_status == "CANCELLED" else 0,
-                    refunded_amount=Decimal("0"),
+                    refunded_amount=refunded_amount if allocate_refund_to_single_line else Decimal("0"),
                     payload=item,
                 )
             )

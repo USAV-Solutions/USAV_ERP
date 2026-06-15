@@ -15,6 +15,7 @@ Returns domain: imports cancellation, return, and refund signals from eBay, Ecwi
 - Partial returns and partial cancellations are line-quantity problems. Keep `return_item` quantities authoritative instead of flattening them into one header-only status.
 - eBay true return cases and order-level refunds/cancellations come from different API surfaces. Prefer physical return/cancel classifications over refund-only classifications when the same case overlaps.
 - eBay returns sync is intentionally list-first: use `getOrders` by `lastModifiedDate` as the cheap candidate detector, then call `getOrder/{orderId}` only for suspicious candidate payloads that need enrichment. Do not reintroduce per-order detail hydration for the full window.
+- Ecwid order-level refund payloads may expose only `refundedAmount` with no per-line return quantity. For a single-line refund-only order, the importer assigns the line quantity as returned so Zoho Sales Return validation has a quantity to sync; multi-line refund-only orders remain ambiguous unless Ecwid provides return/line detail.
 - Walmart cancellations come from Orders API line statuses, while physical returns/refunds come from Returns API payloads; do not assume one source covers both.
 - `return_sync_state` is intentionally separate from `integration_state`; `/returns/sync/status` must not affect the Orders dashboard.
 
