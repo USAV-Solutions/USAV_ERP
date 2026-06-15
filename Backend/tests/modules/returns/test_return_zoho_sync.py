@@ -79,6 +79,8 @@ def _zoho_client():
                     "item_id": "ZITEM-1",
                     "sku": "SKU-1",
                     "name": "Item 1",
+                    "quantity_shipped": 1,
+                    "quantity_returned": 0,
                 }
             ],
         }
@@ -87,6 +89,8 @@ def _zoho_client():
     client.create_sales_return = AsyncMock(
         return_value={"salesreturn_id": "SR-1", "salesreturn_number": "SR-0001"}
     )
+    client.get_item = AsyncMock(return_value={"item_id": "ZITEM-1", "is_returnable": True})
+    client.update_item = AsyncMock(return_value={"item_id": "ZITEM-1", "is_returnable": True})
     return client
 
 
@@ -113,6 +117,7 @@ async def test_validate_ready_maps_local_item_to_zoho_salesorder_line():
 
     assert result.status == ReturnZohoSyncStatus.READY_TO_SYNC
     assert result.zoho_salesorder_id == "SO-1"
+    assert result.line_items[0].zoho_item_id == "ZITEM-1"
     assert result.line_items[0].zoho_salesorder_item_id == "SOL-1"
     assert record.zoho_sync_status == ReturnZohoSyncStatus.READY_TO_SYNC
 
@@ -129,6 +134,33 @@ async def test_validate_blocks_quantity_above_available_after_prior_synced_retur
 
 
 @pytest.mark.asyncio
+async def test_validate_blocks_quantity_above_zoho_shipped_quantity():
+    record = _record(quantity=1, returned_qty=1)
+    client = _zoho_client()
+    client.get_salesorder = AsyncMock(
+        return_value={
+            "salesorder_id": "SO-1",
+            "line_items": [
+                {
+                    "line_item_id": "SOL-1",
+                    "item_id": "ZITEM-1",
+                    "sku": "SKU-1",
+                    "name": "Item 1",
+                    "quantity_shipped": 0,
+                    "quantity_returned": 0,
+                }
+            ],
+        }
+    )
+    service = _TestZohoReturnSyncService(record=record, zoho_client=client)
+
+    result = await service.validate_return_for_zoho(record.id)
+
+    assert result.status == ReturnZohoSyncStatus.QUANTITY_CONFLICT
+    assert "exceeds Zoho shipped quantity" in result.blockers[0]
+
+
+@pytest.mark.asyncio
 async def test_sync_skips_create_when_return_already_has_zoho_salesreturn_id():
     record = _record(zoho_salesreturn_id="SR-EXISTING")
     client = _zoho_client()
@@ -138,6 +170,8 @@ async def test_sync_skips_create_when_return_already_has_zoho_salesreturn_id():
 
     assert result.status == ReturnZohoSyncStatus.ALREADY_SYNCED
     client.create_sales_return.assert_not_called()
+    client.get_item.assert_not_called()
+    client.update_item.assert_not_called()
     assert record.zoho_sync_status == ReturnZohoSyncStatus.SYNCED
 
 
@@ -154,4 +188,39 @@ async def test_sync_creates_sales_return_and_stores_result():
     assert record.zoho_salesreturn_number == "SR-0001"
     payload = client.create_sales_return.await_args.args[0]
     assert payload["salesorder_id"] == "SO-1"
-    assert payload["line_items"] == [{"salesorder_item_id": "SOL-1", "quantity": 1}]
+    assert payload["line_items"] == [{"item_id": "ZITEM-1", "salesorder_item_id": "SOL-1", "quantity": 1}]
+    client.get_item.assert_awaited_once_with("ZITEM-1")
+    client.update_item.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sync_marks_zoho_item_returnable_before_sales_return_create():
+    record = _record()
+    client = _zoho_client()
+    client.get_item = AsyncMock(return_value={"item_id": "ZITEM-1", "is_returnable": False})
+    service = _TestZohoReturnSyncService(record=record, zoho_client=client)
+
+    result = await service.sync_return_to_zoho(record.id)
+
+    assert result.status == ReturnZohoSyncStatus.SYNCED
+    client.update_item.assert_awaited_once_with("ZITEM-1", {"is_returnable": True})
+    assert client.update_item.await_count == 1
+    client.create_sales_return.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_validate_blocks_zoho_salesorder_line_without_item_id():
+    record = _record()
+    client = _zoho_client()
+    client.get_salesorder = AsyncMock(
+        return_value={
+            "salesorder_id": "SO-1",
+            "line_items": [{"line_item_id": "SOL-1", "sku": "SKU-1", "name": "Item 1", "quantity_shipped": 1}],
+        }
+    )
+    service = _TestZohoReturnSyncService(record=record, zoho_client=client)
+
+    result = await service.validate_return_for_zoho(record.id)
+
+    assert result.status == ReturnZohoSyncStatus.MISSING_LINE_ITEM_MAPPING
+    assert "with item_id" in result.blockers[0]

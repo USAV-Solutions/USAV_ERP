@@ -20,6 +20,7 @@ class ZohoReturnLineValidation:
     return_item_id: int
     linked_order_item_id: Optional[int]
     quantity: int
+    zoho_item_id: Optional[str]
     zoho_salesorder_item_id: Optional[str]
     status: ReturnZohoSyncStatus
     message: Optional[str] = None
@@ -72,6 +73,7 @@ class ZohoReturnSyncService:
 
         payload = self.build_sales_return_payload(record, validation)
         try:
+            await self._ensure_return_items_are_returnable(payload)
             sales_return = await self.zoho_client.create_sales_return(payload)
             salesreturn_id = str(
                 sales_return.get("salesreturn_id")
@@ -238,6 +240,7 @@ class ZohoReturnSyncService:
                 return_item_id=item.id,
                 linked_order_item_id=None,
                 quantity=quantity,
+                zoho_item_id=None,
                 zoho_salesorder_item_id=None,
                 status=ReturnZohoSyncStatus.MISSING_LINE_ITEM_MAPPING,
                 message=f"Return item {item.id} is not linked to a local order item.",
@@ -248,6 +251,7 @@ class ZohoReturnSyncService:
                 return_item_id=item.id,
                 linked_order_item_id=order_item.id,
                 quantity=quantity,
+                zoho_item_id=None,
                 zoho_salesorder_item_id=None,
                 status=ReturnZohoSyncStatus.QUANTITY_CONFLICT,
                 message=f"Return item {item.id} has no returned or cancelled quantity.",
@@ -260,6 +264,7 @@ class ZohoReturnSyncService:
                 return_item_id=item.id,
                 linked_order_item_id=order_item.id,
                 quantity=quantity,
+                zoho_item_id=None,
                 zoho_salesorder_item_id=None,
                 status=ReturnZohoSyncStatus.QUANTITY_CONFLICT,
                 message=(
@@ -270,20 +275,38 @@ class ZohoReturnSyncService:
 
         zoho_line = self._match_zoho_salesorder_line(order_item, salesorder_lines)
         zoho_line_id = self._zoho_salesorder_item_id(zoho_line) if zoho_line else None
-        if not zoho_line_id:
+        zoho_item_id = self._zoho_item_id(zoho_line) if zoho_line else None
+        if not zoho_line_id or not zoho_item_id:
             return ZohoReturnLineValidation(
                 return_item_id=item.id,
                 linked_order_item_id=order_item.id,
                 quantity=quantity,
+                zoho_item_id=None,
                 zoho_salesorder_item_id=None,
                 status=ReturnZohoSyncStatus.MISSING_LINE_ITEM_MAPPING,
-                message=f"Order item {order_item.id} has no matching Zoho Sales Order line item.",
+                message=f"Order item {order_item.id} has no matching Zoho Sales Order line item with item_id.",
+            )
+
+        returnable_qty = self._zoho_returnable_quantity(zoho_line)
+        if quantity > returnable_qty:
+            return ZohoReturnLineValidation(
+                return_item_id=item.id,
+                linked_order_item_id=order_item.id,
+                quantity=quantity,
+                zoho_item_id=zoho_item_id,
+                zoho_salesorder_item_id=zoho_line_id,
+                status=ReturnZohoSyncStatus.QUANTITY_CONFLICT,
+                message=(
+                    f"Return item {item.id} quantity {quantity} exceeds Zoho shipped quantity "
+                    f"available to return {returnable_qty}."
+                ),
             )
 
         return ZohoReturnLineValidation(
             return_item_id=item.id,
             linked_order_item_id=order_item.id,
             quantity=quantity,
+            zoho_item_id=zoho_item_id,
             zoho_salesorder_item_id=zoho_line_id,
             status=ReturnZohoSyncStatus.READY_TO_SYNC,
         )
@@ -291,11 +314,12 @@ class ZohoReturnSyncService:
     def build_sales_return_payload(self, record: ReturnRecord, validation: ZohoReturnValidation) -> dict[str, Any]:
         line_items = [
             {
+                "item_id": item.zoho_item_id,
                 "salesorder_item_id": item.zoho_salesorder_item_id,
                 "quantity": item.quantity,
             }
             for item in validation.line_items
-            if item.status == ReturnZohoSyncStatus.READY_TO_SYNC and item.zoho_salesorder_item_id
+            if item.status == ReturnZohoSyncStatus.READY_TO_SYNC and item.zoho_salesorder_item_id and item.zoho_item_id
         ]
         if not validation.zoho_salesorder_id or not line_items:
             raise ValueError("Return record is not ready for Zoho Sales Return payload creation.")
@@ -316,6 +340,17 @@ class ZohoReturnSyncService:
         if record.reason:
             payload["reason"] = record.reason
         return payload
+
+    async def _ensure_return_items_are_returnable(self, payload: dict[str, Any]) -> None:
+        item_ids = {
+            str(line.get("item_id") or "").strip()
+            for line in payload.get("line_items", [])
+            if str(line.get("item_id") or "").strip()
+        }
+        for item_id in sorted(item_ids):
+            zoho_item = await self.zoho_client.get_item(item_id)
+            if zoho_item.get("is_returnable") is False:
+                await self.zoho_client.update_item(item_id, {"is_returnable": True})
 
     def _apply_validation_status(self, record: ReturnRecord, validation: ZohoReturnValidation) -> None:
         if validation.status == ReturnZohoSyncStatus.ALREADY_SYNCED:
@@ -380,6 +415,21 @@ class ZohoReturnSyncService:
             or zoho_line.get("line_item_id")
             or ""
         ).strip() or None
+
+    def _zoho_item_id(self, zoho_line: Optional[dict[str, Any]]) -> Optional[str]:
+        if not zoho_line:
+            return None
+        return str(zoho_line.get("item_id") or "").strip() or None
+
+    def _zoho_returnable_quantity(self, zoho_line: Optional[dict[str, Any]]) -> int:
+        if not zoho_line:
+            return 0
+        try:
+            shipped_qty = int(Decimal(str(zoho_line.get("quantity_shipped") or 0)))
+            returned_qty = int(Decimal(str(zoho_line.get("quantity_returned") or 0)))
+        except Exception:
+            return 0
+        return max(shipped_qty - returned_qty, 0)
 
     async def _already_synced_quantity(self, record_id: int, order_item_id: int) -> int:
         qty_expr = func.coalesce(func.sum(ReturnItem.returned_qty + ReturnItem.cancelled_qty), 0)

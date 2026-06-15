@@ -182,6 +182,29 @@ def test_normalize_ecwid_single_line_refund_sets_return_quantity():
     assert record.items[0].refunded_amount == Decimal("20")
 
 
+def test_normalize_ecwid_single_line_return_allocates_header_refund():
+    service = _build_service()
+    record = service._normalize_ecwid_order_record(
+        OrderPlatform.ECWID,
+        "ECWID_API",
+        {
+            "id": 4684,
+            "paymentStatus": "PARTIALLY_REFUNDED",
+            "fulfillmentStatus": "RETURNED",
+            "currency": "USD",
+            "total": 84,
+            "refundedAmount": 52,
+            "items": [{"productId": "386930698", "sku": "01101", "name": "BOSE Control Pod for Companion 5", "quantity": 1}],
+        },
+    )
+
+    assert record is not None
+    assert record.normalized_status == ReturnNormalizedStatus.RETURNED
+    assert record.refunded_amount == Decimal("52")
+    assert record.items[0].returned_qty == 1
+    assert record.items[0].refunded_amount == Decimal("52")
+
+
 def test_normalize_walmart_partial_cancellation():
     service = _build_service()
     record = service._normalize_walmart_order_record(

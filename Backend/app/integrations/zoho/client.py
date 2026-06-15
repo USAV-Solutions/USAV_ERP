@@ -701,9 +701,13 @@ class ZohoClient:
 
     async def create_sales_return(self, sales_return_data: dict) -> dict:
         """Create a sales return in Zoho."""
+        salesorder_id = str(sales_return_data.get("salesorder_id") or "").strip()
+        if not salesorder_id:
+            raise ValueError("salesorder_id is required to create a Zoho Sales Return")
         result = await self._request(
             "POST",
             "/salesreturns",
+            params={"salesorder_id": salesorder_id},
             data={"JSONString": json.dumps(sales_return_data)},
         )
         return result.get("salesreturn", {})

@@ -12,3 +12,4 @@ Defines Pydantic request/response schemas for Returns list/detail endpoints, mar
 - Keep frontend `frontend/src/types/returns.ts` aligned with these schemas.
 - `summary_counts` is part of the paginated list response because the Returns page needs status cards without a second endpoint.
 - Return list/detail responses now include `zoho_salesreturn_id`, `zoho_salesreturn_number`, `zoho_sync_status`, `zoho_sync_error`, and `zoho_synced_at`; frontend rows should not infer syncability without calling the Zoho validation endpoint.
+- Zoho validation line responses expose both `zoho_item_id` and `zoho_salesorder_item_id`; Sales Return create payloads need both IDs.

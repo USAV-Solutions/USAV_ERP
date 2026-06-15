@@ -802,7 +802,7 @@ class ReturnSyncService:
             and refunded_amount > Decimal("0")
         )
         raw_items = _coerce_list(raw.get("items"))
-        allocate_refund_to_single_line = is_refund_only and len(raw_items) == 1
+        allocate_refund_to_single_line = refunded_amount > Decimal("0") and len(raw_items) == 1
         items: list[NormalizedReturnItem] = []
         total_qty = 0
         for item in raw_items:

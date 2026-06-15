@@ -106,6 +106,7 @@ def _zoho_validation_response(result: ZohoReturnValidation) -> ReturnZohoValidat
                 return_item_id=item.return_item_id,
                 linked_order_item_id=item.linked_order_item_id,
                 quantity=item.quantity,
+                zoho_item_id=item.zoho_item_id,
                 zoho_salesorder_item_id=item.zoho_salesorder_item_id,
                 status=item.status,
                 message=item.message,

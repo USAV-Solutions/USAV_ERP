@@ -54,6 +54,7 @@ class ReturnZohoLineValidationResponse(BaseModel):
     return_item_id: int
     linked_order_item_id: Optional[int] = None
     quantity: int = 0
+    zoho_item_id: Optional[str] = None
     zoho_salesorder_item_id: Optional[str] = None
     status: ReturnZohoSyncStatus
     message: Optional[str] = None

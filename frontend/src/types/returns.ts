@@ -130,6 +130,7 @@ export interface ReturnZohoLineValidationResponse {
   return_item_id: number
   linked_order_item_id: number | null
   quantity: number
+  zoho_item_id: string | null
   zoho_salesorder_item_id: string | null
   status: ReturnZohoSyncStatus
   message: string | null
