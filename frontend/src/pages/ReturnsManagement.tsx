@@ -40,6 +40,7 @@ import {
   getReturnRecord,
   getReturnSyncStatus,
   listReturns,
+  syncReturnToZoho,
   syncReturns,
   syncReturnsRange,
 } from '../api/returns'
@@ -51,6 +52,8 @@ import type {
   ReturnRecordDetail,
   ReturnSyncResponse,
   ReturnSyncStatusResponse,
+  ReturnZohoSyncStatus,
+  ReturnZohoValidationResponse,
 } from '../types/returns'
 
 const PLATFORM_LABELS: Record<ReturnPlatform, string> = {
@@ -85,6 +88,18 @@ const STATUS_COLORS: Record<ReturnNormalizedStatus, 'default' | 'success' | 'war
   UNKNOWN: 'default',
 }
 
+const ZOHO_SYNC_COLORS: Record<ReturnZohoSyncStatus, 'default' | 'success' | 'warning' | 'error' | 'info'> = {
+  PENDING: 'default',
+  READY_TO_SYNC: 'info',
+  MISSING_LOCAL_ORDER: 'warning',
+  MISSING_ZOHO_ORDER: 'warning',
+  MISSING_LINE_ITEM_MAPPING: 'warning',
+  QUANTITY_CONFLICT: 'warning',
+  ALREADY_SYNCED: 'success',
+  SYNCED: 'success',
+  ERROR: 'error',
+}
+
 const SYNC_PLATFORM_OPTIONS = [
   { value: '', label: 'All Configured Platforms' },
   { value: 'ECWID', label: 'Ecwid' },
@@ -106,6 +121,10 @@ function formatDateTime(value: string | null): string {
 function formatMoney(amount: string, currency: string): string {
   const numeric = Number(amount || 0)
   return `${currency} ${numeric.toFixed(2)}`
+}
+
+function formatStatusLabel(value: string): string {
+  return value.replace(/_/g, ' ')
 }
 
 function SummaryCards({ counts, total }: { counts: Record<string, number>; total: number }) {
@@ -154,6 +173,8 @@ export default function ReturnsManagement() {
   const [syncDialogOpen, setSyncDialogOpen] = useState(false)
   const [syncPlatform, setSyncPlatform] = useState('')
   const [syncResults, setSyncResults] = useState<ReturnSyncResponse[] | null>(null)
+  const [singleZohoResult, setSingleZohoResult] = useState<ReturnZohoValidationResponse | null>(null)
+  const [syncingZohoReturnId, setSyncingZohoReturnId] = useState<number | null>(null)
 
   const [rangeDialogOpen, setRangeDialogOpen] = useState(false)
   const [rangePlatform, setRangePlatform] = useState('')
@@ -229,6 +250,20 @@ export default function ReturnsManagement() {
     },
   })
 
+  const zohoSyncMutation = useMutation({
+    mutationFn: (recordId: number) => {
+      setSyncingZohoReturnId(recordId)
+      return syncReturnToZoho(recordId)
+    },
+    onSuccess: (data) => {
+      setSingleZohoResult(data)
+      void queryClient.invalidateQueries({ queryKey: ['returns'] })
+      void queryClient.invalidateQueries({ queryKey: ['returns-sync-status'] })
+      void queryClient.invalidateQueries({ queryKey: ['return-record', data.record_id] })
+    },
+    onSettled: () => setSyncingZohoReturnId(null),
+  })
+
   const syncAlerts = useMemo(
     () => (syncStatusQuery.data?.platforms || []).filter((entry) => entry.current_status === 'ERROR'),
     [syncStatusQuery.data],
@@ -267,6 +302,23 @@ export default function ReturnsManagement() {
         <SummaryCards counts={returnsQuery.data?.summary_counts || {}} total={returnsQuery.data?.total || 0} />
       </Box>
 
+      {singleZohoResult ? (
+        <Alert
+          severity={singleZohoResult.status === 'SYNCED' || singleZohoResult.status === 'ALREADY_SYNCED' ? 'success' : 'warning'}
+          sx={{ mb: 2 }}
+          onClose={() => setSingleZohoResult(null)}
+        >
+          Return {singleZohoResult.record_id}: {formatStatusLabel(singleZohoResult.status)}
+          {singleZohoResult.zoho_salesreturn_number ? ` (${singleZohoResult.zoho_salesreturn_number})` : ''}
+          {singleZohoResult.blockers.length ? ` - ${singleZohoResult.blockers.join('; ')}` : ''}
+        </Alert>
+      ) : null}
+      {zohoSyncMutation.isError ? (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => zohoSyncMutation.reset()}>
+          {(zohoSyncMutation.error as Error).message}
+        </Alert>
+      ) : null}
+
       <Paper sx={{ p: 2, mb: 2 }}>
         <Grid container spacing={2}>
           <Grid item xs={12} md={3}>
@@ -289,7 +341,7 @@ export default function ReturnsManagement() {
               <Select value={statusFilter} label="Status" onChange={(e) => setStatusFilter(e.target.value as ReturnNormalizedStatus | '')}>
                 <MenuItem value="">All</MenuItem>
                 {STATUS_OPTIONS.map((value) => (
-                  <MenuItem key={value} value={value}>{value.replaceAll('_', ' ')}</MenuItem>
+                  <MenuItem key={value} value={value}>{formatStatusLabel(value)}</MenuItem>
                 ))}
               </Select>
             </FormControl>
@@ -348,6 +400,8 @@ export default function ReturnsManagement() {
                 <TableCell align="right">Refunded</TableCell>
                 <TableCell align="right">Returned Qty</TableCell>
                 <TableCell align="right">Cancelled Qty</TableCell>
+                <TableCell>Zoho</TableCell>
+                <TableCell align="right">Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -364,7 +418,7 @@ export default function ReturnsManagement() {
                       <TableCell>{formatDateTime(row.event_at)}</TableCell>
                       <TableCell>{PLATFORM_LABELS[row.platform]}</TableCell>
                       <TableCell>
-                        <Chip size="small" label={row.normalized_status.replaceAll('_', ' ')} color={STATUS_COLORS[row.normalized_status]} />
+                        <Chip size="small" label={formatStatusLabel(row.normalized_status)} color={STATUS_COLORS[row.normalized_status]} />
                       </TableCell>
                       <TableCell>{row.external_order_id}</TableCell>
                       <TableCell>{row.external_return_id || '—'}</TableCell>
@@ -375,9 +429,36 @@ export default function ReturnsManagement() {
                       <TableCell align="right">{formatMoney(row.refunded_amount, row.currency)}</TableCell>
                       <TableCell align="right">{row.returned_qty_total}</TableCell>
                       <TableCell align="right">{row.cancelled_qty_total}</TableCell>
+                      <TableCell>
+                        <Stack spacing={0.5}>
+                          <Chip
+                            size="small"
+                            label={formatStatusLabel(row.zoho_sync_status)}
+                            color={ZOHO_SYNC_COLORS[row.zoho_sync_status]}
+                          />
+                          {row.zoho_salesreturn_number ? (
+                            <Typography variant="caption" color="text.secondary">{row.zoho_salesreturn_number}</Typography>
+                          ) : null}
+                        </Stack>
+                      </TableCell>
+                      <TableCell align="right">
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={syncingZohoReturnId === row.id ? <CircularProgress size={16} /> : <Sync />}
+                          disabled={
+                            zohoSyncMutation.isPending ||
+                            row.zoho_sync_status === 'SYNCED' ||
+                            row.zoho_sync_status === 'ALREADY_SYNCED'
+                          }
+                          onClick={() => zohoSyncMutation.mutate(row.id)}
+                        >
+                          {syncingZohoReturnId === row.id ? 'Syncing...' : 'Sync to Zoho'}
+                        </Button>
+                      </TableCell>
                     </TableRow>
                     <TableRow>
-                      <TableCell colSpan={10} sx={{ py: 0, borderBottom: expanded ? undefined : 0 }}>
+                      <TableCell colSpan={12} sx={{ py: 0, borderBottom: expanded ? undefined : 0 }}>
                         <Collapse in={expanded} timeout="auto" unmountOnExit>
                           <Box sx={{ p: 2, bgcolor: 'grey.50' }}>
                             {detailQuery.isLoading && expanded ? (
@@ -389,6 +470,7 @@ export default function ReturnsManagement() {
                                   <Typography variant="body2"><strong>Source Status:</strong> {detailQuery.data.source_status || '—'}</Typography>
                                   <Typography variant="body2"><strong>Substatus:</strong> {detailQuery.data.source_substatus || '—'}</Typography>
                                   <Typography variant="body2"><strong>Linked Order ID:</strong> {detailQuery.data.linked_order_id || '—'}</Typography>
+                                  <Typography variant="body2"><strong>Zoho Error:</strong> {detailQuery.data.zoho_sync_error || '—'}</Typography>
                                 </Stack>
                                 <Table size="small">
                                   <TableHead>

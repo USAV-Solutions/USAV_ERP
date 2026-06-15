@@ -54,6 +54,7 @@ try:
         ReturnNormalizedStatus,
         ReturnRecord,
         ReturnSyncState,
+        ReturnZohoSyncStatus,
     )
 except ImportError as e:
     print(f"Failed to import from returns: {e}")
@@ -109,6 +110,7 @@ __all__ = [
     "OrderStatus",
     "OrderItemStatus",
     "ReturnNormalizedStatus",
+    "ReturnZohoSyncStatus",
     "ReturnSyncState",
     "ReturnRecord",
     "ReturnItem",

@@ -126,6 +126,7 @@ export const ORDERS = {
 export const RETURNS = {
   LIST: '/returns',
   RECORD: (id: number) => `/returns/${id}`,
+  ZOHO_SYNC_RECORD: (id: number) => `/returns/${id}/zoho/sync`,
   SYNC: '/returns/sync',
   SYNC_RANGE: '/returns/sync/range',
   SYNC_STATUS: '/returns/sync/status',
@@ -155,4 +156,12 @@ export const ACCOUNTING = {
   SALES_ORDER_REPORTS: '/accounting/reports/sales-orders',
   SALES_ORDER_REPORTS_EXPORT: '/accounting/reports/sales-orders/export',
   SALES_ORDER_REPORT_FILTER_OPTIONS: '/accounting/reports/sales-orders/filter-options',
+}
+
+export const BEST_SELLING_DASHBOARD = {
+  SUMMARY: '/dashboard/best-selling/summary',
+  PRODUCTS: '/dashboard/best-selling/products',
+  TRENDS: '/dashboard/best-selling/trends',
+  PLATFORM_BREAKDOWN: '/dashboard/best-selling/platform-breakdown',
+  PRODUCT: (sku: string) => `/dashboard/best-selling/products/${encodeURIComponent(sku)}`,
 }
