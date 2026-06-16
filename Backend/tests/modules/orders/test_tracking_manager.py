@@ -6,7 +6,13 @@ from sqlalchemy.engine.result import ScalarResult
 import app.models  # Pre-import to resolve circular dependencies
 from app.modules.orders.models import Order, OrderPlatform, OrderStatus, ShippingStatus
 from app.modules.orders.schemas.orders import OrderStatusUpdate, ShippingStatusUpdate
-from app.modules.orders.routes import update_order_status, update_shipping_status, _detect_carrier, _parse_tracking_csv
+from app.modules.orders.routes import (
+    update_order_status,
+    update_shipping_status,
+    _detect_carrier,
+    _parse_tracking_csv,
+    _parse_tracking_csv_excluding_fba,
+)
 
 
 def test_detect_carrier():
@@ -48,6 +54,33 @@ ECWID,4768,Joseph Jennings,Bracket,SKU3,1,,00732,9400150106151254121349,USED,
     assert rows[1]["platform"] == "ECWID"
     assert rows[1]["order_number"] == "4768"
     assert rows[1]["tracking"] == "9400150106151254121349"
+
+
+def test_parse_tracking_csv_skips_scientific_notation_tracking():
+    csv_text = """Platform,Order Number,Buyer Name,Item Title,USAV SKU,Quantity,Ship by date,Item Number,Tracking,Condition,Note
+Amazon,114-0294090-0548272,David Deane,Bose Wave,SKU1,1,6/8/2026,B0CYZ49F5D,9.36128967706487E+021,USED,Expedited
+ECWID,4768,Joseph Jennings,Bracket,SKU3,1,,00732,9400150106151254121349,USED,
+"""
+    rows, seen, skipped = _parse_tracking_csv(csv_text)
+
+    assert seen == 2
+    assert skipped == 1
+    assert len(rows) == 1
+    assert rows[0]["tracking"] == "9400150106151254121349"
+
+
+def test_parse_tracking_csv_excluding_fba_skips_scientific_notation_tracking():
+    csv_text = """Platform,Order Number,Buyer Name,Item Title,USAV SKU,Quantity,Ship by date,Item Number,Tracking,Condition,Note
+Amazon,113-0720540-1242637,cheddunbar,Bose Radio,,,6/15/2026,,9.36128967706487E+021,USED,
+eBay,21-14736-94321,Randas Computer,Bose Radio,,,6/12/2026,,9400108106245253747367,USED,
+"""
+    rows, seen, skipped, skipped_fba = _parse_tracking_csv_excluding_fba(csv_text)
+
+    assert seen == 2
+    assert skipped == 1
+    assert skipped_fba == 0
+    assert len(rows) == 1
+    assert rows[0]["tracking"] == "9400108106245253747367"
 
 
 @pytest.mark.asyncio

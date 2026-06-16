@@ -25,6 +25,7 @@ SKU Resolution
 import csv
 import io
 import logging
+import re
 from pathlib import Path
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -792,6 +793,19 @@ def _detect_carrier(tracking_number: str) -> str:
     return "USPS"  # default fallback
 
 
+def _clean_tracking_number(tracking_number: str) -> str | None:
+    """
+    Normalize tracking text from spreadsheet exports.
+
+    Scientific notation means Google Sheets treated the tracking as a number,
+    which can lose exact digits. Skip it instead of saving a corrupted value.
+    """
+    tracking = tracking_number.strip()
+    if re.fullmatch(r"[+-]?\d+(?:\.\d+)?[eE][+-]?\d+", tracking):
+        return None
+    return re.sub(r"\s+", "", tracking)
+
+
 async def _process_tracking_import_rows(
     db: AsyncSession,
     rows: list[dict]
@@ -920,6 +934,11 @@ def _parse_tracking_csv(file_text: str) -> tuple[list[dict], int, int]:
             rows_skipped += 1
             continue
 
+        tracking_clean = _clean_tracking_number(tracking)
+        if not tracking_clean:
+            rows_skipped += 1
+            continue
+
         # Ignore orders that are empty
         if not order_number:
             rows_skipped += 1
@@ -928,7 +947,7 @@ def _parse_tracking_csv(file_text: str) -> tuple[list[dict], int, int]:
         parsed_rows.append({
             "platform": platform,
             "order_number": order_number,
-            "tracking": tracking,
+            "tracking": tracking_clean,
         })
 
     return parsed_rows, rows_seen, rows_skipped
@@ -1383,7 +1402,6 @@ def _parse_tracking_csv_excluding_fba(file_text: str) -> tuple[list[dict], int, 
     Parse daily Google Sheet tracking summary CSV.
     Stops parsing when FBA divider section is encountered, or skips FBA rows.
     """
-    import re
     reader = csv.reader(io.StringIO(file_text))
     rows_seen = 0
     rows_skipped = 0
@@ -1447,8 +1465,10 @@ def _parse_tracking_csv_excluding_fba(file_text: str) -> tuple[list[dict], int, 
             rows_skipped += 1
             continue
 
-        # Clean tracking number (remove spaces)
-        tracking_clean = re.sub(r"\s+", "", tracking)
+        tracking_clean = _clean_tracking_number(tracking)
+        if not tracking_clean:
+            rows_skipped += 1
+            continue
 
         parsed_rows.append({
             "platform": platform,

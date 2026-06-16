@@ -8,7 +8,7 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.modules.orders.models import OrderPlatform
-from app.modules.returns.models import ReturnNormalizedStatus
+from app.modules.returns.models import ReturnNormalizedStatus, ReturnZohoSyncStatus
 
 
 class ReturnItemDetail(BaseModel):
@@ -46,6 +46,11 @@ class ReturnRecordBrief(BaseModel):
     order_total_amount: Decimal
     refunded_amount: Decimal
     currency: str
+    zoho_salesreturn_id: Optional[str] = None
+    zoho_salesreturn_number: Optional[str] = None
+    zoho_sync_status: ReturnZohoSyncStatus = ReturnZohoSyncStatus.PENDING
+    zoho_sync_error: Optional[str] = None
+    zoho_synced_at: Optional[datetime] = None
     item_count: int = 0
     returned_qty_total: int = 0
     cancelled_qty_total: int = 0

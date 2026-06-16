@@ -20,6 +20,17 @@ export type ReturnNormalizedStatus =
 
 export type ReturnIntegrationSyncStatus = 'IDLE' | 'SYNCING' | 'ERROR'
 
+export type ReturnZohoSyncStatus =
+  | 'PENDING'
+  | 'READY_TO_SYNC'
+  | 'MISSING_LOCAL_ORDER'
+  | 'MISSING_ZOHO_ORDER'
+  | 'MISSING_LINE_ITEM_MAPPING'
+  | 'QUANTITY_CONFLICT'
+  | 'ALREADY_SYNCED'
+  | 'SYNCED'
+  | 'ERROR'
+
 export interface ReturnItemDetail {
   id: number
   linked_order_item_id: number | null
@@ -56,6 +67,11 @@ export interface ReturnRecordBrief {
   item_count: number
   returned_qty_total: number
   cancelled_qty_total: number
+  zoho_salesreturn_id: string | null
+  zoho_salesreturn_number: string | null
+  zoho_sync_status: ReturnZohoSyncStatus
+  zoho_sync_error: string | null
+  zoho_synced_at: string | null
   created_at: string
   updated_at: string
 }
@@ -108,4 +124,24 @@ export interface ReturnSyncResponse {
   skipped_duplicates: number
   errors: string[]
   success: boolean
+}
+
+export interface ReturnZohoLineValidationResponse {
+  return_item_id: number
+  linked_order_item_id: number | null
+  quantity: number
+  zoho_item_id: string | null
+  zoho_salesorder_item_id: string | null
+  status: ReturnZohoSyncStatus
+  message: string | null
+}
+
+export interface ReturnZohoValidationResponse {
+  record_id: number
+  status: ReturnZohoSyncStatus
+  blockers: string[]
+  zoho_salesorder_id: string | null
+  zoho_salesreturn_id: string | null
+  zoho_salesreturn_number: string | null
+  line_items: ReturnZohoLineValidationResponse[]
 }

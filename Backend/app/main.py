@@ -19,6 +19,7 @@ from app.core.database import close_db, engine
 from app.modules.orders.routes import router as orders_router
 from app.modules.returns.routes import router as returns_router
 from app.modules.accounting.routes import router as accounting_router
+from app.modules.dashboard.routes import router as dashboard_router
 from app.modules.sync.endpoints import router as sync_router
 from app.integrations.zoho.webhooks import (
     register_webhook_handler,
@@ -184,6 +185,7 @@ app.include_router(get_api_router(), prefix=settings.api_prefix)
 app.include_router(orders_router, prefix=settings.api_prefix)
 app.include_router(returns_router, prefix=settings.api_prefix)
 app.include_router(accounting_router, prefix=settings.api_prefix)
+app.include_router(dashboard_router, prefix=settings.api_prefix)
 app.include_router(sync_router, prefix=settings.api_prefix)
 
 # Zoho webhooks live outside the API prefix so that Zoho's static

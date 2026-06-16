@@ -5,8 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.modules.orders.models import OrderPlatform
-from app.modules.returns.models import ReturnNormalizedStatus
+from app.models import OrderPlatform, ReturnNormalizedStatus
 from app.modules.returns.schemas.sync import ReturnSyncResponse
 from app.modules.returns.service import (
     NormalizedReturnItem,
@@ -153,4 +152,3 @@ def test_build_item_rows_leaves_links_null_without_order():
 
     assert linked_count == 0
     assert rows[0]["linked_order_item_id"] is None
-

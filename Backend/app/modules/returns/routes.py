@@ -20,12 +20,18 @@ from app.modules.returns.dependencies import (
     get_return_record_repo,
     get_return_service,
     get_return_sync_repo,
+    get_zoho_return_service,
 )
 from app.modules.returns.models import ReturnNormalizedStatus
 from app.modules.returns.schemas import (
     ReturnListResponse,
     ReturnRecordBrief,
     ReturnRecordDetail,
+    ReturnZohoLineValidationResponse,
+    ReturnZohoSyncRangeRequest,
+    ReturnZohoSyncRangeResponse,
+    ReturnZohoSyncStatusResponse,
+    ReturnZohoValidationResponse,
     ReturnSyncRangeRequest,
     ReturnSyncRequest,
     ReturnSyncResponse,
@@ -33,6 +39,7 @@ from app.modules.returns.schemas import (
     ReturnSyncStatusResponse,
 )
 from app.modules.returns.service import ReturnSyncService
+from app.modules.returns.zoho_sync import ZohoReturnValidation, ZohoReturnSyncService
 from app.repositories.returns.record_repository import ReturnRecordRepository
 from app.repositories.returns.sync_repository import ReturnSyncStateRepository
 
@@ -84,6 +91,29 @@ def _build_platform_clients() -> dict[str, BasePlatformClient]:
         )
 
     return clients
+
+
+def _zoho_validation_response(result: ZohoReturnValidation) -> ReturnZohoValidationResponse:
+    return ReturnZohoValidationResponse(
+        record_id=result.record_id,
+        status=result.status,
+        blockers=result.blockers,
+        zoho_salesorder_id=result.zoho_salesorder_id,
+        zoho_salesreturn_id=result.zoho_salesreturn_id,
+        zoho_salesreturn_number=result.zoho_salesreturn_number,
+        line_items=[
+            ReturnZohoLineValidationResponse(
+                return_item_id=item.return_item_id,
+                linked_order_item_id=item.linked_order_item_id,
+                quantity=item.quantity,
+                zoho_item_id=item.zoho_item_id,
+                zoho_salesorder_item_id=item.zoho_salesorder_item_id,
+                status=item.status,
+                message=item.message,
+            )
+            for item in result.line_items
+        ],
+    )
 
 
 @router.get("", response_model=ReturnListResponse)
@@ -151,6 +181,11 @@ async def list_returns(
                 order_total_amount=row.order_total_amount,
                 refunded_amount=row.refunded_amount,
                 currency=row.currency,
+                zoho_salesreturn_id=getattr(row, "zoho_salesreturn_id", None),
+                zoho_salesreturn_number=getattr(row, "zoho_salesreturn_number", None),
+                zoho_sync_status=getattr(row, "zoho_sync_status", None) or "PENDING",
+                zoho_sync_error=getattr(row, "zoho_sync_error", None),
+                zoho_synced_at=getattr(row, "zoho_synced_at", None),
                 item_count=len(row.items or []),
                 returned_qty_total=returned_qty_total,
                 cancelled_qty_total=cancelled_qty_total,
@@ -159,6 +194,69 @@ async def list_returns(
             )
         )
     return ReturnListResponse(total=total, skip=skip, limit=limit, items=items, summary_counts=summary_counts)
+
+
+@router.post("/{record_id}/zoho/validate", response_model=ReturnZohoValidationResponse)
+async def validate_return_for_zoho(
+    record_id: int,
+    _admin: AdminUser,
+    service: ZohoReturnSyncService = Depends(get_zoho_return_service),
+):
+    try:
+        result = await service.validate_return_for_zoho(record_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return _zoho_validation_response(result)
+
+
+@router.post("/{record_id}/zoho/sync", response_model=ReturnZohoValidationResponse)
+async def sync_return_to_zoho(
+    record_id: int,
+    _admin: AdminUser,
+    service: ZohoReturnSyncService = Depends(get_zoho_return_service),
+):
+    try:
+        result = await service.sync_return_to_zoho(record_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return _zoho_validation_response(result)
+
+
+@router.post("/zoho/sync/range", response_model=ReturnZohoSyncRangeResponse)
+async def sync_returns_to_zoho_range(
+    body: ReturnZohoSyncRangeRequest,
+    _admin: AdminUser,
+    service: ZohoReturnSyncService = Depends(get_zoho_return_service),
+):
+    results = await service.sync_eligible_returns_to_zoho(
+        platform=body.platform,
+        since=body.since,
+        until=body.until,
+        limit=body.limit,
+    )
+    responses = [_zoho_validation_response(result) for result in results]
+    return ReturnZohoSyncRangeResponse(
+        total=len(responses),
+        synced=sum(1 for item in responses if item.status.value == "SYNCED"),
+        blocked=sum(
+            1
+            for item in responses
+            if item.status.value
+            in {"MISSING_LOCAL_ORDER", "MISSING_ZOHO_ORDER", "MISSING_LINE_ITEM_MAPPING", "QUANTITY_CONFLICT"}
+        ),
+        failed=sum(1 for item in responses if item.status.value == "ERROR"),
+        items=responses,
+    )
+
+
+@router.get("/zoho/sync/status", response_model=ReturnZohoSyncStatusResponse)
+async def zoho_sync_status(
+    service: ZohoReturnSyncService = Depends(get_zoho_return_service),
+):
+    return ReturnZohoSyncStatusResponse(
+        total_records=await service.count_returns(),
+        counts_by_status=await service.count_by_zoho_status(),
+    )
 
 
 @router.get("/{record_id}", response_model=ReturnRecordDetail)

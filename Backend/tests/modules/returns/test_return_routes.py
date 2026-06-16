@@ -5,8 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.modules.orders.models import OrderPlatform
-from app.modules.returns.models import ReturnNormalizedStatus
+from app.models import OrderPlatform, ReturnNormalizedStatus
 from app.modules.returns.routes import list_returns, sync_status
 
 

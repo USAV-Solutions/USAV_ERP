@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.modules.returns.service import ReturnSyncService
+from app.modules.returns.zoho_sync import ZohoReturnSyncService
 from app.repositories.orders.order_repository import OrderRepository
 from app.repositories.returns.record_repository import ReturnRecordRepository
 from app.repositories.returns.sync_repository import ReturnSyncStateRepository
@@ -32,3 +33,7 @@ async def get_return_service(
         record_repo=record_repo,
         order_repo=order_repo,
     )
+
+
+async def get_zoho_return_service(db: AsyncSession = Depends(get_db)) -> ZohoReturnSyncService:
+    return ZohoReturnSyncService(session=db)

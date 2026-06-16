@@ -45,6 +45,18 @@ class ReturnNormalizedStatus(str, enum.Enum):
     UNKNOWN = "UNKNOWN"
 
 
+class ReturnZohoSyncStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    READY_TO_SYNC = "READY_TO_SYNC"
+    MISSING_LOCAL_ORDER = "MISSING_LOCAL_ORDER"
+    MISSING_ZOHO_ORDER = "MISSING_ZOHO_ORDER"
+    MISSING_LINE_ITEM_MAPPING = "MISSING_LINE_ITEM_MAPPING"
+    QUANTITY_CONFLICT = "QUANTITY_CONFLICT"
+    ALREADY_SYNCED = "ALREADY_SYNCED"
+    SYNCED = "SYNCED"
+    ERROR = "ERROR"
+
+
 class ReturnSyncState(Base, TimestampMixin):
     __tablename__ = "return_sync_state"
 
@@ -99,6 +111,16 @@ class ReturnRecord(Base, TimestampMixin):
     refunded_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, server_default="0")
     currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="USD")
     raw_payload: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    zoho_salesreturn_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    zoho_salesreturn_number: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    zoho_sync_status: Mapped[ReturnZohoSyncStatus] = mapped_column(
+        Enum(ReturnZohoSyncStatus, name="return_zoho_sync_status_enum", create_constraint=False),
+        nullable=False,
+        default=ReturnZohoSyncStatus.PENDING,
+        server_default=ReturnZohoSyncStatus.PENDING.value,
+    )
+    zoho_sync_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    zoho_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     linked_order: Mapped[Optional["Order"]] = relationship("Order", lazy="selectin")
     items: Mapped[list["ReturnItem"]] = relationship(
@@ -118,6 +140,8 @@ class ReturnRecord(Base, TimestampMixin):
         Index("ix_return_record_event_at", "event_at"),
         Index("ix_return_record_ordered_at", "ordered_at"),
         Index("ix_return_record_linked_order_id", "linked_order_id"),
+        Index("ix_return_record_zoho_salesreturn_id", "zoho_salesreturn_id"),
+        Index("ix_return_record_zoho_sync_status", "zoho_sync_status"),
     )
 
 

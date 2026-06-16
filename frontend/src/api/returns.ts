@@ -9,6 +9,7 @@ import type {
   ReturnSyncRequest,
   ReturnSyncResponse,
   ReturnSyncStatusResponse,
+  ReturnZohoValidationResponse,
 } from '../types/returns'
 
 export interface ListReturnsParams {
@@ -64,5 +65,10 @@ export async function syncReturns(body: ReturnSyncRequest = {}): Promise<ReturnS
 
 export async function syncReturnsRange(body: ReturnSyncRangeRequest): Promise<ReturnSyncResponse[]> {
   const { data } = await axiosClient.post<ReturnSyncResponse[]>(RETURNS.SYNC_RANGE, body)
+  return data
+}
+
+export async function syncReturnToZoho(recordId: number): Promise<ReturnZohoValidationResponse> {
+  const { data } = await axiosClient.post<ReturnZohoValidationResponse>(RETURNS.ZOHO_SYNC_RECORD(recordId))
   return data
 }
