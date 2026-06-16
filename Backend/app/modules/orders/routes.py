@@ -1501,7 +1501,7 @@ async def import_tracking_from_link(
         )
     
     spreadsheet_id = match.group(1)
-    gid_match = re.search(r"[#&]gid=([0-9]+)", sheet_url)
+    gid_match = re.search(r"[#&?]gid=([0-9]+)", sheet_url)
     gid_param = f"&gid={gid_match.group(1)}" if gid_match else ""
     csv_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=csv{gid_param}"
 
