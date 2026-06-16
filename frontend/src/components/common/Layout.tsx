@@ -35,8 +35,8 @@ import {
   AssignmentReturn,
   ExpandLess,
   ExpandMore,
-  PlaylistAdd,
   QrCodeScanner,
+  Add as AddIcon,
 } from '@mui/icons-material'
 import { useAuth } from '../../hooks/useAuth'
 
@@ -61,7 +61,7 @@ const navItems: NavItem[] = [
     roles: ['ADMIN', 'SALES_REP'],
     children: [
       { title: 'Active Listings', path: '/catalog/listings/active', icon: <Storefront />, roles: ['ADMIN', 'SALES_REP'] },
-      { title: 'Create New Listing', path: '/catalog/listings/create', icon: <PlaylistAdd />, roles: ['ADMIN', 'SALES_REP'] },
+      { title: 'Create New Listing', path: '/catalog/listings/create', icon: <AddIcon />, roles: ['ADMIN', 'SALES_REP'] },
     ],
   },
   { title: 'Orders', path: '/orders', icon: <ShoppingCart />, roles: ['ADMIN', 'SALES_REP', 'WAREHOUSE_OP'] },

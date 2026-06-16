@@ -7,7 +7,7 @@ import WarehouseOps from './pages/WarehouseOps'
 import WarehouseScan from './pages/WarehouseScan'
 import InventoryManagement from './pages/InventoryManagement'
 import ProductListings from './pages/ProductListings'
-import CreateProductListing from './pages/CreateProductListing'
+import CreateEbayListing from './pages/CreateEbayListing'
 import OrdersManagement from './pages/OrdersManagement'
 import ReturnsManagement from './pages/ReturnsManagement'
 import PurchasingManagement from './pages/PurchasingManagement'
@@ -48,9 +48,8 @@ function App() {
         {/* Catalog Routes */}
         <Route element={<RoleGuard allowedRoles={['ADMIN', 'SALES_REP']} />}>
           <Route path="/catalog/inventory" element={<InventoryManagement />} />
-          <Route path="/catalog/listings" element={<Navigate to="/catalog/listings/active" replace />} />
           <Route path="/catalog/listings/active" element={<ProductListings />} />
-          <Route path="/catalog/listings/create" element={<CreateProductListing />} />
+          <Route path="/catalog/listings/create" element={<CreateEbayListing />} />
         </Route>
 
         {/* Orders Routes */}

@@ -1,4 +1,4 @@
-﻿# Backend\app\modules\inventory
+# Backend\app\modules\inventory
 
 ## What This Folder Does
 Inventory/catalog domain: items, variants, identities, listings, images, and lookups.
@@ -10,6 +10,7 @@ Inventory/catalog domain: items, variants, identities, listings, images, and loo
 ## Common Pitfalls
 - Editing this folder without checking sibling tests and schema/type contracts.
 - Making cross-layer changes here but forgetting migration/frontend alignment.
+- For eBay endpoints to work properly, `ebay-accounts.json` must be present in the root of the `Backend` folder.
 
 ## Child Folders
 - `routes/`
