@@ -132,10 +132,12 @@ export const ORDERS = {
 export const RETURNS = {
   LIST: '/returns',
   RECORD: (id: number) => `/returns/${id}`,
+  REMATCH_RECORD: (id: number) => `/returns/${id}/rematch`,
   ZOHO_SYNC_RECORD: (id: number) => `/returns/${id}/zoho/sync`,
   SYNC: '/returns/sync',
   SYNC_RANGE: '/returns/sync/range',
   SYNC_STATUS: '/returns/sync/status',
+  IMPORT_AMAZON_CSV: '/returns/import-amazon-csv',
 }
 
 // Purchasing endpoints

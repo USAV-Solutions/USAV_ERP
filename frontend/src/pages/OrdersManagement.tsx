@@ -126,6 +126,8 @@ const SHIPPING_STATUS_OPTIONS: ShippingStatus[] = [
   'PACKED',
   'SHIPPING',
   'DELIVERED',
+  'RETURNED',
+  'REFUNDED',
 ]
 
 const SORT_BY_OPTIONS = [

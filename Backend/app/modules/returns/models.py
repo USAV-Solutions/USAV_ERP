@@ -29,7 +29,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.models.entities import TimestampMixin
-from app.modules.orders.models import IntegrationSyncStatus, OrderPlatform
+from app.modules.orders.models import IntegrationSyncStatus, OrderPlatform, OrderFulfillmentChannel
 
 if TYPE_CHECKING:
     from app.modules.orders.models import Order, OrderItem
@@ -43,6 +43,7 @@ class ReturnNormalizedStatus(str, enum.Enum):
     CANCELLED = "CANCELLED"
     PARTIALLY_CANCELLED = "PARTIALLY_CANCELLED"
     UNKNOWN = "UNKNOWN"
+    UNMATCHED_ORDER = "UNMATCHED_ORDER"
 
 
 class ReturnZohoSyncStatus(str, enum.Enum):
@@ -106,6 +107,12 @@ class ReturnRecord(Base, TimestampMixin):
     source_status: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     source_substatus: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    fulfillment_channel: Mapped[OrderFulfillmentChannel] = mapped_column(
+        Enum(OrderFulfillmentChannel, name="return_order_fulfillment_channel_enum", create_constraint=False),
+        nullable=False,
+        default=OrderFulfillmentChannel.SELF_FULFILLED,
+        server_default="SELF_FULFILLED",
+    )
 
     order_total_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, server_default="0")
     refunded_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, server_default="0")

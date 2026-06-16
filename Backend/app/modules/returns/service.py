@@ -12,12 +12,13 @@ from typing import Any, Optional, Sequence
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.integrations.base import BasePlatformClient
-from app.modules.orders.models import IntegrationSyncStatus, Order, OrderItem, OrderPlatform
+from app.modules.orders.models import IntegrationSyncStatus, Order, OrderItem, OrderPlatform, OrderFulfillmentChannel, OrderStatus
 from app.modules.returns.models import ReturnItem, ReturnNormalizedStatus, ReturnRecord, ReturnSyncState
 from app.modules.returns.schemas.sync import ReturnSyncResponse
 from app.repositories.orders.order_repository import OrderRepository
 from app.repositories.returns.record_repository import ReturnRecordRepository
 from app.repositories.returns.sync_repository import ReturnSyncStateRepository
+import csv
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,7 @@ class NormalizedReturnRecord:
     platform: OrderPlatform
     source: str
     normalized_status: ReturnNormalizedStatus
+    fulfillment_channel: OrderFulfillmentChannel = OrderFulfillmentChannel.SELF_FULFILLED
     external_return_id: Optional[str] = None
     customer_name: Optional[str] = None
     customer_email: Optional[str] = None
@@ -221,6 +223,151 @@ class ReturnSyncService:
             response.errors.append(f"{type(exc).__name__}: {exc}")
         return response
 
+    async def import_amazon_returns_csv(self, file_content: str) -> ReturnSyncResponse:
+        response = ReturnSyncResponse(platform="AMAZON")
+        reader = csv.DictReader(file_content.splitlines())
+        records = {}
+        for row in reader:
+            if row.get("order-status", "").strip().lower() != "cancelled":
+                continue
+            
+            amazon_order_id = row.get("amazon-order-id", "").strip()
+            if not amazon_order_id:
+                continue
+            
+            if amazon_order_id not in records:
+                fc = row.get("fulfillment-channel", "").strip().lower()
+                fulfillment_channel = OrderFulfillmentChannel.SELF_FULFILLED
+                if fc == "amazon":
+                    fulfillment_channel = OrderFulfillmentChannel.AMAZON_FBA
+
+                records[amazon_order_id] = NormalizedReturnRecord(
+                    external_record_key=amazon_order_id,
+                    external_order_id=amazon_order_id,
+                    platform=OrderPlatform.AMAZON,
+                    source="AMAZON_CSV",
+                    normalized_status=ReturnNormalizedStatus.CANCELLED,
+                    fulfillment_channel=fulfillment_channel,
+                    ordered_at=_parse_datetime(row.get("purchase-date")),
+                    event_at=_parse_datetime(row.get("last-updated-date")),
+                    currency=row.get("currency") or "USD",
+                    items=[],
+                    order_total_amount=Decimal("0"),
+                    refunded_amount=Decimal("0"),
+                )
+
+            item = NormalizedReturnItem(
+                external_item_id=row.get("order-item-id"),
+                external_sku=row.get("sku"),
+                item_name=row.get("product-name") or "Unknown",
+                ordered_qty=int(row.get("quantity") or 0),
+                cancelled_qty=int(row.get("quantity") or 0),
+                refunded_amount=Decimal(row.get("item-price") or "0") + Decimal(row.get("item-tax") or "0"),
+                payload=row,
+            )
+            records[amazon_order_id].items.append(item)
+            records[amazon_order_id].order_total_amount += item.refunded_amount
+            records[amazon_order_id].refunded_amount += item.refunded_amount
+
+        try:
+            await self._ingest_records(list(records.values()), response)
+            await self.session.commit()
+        except Exception as exc:
+            await self.session.rollback()
+            response.success = False
+            response.errors.append(f"{type(exc).__name__}: {exc}")
+        return response
+
+    async def rematch_record(self, record_id: int) -> ReturnRecord:
+        record = await self.record_repo.get_with_items(record_id)
+        if not record:
+            raise LookupError(f"Return record {record_id} not found")
+            
+        linked_order = await self._find_linked_order(record.platform, record.external_order_id)
+        if not linked_order:
+            record.normalized_status = ReturnNormalizedStatus.UNMATCHED_ORDER
+            await self.session.commit()
+            return record
+            
+        record.linked_order_id = linked_order.id
+
+        if not record.customer_name and linked_order.customer_name:
+            record.customer_name = linked_order.customer_name
+        if not record.customer_email and linked_order.customer_email:
+            record.customer_email = linked_order.customer_email
+        if not record.currency and linked_order.currency:
+            record.currency = linked_order.currency
+        
+        # Determine the correct status to update the order with
+        # If record.normalized_status is UNMATCHED_ORDER, we might not have the original status easily, 
+        # but we can try to recalculate or just use the simplest assumption.
+        # However, to be safe, if we have raw_payload, we could ideally re-normalize.
+        # For simplicity, we just use the current status map if it's not UNMATCHED_ORDER, 
+        # or rely on the UI/sync to have the correct status in source_status.
+        
+        # Instead of guessing, let's look at source_status.
+        # But to be robust, we can just do a basic map from source_status or reason if normalized_status is UNMATCHED_ORDER
+        # However, if normalized_status is UNMATCHED_ORDER, it means it was previously unmatched. 
+        # It's better if we didn't overwrite normalized_status with UNMATCHED_ORDER, but we did.
+        # So let's re-guess it from refunded_amount or cancelled_qty_total
+        returned_qty = sum(item.returned_qty for item in record.items)
+        cancelled_qty = sum(item.cancelled_qty for item in record.items)
+        
+        assumed_status = record.normalized_status
+        if assumed_status == ReturnNormalizedStatus.UNMATCHED_ORDER:
+            if returned_qty > 0:
+                assumed_status = ReturnNormalizedStatus.RETURNED
+            elif cancelled_qty > 0:
+                assumed_status = ReturnNormalizedStatus.CANCELLED
+            elif record.refunded_amount > Decimal("0"):
+                assumed_status = ReturnNormalizedStatus.REFUNDED
+            else:
+                assumed_status = ReturnNormalizedStatus.RETURNED
+            record.normalized_status = assumed_status
+
+        status_map = {
+            ReturnNormalizedStatus.RETURNED: OrderStatus.RETURN,
+            ReturnNormalizedStatus.PARTIALLY_RETURNED: OrderStatus.RETURN,
+            ReturnNormalizedStatus.REFUNDED: OrderStatus.REFUNDED,
+            ReturnNormalizedStatus.PARTIALLY_REFUNDED: OrderStatus.PARTIALLY_REFUNDED,
+            ReturnNormalizedStatus.CANCELLED: OrderStatus.CANCELLED,
+            ReturnNormalizedStatus.PARTIALLY_CANCELLED: OrderStatus.CANCELLED,
+        }
+        new_status = status_map.get(record.normalized_status)
+        if new_status:
+            linked_order.status = new_status
+            
+        # Also re-link items
+        _, linked_items_count = self._build_item_rows(
+            linked_order, 
+            [NormalizedReturnItem(
+                external_item_id=item.external_item_id,
+                external_sku=item.external_sku,
+                item_name=item.item_name,
+                ordered_qty=item.ordered_qty,
+                returned_qty=item.returned_qty,
+                cancelled_qty=item.cancelled_qty,
+                refunded_amount=item.refunded_amount,
+                payload=item.item_payload
+            ) for item in record.items]
+        )
+        
+        # Link order items properly
+        for item in record.items:
+            linked_item = self._link_order_item(
+                linked_order,
+                NormalizedReturnItem(
+                    external_item_id=item.external_item_id,
+                    external_sku=item.external_sku,
+                    item_name=item.item_name,
+                )
+            )
+            if linked_item:
+                item.linked_order_item_id = linked_item.id
+
+        await self.session.commit()
+        return record
+
     async def _ensure_sync_state(self, platform_name: str) -> None:
         if await self.sync_repo.get_by_platform(platform_name):
             return
@@ -249,8 +396,31 @@ class ReturnSyncService:
     ) -> str:
         linked_order = await self._find_linked_order(record.platform, record.external_order_id)
         linked_order_id = linked_order.id if linked_order else None
+        
+        if linked_order:
+            if not record.customer_name and linked_order.customer_name:
+                record.customer_name = linked_order.customer_name
+            if not record.customer_email and linked_order.customer_email:
+                record.customer_email = linked_order.customer_email
+            if not record.currency and linked_order.currency:
+                record.currency = linked_order.currency
+
         if linked_order_id is not None:
             response.linked_orders += 1
+            
+            status_map = {
+                ReturnNormalizedStatus.RETURNED: OrderStatus.RETURN,
+                ReturnNormalizedStatus.PARTIALLY_RETURNED: OrderStatus.RETURN,
+                ReturnNormalizedStatus.REFUNDED: OrderStatus.REFUNDED,
+                ReturnNormalizedStatus.PARTIALLY_REFUNDED: OrderStatus.PARTIALLY_REFUNDED,
+                ReturnNormalizedStatus.CANCELLED: OrderStatus.CANCELLED,
+                ReturnNormalizedStatus.PARTIALLY_CANCELLED: OrderStatus.CANCELLED,
+            }
+            new_status = status_map.get(record.normalized_status)
+            if new_status:
+                linked_order.status = new_status
+        else:
+            record.normalized_status = ReturnNormalizedStatus.UNMATCHED_ORDER
 
         item_rows, linked_items = self._build_item_rows(linked_order, record.items)
         response.linked_items += linked_items
@@ -271,6 +441,7 @@ class ReturnSyncService:
             "source_status": record.source_status,
             "source_substatus": record.source_substatus,
             "reason": record.reason,
+            "fulfillment_channel": record.fulfillment_channel,
             "order_total_amount": record.order_total_amount,
             "refunded_amount": record.refunded_amount,
             "currency": record.currency,
@@ -322,6 +493,10 @@ class ReturnSyncService:
             linked_order_item = self._link_order_item(order, item)
             if linked_order_item is not None:
                 linked_count += 1
+                if not item.item_name or item.item_name == "Unknown" or item.item_name == "Unknown Item":
+                    item.item_name = linked_order_item.item_name
+                if not item.external_sku and linked_order_item.external_sku:
+                    item.external_sku = linked_order_item.external_sku
             rows.append(
                 {
                     "linked_order_item_id": linked_order_item.id if linked_order_item else None,
@@ -361,6 +536,9 @@ class ReturnSyncService:
             "normalized_status": payload["normalized_status"].value
             if hasattr(payload["normalized_status"], "value")
             else str(payload["normalized_status"]),
+            "fulfillment_channel": payload.get("fulfillment_channel").value
+            if hasattr(payload.get("fulfillment_channel"), "value")
+            else str(payload.get("fulfillment_channel")),
             "order_total_amount": str(_to_decimal(payload["order_total_amount"])),
             "refunded_amount": str(_to_decimal(payload["refunded_amount"])),
             "items": [
@@ -403,6 +581,7 @@ class ReturnSyncService:
             "source_status": existing.source_status,
             "source_substatus": existing.source_substatus,
             "reason": existing.reason,
+            "fulfillment_channel": existing.fulfillment_channel,
             "order_total_amount": existing.order_total_amount,
             "refunded_amount": existing.refunded_amount,
             "currency": existing.currency,

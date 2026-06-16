@@ -57,6 +57,8 @@ export type ShippingStatus =
   | 'PACKED'
   | 'SHIPPING'
   | 'DELIVERED'
+  | 'RETURNED'
+  | 'REFUNDED'
 
 export type IntegrationSyncStatus = 'IDLE' | 'SYNCING' | 'ERROR'
 export type ZohoSyncStatus = 'PENDING' | 'SYNCED' | 'ERROR' | 'DIRTY'

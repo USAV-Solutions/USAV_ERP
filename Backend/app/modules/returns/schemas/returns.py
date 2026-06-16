@@ -7,7 +7,7 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.modules.orders.models import OrderPlatform
+from app.modules.orders.models import OrderPlatform, OrderFulfillmentChannel
 from app.modules.returns.models import ReturnNormalizedStatus, ReturnZohoSyncStatus
 
 
@@ -43,6 +43,7 @@ class ReturnRecordBrief(BaseModel):
     source_status: Optional[str] = None
     source_substatus: Optional[str] = None
     reason: Optional[str] = None
+    fulfillment_channel: OrderFulfillmentChannel
     order_total_amount: Decimal
     refunded_amount: Decimal
     currency: str

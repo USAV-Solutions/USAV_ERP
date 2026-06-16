@@ -82,11 +82,14 @@ import TablePaginationWithPageJump from '../components/common/TablePaginationWit
 import OrderSummaryCards from '../components/common/OrderSummaryCards'
 import type { VariantSearchResult } from '../types/orders'
 
-const statusColor = {
+const statusColor: Record<PurchaseDeliverStatus, 'default' | 'success' | 'warning' | 'error' | 'info'> = {
   CREATED: 'default',
   BILLED: 'warning',
   DELIVERED: 'success',
-} as const
+  CANCELLED: 'error',
+  RETURNED: 'warning',
+  REFUNDED: 'info',
+}
 
 const itemStatusColor = {
   UNMATCHED: 'error',
@@ -1757,6 +1760,9 @@ export default function PurchasingManagement() {
                 <MenuItem value="CREATED">CREATED</MenuItem>
                 <MenuItem value="BILLED">BILLED</MenuItem>
                 <MenuItem value="DELIVERED">DELIVERED</MenuItem>
+                <MenuItem value="CANCELLED">CANCELLED</MenuItem>
+                <MenuItem value="RETURNED">RETURNED</MenuItem>
+                <MenuItem value="REFUNDED">REFUNDED</MenuItem>
               </Select>
             </FormControl>
             <TextField
@@ -1973,6 +1979,9 @@ export default function PurchasingManagement() {
                 <MenuItem value="CREATED">CREATED</MenuItem>
                 <MenuItem value="BILLED">BILLED</MenuItem>
                 <MenuItem value="DELIVERED">DELIVERED</MenuItem>
+                <MenuItem value="CANCELLED">CANCELLED</MenuItem>
+                <MenuItem value="RETURNED">RETURNED</MenuItem>
+                <MenuItem value="REFUNDED">REFUNDED</MenuItem>
               </Select>
             </FormControl>
 

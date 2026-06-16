@@ -1,4 +1,4 @@
-export type PurchaseDeliverStatus = 'CREATED' | 'BILLED' | 'DELIVERED'
+export type PurchaseDeliverStatus = 'CREATED' | 'BILLED' | 'DELIVERED' | 'CANCELLED' | 'RETURNED' | 'REFUNDED'
 export type PurchaseOrderItemStatus = 'UNMATCHED' | 'MATCHED' | 'RECEIVED'
 export type ZohoSyncStatus = 'PENDING' | 'SYNCED' | 'ERROR' | 'DIRTY'
 

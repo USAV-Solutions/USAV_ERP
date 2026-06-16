@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AdminUser
@@ -15,7 +15,7 @@ from app.integrations.base import BasePlatformClient
 from app.integrations.ebay.client import EbayClient
 from app.integrations.ecwid.client import EcwidClient
 from app.integrations.walmart.client import WalmartClient
-from app.modules.orders.models import OrderPlatform
+from app.modules.orders.models import OrderPlatform, OrderFulfillmentChannel
 from app.modules.returns.dependencies import (
     get_return_record_repo,
     get_return_service,
@@ -118,10 +118,11 @@ def _zoho_validation_response(result: ZohoReturnValidation) -> ReturnZohoValidat
 
 @router.get("", response_model=ReturnListResponse)
 async def list_returns(
-    skip: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=500)] = 50,
-    platform: Annotated[Optional[OrderPlatform], Query()] = None,
-    normalized_status: Annotated[Optional[str], Query()] = None,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=1000),
+    platform: Optional[OrderPlatform] = None,
+    fulfillment_channel: Optional[OrderFulfillmentChannel] = None,
+    normalized_status: Optional[ReturnNormalizedStatus] = None,
     source: Annotated[Optional[str], Query()] = None,
     ordered_at_from: Annotated[Optional[datetime], Query()] = None,
     ordered_at_to: Annotated[Optional[datetime], Query()] = None,
@@ -132,21 +133,12 @@ async def list_returns(
     search: Annotated[Optional[str], Query()] = None,
     record_repo: ReturnRecordRepository = Depends(get_return_record_repo),
 ):
-    status_filter = None
-    if normalized_status:
-        try:
-            status_filter = ReturnNormalizedStatus(normalized_status)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid return status: {normalized_status}",
-            ) from exc
-
     rows, total, summary_counts = await record_repo.list_records(
         skip=skip,
         limit=limit,
         platform=platform,
-        normalized_status=status_filter,
+        fulfillment_channel=fulfillment_channel,
+        normalized_status=normalized_status,
         source=source,
         ordered_at_from=ordered_at_from,
         ordered_at_to=ordered_at_to,
@@ -178,6 +170,7 @@ async def list_returns(
                 source_status=row.source_status,
                 source_substatus=row.source_substatus,
                 reason=row.reason,
+                fulfillment_channel=row.fulfillment_channel,
                 order_total_amount=row.order_total_amount,
                 refunded_amount=row.refunded_amount,
                 currency=row.currency,
@@ -249,6 +242,22 @@ async def sync_returns_to_zoho_range(
     )
 
 
+@router.post("/import-amazon-csv", response_model=ReturnSyncResponse)
+async def import_amazon_csv(
+    _admin: AdminUser,
+    file: UploadFile = File(...),
+    service: ReturnSyncService = Depends(get_return_service),
+):
+    try:
+        content = await file.read()
+        file_text = content.decode("utf-8-sig")
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file format") from exc
+
+    return await service.import_amazon_returns_csv(file_text)
+
+
+
 @router.get("/zoho/sync/status", response_model=ReturnZohoSyncStatusResponse)
 async def zoho_sync_status(
     service: ZohoReturnSyncService = Depends(get_zoho_return_service),
@@ -267,6 +276,24 @@ async def get_return_record(
     record = await record_repo.get_with_items(record_id)
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Return record {record_id} not found.")
+    detail = ReturnRecordDetail.model_validate(record)
+    detail.item_count = len(record.items or [])
+    detail.returned_qty_total = sum(int(item.returned_qty or 0) for item in record.items)
+    detail.cancelled_qty_total = sum(int(item.cancelled_qty or 0) for item in record.items)
+    return detail
+
+
+@router.post("/{record_id}/rematch", response_model=ReturnRecordDetail)
+async def rematch_return_record(
+    record_id: int,
+    _admin: AdminUser,
+    service: ReturnSyncService = Depends(get_return_service),
+):
+    try:
+        record = await service.rematch_record(record_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    
     detail = ReturnRecordDetail.model_validate(record)
     detail.item_count = len(record.items or [])
     detail.returned_qty_total = sum(int(item.returned_qty or 0) for item in record.items)
