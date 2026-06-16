@@ -4,6 +4,7 @@ import Login from './pages/Login'
 import SeaTalkCallback from './pages/SeaTalkCallback'
 import Dashboard from './pages/Dashboard'
 import WarehouseOps from './pages/WarehouseOps'
+import WarehouseScan from './pages/WarehouseScan'
 import InventoryManagement from './pages/InventoryManagement'
 import ProductListings from './pages/ProductListings'
 import CreateProductListing from './pages/CreateProductListing'
@@ -41,6 +42,7 @@ function App() {
         {/* Warehouse Routes */}
         <Route element={<RoleGuard allowedRoles={['ADMIN', 'WAREHOUSE_OP']} />}>
           <Route path="/warehouse/ops" element={<WarehouseOps />} />
+          <Route path="/scan" element={<WarehouseScan />} />
         </Route>
 
         {/* Catalog Routes */}

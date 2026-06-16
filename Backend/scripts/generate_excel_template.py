@@ -226,8 +226,8 @@ async def create_template():
     populate_sheet1(wb.active, orders, thin_border, header_font, header_fill)
     populate_sheet2(wb.create_sheet(title="Tracking Verification"), orders, thin_border, header_font)
 
-    # Save the file
-    filepath = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "USAV_Shipment_Tracking_Template.xlsx")
+    # Save the file in the misc directory
+    filepath = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "misc", "USAV_Shipment_Tracking_Template.xlsx")
     wb.save(filepath)
     print(f"📢 Template successfully generated at: {filepath}")
 

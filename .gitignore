@@ -116,3 +116,5 @@ mnt/
 misc/tmux-logs.txt
 misc/Ebay_Listing/*
 
+# Excel generated templates
+*.xlsx

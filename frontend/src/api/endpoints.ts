@@ -121,6 +121,9 @@ export const ORDERS = {
   MATCH_ITEM: (itemId: number) => `/orders/items/${itemId}/match`,
   CONFIRM_ITEM: (itemId: number) => `/orders/items/${itemId}/confirm`,
   REJECT_ITEM: (itemId: number) => `/orders/items/${itemId}/reject`,
+
+  // Physical Barcode Scans
+  SCANS: '/orders/scans',
 }
 
 export const RETURNS = {

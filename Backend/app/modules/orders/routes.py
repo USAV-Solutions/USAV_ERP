@@ -56,6 +56,7 @@ from app.modules.orders.models import (
     OrderPlatform,
     OrderStatus,
     ShippingStatus,
+    PhysicalScan,
 )
 from app.modules.orders.schemas.orders import (
     OrderBrief,
@@ -1486,13 +1487,14 @@ async def import_tracking_from_link(
 ):
     """
     Import tracking numbers directly from a Google Sheets URL.
-    Converts sheet view URL to CSV export format, downloads, and parses it.
+    Converts sheet view URL to CSV export format.
+    Automatically attempts to discover and import all tabs (worksheets) within the spreadsheet.
+    Falls back to importing the single specified tab or first tab if auto-discovery fails.
     """
     import httpx
     import re
 
     sheet_url = str(body.sheet_url)
-    # Convert standard Google Sheets URL to CSV export URL
     match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", sheet_url)
     if not match:
         raise HTTPException(
@@ -1501,46 +1503,165 @@ async def import_tracking_from_link(
         )
     
     spreadsheet_id = match.group(1)
-    gid_match = re.search(r"[#&]gid=([0-9]+)", sheet_url)
-    gid_param = f"&gid={gid_match.group(1)}" if gid_match else ""
-    csv_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=csv{gid_param}"
-
+    
+    # Step 1: Attempt auto-discovery of all tab GIDs in the spreadsheet by fetching HTML
+    gids = []
+    edit_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            headers = {'User-Agent': 'Mozilla/5.0'}
-            response = await client.get(csv_url, headers=headers, follow_redirects=True)
-            response.raise_for_status()
-            file_text = response.text
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            html_res = await client.get(edit_url, headers=headers, follow_redirects=True)
+            if html_res.status_code == 200:
+                pattern = r'\\"(?P<gid>\d{8,12})\\",\[\{\\"1\\":\[\[0,0,\\"(?P<title>[^"]+)\\"'
+                matches = re.findall(pattern, html_res.text)
+                if matches:
+                    # Deduplicate while preserving order
+                    seen_gids = set()
+                    for item in matches:
+                        gid = item[0]
+                        if gid not in seen_gids:
+                            seen_gids.add(gid)
+                            gids.append(gid)
+                    logger.info(f"Auto-discovered {len(gids)} tabs in spreadsheet {spreadsheet_id}: {gids}")
     except Exception as e:
-        logger.error(f"Failed to fetch Google Sheet: {e}", exc_info=True)
+        logger.warning(f"Google Sheets tab auto-discovery failed ({e}). Falling back to single tab import.")
+
+    # Step 2: Build the list of CSV URLs to fetch. If no GIDs discovered, fallback to URL parameter or default first tab.
+    csv_urls = []
+    if gids:
+        for gid in gids:
+            csv_urls.append(f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=csv&gid={gid}")
+    else:
+        # Fallback to extracting the GID parameter from the user-provided URL or default sheet export URL
+        gid_match = re.search(r"[#&?]gid=([0-9]+)", sheet_url)
+        gid_param = f"&gid={gid_match.group(1)}" if gid_match else ""
+        csv_urls.append(f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=csv{gid_param}")
+
+    # Step 3: Loop and process all CSV files
+    total_rows_seen = 0
+    total_rows_skipped = 0
+    total_updated_count = 0
+    total_skipped_duplicates = 0
+    all_errors = []
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        for csv_url in csv_urls:
+            try:
+                response = await client.get(csv_url, headers={'User-Agent': 'Mozilla/5.0'}, follow_redirects=True)
+                if response.status_code != 200:
+                    logger.warning(f"Skipping sheet download: URL {csv_url} returned status code {response.status_code}")
+                    continue
+                
+                file_text = response.text
+                rows, rows_seen, initial_rows_skipped, skipped_fba = _parse_tracking_csv_excluding_fba(file_text)
+                if not rows:
+                    # Even if no valid tracking rows, add count of parsed structure
+                    total_rows_seen += rows_seen
+                    total_rows_skipped += initial_rows_skipped + skipped_fba
+                    continue
+                
+                updated_count, skipped_duplicates, errors = await _process_tracking_import_rows(db, rows)
+                
+                # Accumulate statistics
+                total_rows_seen += rows_seen
+                total_rows_skipped += initial_rows_skipped + (len(rows) - updated_count - skipped_duplicates) + skipped_fba
+                total_updated_count += updated_count
+                total_skipped_duplicates += skipped_duplicates
+                all_errors.extend(errors)
+            except Exception as e:
+                logger.error(f"Error importing from sheet URL {csv_url}: {e}", exc_info=True)
+                all_errors.append(f"Sheet import error: {str(e)}")
+
+    if total_rows_seen == 0 and all_errors:
+        # If we failed to parse anything at all and have errors, raise HTTP exception
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to download Google Sheet: {str(e)}",
+            detail=f"Failed to fetch tracking data: {'; '.join(all_errors[:3])}",
         )
-
-    rows, rows_seen, initial_rows_skipped, skipped_fba = _parse_tracking_csv_excluding_fba(file_text)
-    
-    # Process the database updates and validations using the shared helper
-    updated_count, skipped_duplicates, errors = await _process_tracking_import_rows(db, rows)
 
     await db.commit()
 
-    # Calculate final skipped rows (initial skips + orders not found + FBA skips)
-    final_rows_skipped = initial_rows_skipped + (len(rows) - updated_count - skipped_duplicates) + skipped_fba
-
     return SalesImportFileResponse(
         source=SalesImportFileSource.TRACKING_CSV,
-        source_rows_seen=rows_seen,
-        source_rows_skipped=final_rows_skipped,
+        source_rows_seen=total_rows_seen,
+        source_rows_skipped=total_rows_skipped,
         customers_created=0,
         customers_updated=0,
-        new_orders=updated_count,
+        new_orders=total_updated_count,
         new_items=0,
         auto_matched=0,
-        skipped_duplicates=skipped_duplicates,
+        skipped_duplicates=total_skipped_duplicates,
         success=True,
-        errors=errors,
+        errors=all_errors,
     )
+
+
+class BarcodeScanRequest(BaseModel):
+    tracking_number: str
+    scanned_by: Optional[str] = None
+
+
+class BarcodeScanResponse(BaseModel):
+    matched: bool
+    message: str
+    order_id: Optional[int] = None
+    platform: Optional[str] = None
+
+
+@router.post("/scans", response_model=BarcodeScanResponse)
+async def create_physical_scan(
+    _staff: AdminOrSalesUser,
+    body: BarcodeScanRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Log a physical barcode scan of a package.
+    Matches the barcode to an existing order's tracking number.
+    If matched, marks the order as SHIPPED/SHIPPING.
+    """
+    import re
+    # Clean the scanned barcode (remove whitespaces)
+    scanned_barcode = re.sub(r"\s+", "", body.tracking_number.strip())
+    
+    # Query database for order with matching tracking number
+    stmt = select(Order).where(func.lower(Order.tracking_number) == func.lower(scanned_barcode))
+    order = (await db.execute(stmt)).scalars().first()
+    
+    is_matched = order is not None
+    
+    # Save the scan log
+    scan = PhysicalScan(
+        tracking_number=scanned_barcode,
+        scanned_by=body.scanned_by or "Web Scanner",
+        is_matched=is_matched,
+    )
+    db.add(scan)
+    
+    if is_matched:
+        # Update order status to shipped/shipping if found
+        order.status = OrderStatus.SHIPPED
+        order.shipping_status = ShippingStatus.SHIPPING
+        order.zoho_sync_status = ZohoSyncStatus.DIRTY
+        db.add(order)
+        message = f"Matched order '{order.external_order_id}' successfully."
+        order_id = order.id
+        platform = order.platform.value
+    else:
+        message = "No matching order found for this tracking number."
+        order_id = None
+        platform = None
+        
+    await db.commit()
+    
+    return BarcodeScanResponse(
+        matched=is_matched,
+        message=message,
+        order_id=order_id,
+        platform=platform,
+    )
+
 
 
 # ============================================================================
