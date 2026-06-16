@@ -8,7 +8,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.modules.orders.models import OrderPlatform
+from app.modules.orders.models import OrderPlatform, OrderFulfillmentChannel
 from app.modules.returns.models import ReturnItem, ReturnNormalizedStatus, ReturnRecord
 from app.repositories.base import BaseRepository
 
@@ -22,6 +22,7 @@ class ReturnRecordRepository(BaseRepository[ReturnRecord]):
         stmt,
         *,
         platform: Optional[OrderPlatform] = None,
+        fulfillment_channel: Optional[OrderFulfillmentChannel] = None,
         normalized_status: Optional[ReturnNormalizedStatus] = None,
         source: Optional[str] = None,
         ordered_at_from: Optional[datetime] = None,
@@ -32,6 +33,8 @@ class ReturnRecordRepository(BaseRepository[ReturnRecord]):
     ):
         if platform is not None:
             stmt = stmt.where(ReturnRecord.platform == platform)
+        if fulfillment_channel is not None:
+            stmt = stmt.where(ReturnRecord.fulfillment_channel == fulfillment_channel)
         if normalized_status is not None:
             stmt = stmt.where(ReturnRecord.normalized_status == normalized_status)
         if source:
@@ -87,6 +90,7 @@ class ReturnRecordRepository(BaseRepository[ReturnRecord]):
         skip: int = 0,
         limit: int = 50,
         platform: Optional[OrderPlatform] = None,
+        fulfillment_channel: Optional[OrderFulfillmentChannel] = None,
         normalized_status: Optional[ReturnNormalizedStatus] = None,
         source: Optional[str] = None,
         ordered_at_from: Optional[datetime] = None,
@@ -104,6 +108,7 @@ class ReturnRecordRepository(BaseRepository[ReturnRecord]):
         stmt = self._apply_filters(
             stmt,
             platform=platform,
+            fulfillment_channel=fulfillment_channel,
             normalized_status=normalized_status,
             source=source,
             ordered_at_from=ordered_at_from,
@@ -136,6 +141,7 @@ class ReturnRecordRepository(BaseRepository[ReturnRecord]):
         summary_stmt = self._apply_filters(
             summary_stmt,
             platform=platform,
+            fulfillment_channel=fulfillment_channel,
             normalized_status=normalized_status,
             source=source,
             ordered_at_from=ordered_at_from,

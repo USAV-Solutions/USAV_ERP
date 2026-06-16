@@ -61,6 +61,7 @@ export interface ReturnRecordBrief {
   source_status: string | null
   source_substatus: string | null
   reason: string | null
+  fulfillment_channel: string
   order_total_amount: string
   refunded_amount: string
   currency: string

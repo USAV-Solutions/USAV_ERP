@@ -66,6 +66,8 @@ class OrderStatus(str, enum.Enum):
     DELIVERED = "DELIVERED"
     CANCELLED = "CANCELLED"
     REFUNDED = "REFUNDED"
+    PARTIALLY_REFUNDED = "PARTIALLY_REFUNDED"
+    RETURN = "RETURN"
     ON_HOLD = "ON_HOLD"
     ERROR = "ERROR"
 
@@ -101,6 +103,8 @@ class ShippingStatus(str, enum.Enum):
     PACKED = "PACKED"
     SHIPPING = "SHIPPING"
     DELIVERED = "DELIVERED"
+    RETURNED = "RETURNED"
+    REFUNDED = "REFUNDED"
 
 
 class IntegrationSyncStatus(str, enum.Enum):

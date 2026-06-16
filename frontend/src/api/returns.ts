@@ -16,6 +16,7 @@ export interface ListReturnsParams {
   skip?: number
   limit?: number
   platform?: ReturnPlatform
+  fulfillment_channel?: string
   normalized_status?: ReturnNormalizedStatus
   source?: string
   ordered_at_from?: string
@@ -32,6 +33,7 @@ export async function listReturns(params: ListReturnsParams = {}): Promise<Retur
   if (params.skip !== undefined) query.set('skip', String(params.skip))
   if (params.limit !== undefined) query.set('limit', String(params.limit))
   if (params.platform) query.set('platform', params.platform)
+  if (params.fulfillment_channel) query.set('fulfillment_channel', params.fulfillment_channel)
   if (params.normalized_status) query.set('normalized_status', params.normalized_status)
   if (params.source) query.set('source', params.source)
   if (params.ordered_at_from) query.set('ordered_at_from', params.ordered_at_from)
@@ -72,3 +74,18 @@ export async function syncReturnToZoho(recordId: number): Promise<ReturnZohoVali
   const { data } = await axiosClient.post<ReturnZohoValidationResponse>(RETURNS.ZOHO_SYNC_RECORD(recordId))
   return data
 }
+
+export async function importAmazonReturns(file: File): Promise<ReturnSyncResponse> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const { data } = await axiosClient.post<ReturnSyncResponse>(RETURNS.IMPORT_AMAZON_CSV, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return data
+}
+
+export async function rematchReturnRecord(recordId: number): Promise<ReturnRecordDetail> {
+  const { data } = await axiosClient.post<ReturnRecordDetail>(RETURNS.REMATCH_RECORD(recordId))
+  return data
+}
+
