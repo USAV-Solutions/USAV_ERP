@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.models import OrderPlatform, ReturnNormalizedStatus
+from app.modules.orders.models import OrderFulfillmentChannel
 from app.modules.returns.routes import list_returns, sync_status
 
 
@@ -29,6 +30,7 @@ async def test_list_returns_passes_filters_to_repository():
         source_status="REFUNDED",
         source_substatus="RETURNED",
         reason=None,
+        fulfillment_channel=OrderFulfillmentChannel.SELF_FULFILLED,
         order_total_amount=Decimal("10"),
         refunded_amount=Decimal("10"),
         currency="USD",
@@ -39,6 +41,8 @@ async def test_list_returns_passes_filters_to_repository():
     record_repo.list_records = AsyncMock(return_value=([row], 1, {"RETURNED": 1}))
 
     response = await list_returns(
+        skip=0,
+        limit=50,
         platform=OrderPlatform.ECWID,
         normalized_status="RETURNED",
         record_repo=record_repo,

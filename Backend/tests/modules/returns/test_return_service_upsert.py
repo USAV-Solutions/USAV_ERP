@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.models import OrderPlatform, ReturnNormalizedStatus
+from app.modules.orders.models import OrderFulfillmentChannel
 from app.modules.returns.schemas.sync import ReturnSyncResponse
 from app.modules.returns.service import (
     NormalizedReturnItem,
@@ -107,6 +108,7 @@ async def test_upsert_record_returns_unchanged_for_identical_snapshot():
         source_status="CANCELED",
         source_substatus=None,
         reason=None,
+        fulfillment_channel=OrderFulfillmentChannel.SELF_FULFILLED,
         order_total_amount=Decimal("20.00"),
         refunded_amount=Decimal("0"),
         currency="USD",
