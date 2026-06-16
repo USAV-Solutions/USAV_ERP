@@ -271,3 +271,74 @@ Amazon,113-9832410-7680208,Sergio Minervini,Bose Solo,,,6/11/2026,,381981750779,
     assert rows[2]["order_number"] == "200014728167003"
     assert rows[2]["tracking"] == "940015010615125685366"
 
+
+@pytest.mark.asyncio
+async def test_create_physical_scan_matched():
+    """Verify create_physical_scan endpoint behaves correctly when a matching order is found."""
+    from app.modules.orders.routes import create_physical_scan, BarcodeScanRequest
+    from app.modules.orders.models import Order, OrderPlatform
+    
+    mock_order = MagicMock(spec=Order)
+    mock_order.id = 456
+    mock_order.external_order_id = "AMZ-SCAN-1"
+    mock_order.platform = OrderPlatform.AMAZON
+
+    # Mock DB select query returning the order
+    mock_scalar_result = MagicMock(spec=ScalarResult)
+    mock_scalar_result.first = MagicMock(return_value=mock_order)
+    mock_execute_result = MagicMock()
+    mock_execute_result.scalars = MagicMock(return_value=mock_scalar_result)
+    
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_execute_result)
+    
+    body = BarcodeScanRequest(
+        tracking_number="  940015010615125685366  ",
+        scanned_by="US-Scanner-1",
+    )
+    
+    res = await create_physical_scan(
+        _staff=MagicMock(),
+        body=body,
+        db=mock_db,
+    )
+    
+    assert res.matched is True
+    assert res.order_id == 456
+    assert res.platform == "AMAZON"
+    mock_db.add.assert_called()  # verifying that PhysicalScan is inserted
+    mock_db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_physical_scan_unmatched():
+    """Verify create_physical_scan returns matched=False when no matching order is found."""
+    from app.modules.orders.routes import create_physical_scan, BarcodeScanRequest
+    
+    # Mock DB select query returning None (no matching order)
+    mock_scalar_result = MagicMock(spec=ScalarResult)
+    mock_scalar_result.first = MagicMock(return_value=None)
+    mock_execute_result = MagicMock()
+    mock_execute_result.scalars = MagicMock(return_value=mock_scalar_result)
+    
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_execute_result)
+    
+    body = BarcodeScanRequest(
+        tracking_number="940015010615125685366",
+        scanned_by="US-Scanner-1",
+    )
+    
+    res = await create_physical_scan(
+        _staff=MagicMock(),
+        body=body,
+        db=mock_db,
+    )
+    
+    assert res.matched is False
+    assert res.order_id is None
+    assert res.platform is None
+    mock_db.add.assert_called_once()  # logs unmatched scan log
+    mock_db.commit.assert_called_once()
+
+
