@@ -86,9 +86,8 @@ def _normalize_purchase_order_item_prices(
     if quantity <= 0:
         raise ValueError("quantity must be greater than 0")
 
-    parsed_total = _to_decimal(total_price, default="0")
-    total_missing = total_price is None or str(total_price).strip() == "" or parsed_total == Decimal("0")
-    normalized_total = _quantize_po_item_total(parsed_total)
+    total_missing = total_price is None or str(total_price).strip() == ""
+    normalized_total = _quantize_po_item_total(_to_decimal(total_price, default="0"))
     if total_missing:
         normalized_total = _quantize_po_item_total(
             _to_decimal(unit_price, default="0") * Decimal(quantity)
@@ -1197,8 +1196,8 @@ async def _upsert_purchase_item(
     purchase_item_link: str | None,
     item_name: str,
     quantity: int,
-    unit_price: Decimal | None,
-    total_price: Decimal | None,
+    unit_price: object | None,
+    total_price: object | None,
     po_item_repo: PurchaseOrderItemRepository,
     db: AsyncSession,
     result: PurchaseFileImportResponse,
@@ -1917,8 +1916,8 @@ async def _import_aliexpress_csv(
                 purchase_item_link=str(item.get("purchase_item_link") or "").strip() or None,
                 item_name=item_name,
                 quantity=quantity,
-                unit_price=_to_decimal(item.get("unit_price"), default="0"),
-                total_price=_to_decimal(item.get("total_price"), default="0"),
+                unit_price=item.get("unit_price"),
+                total_price=item.get("total_price"),
                 po_item_repo=po_item_repo,
                 db=db,
                 result=result,
@@ -2226,8 +2225,8 @@ async def _import_ebay_purchase_api(
                 )
                 item_name = str(item.get("external_item_name") or "").strip()
                 quantity = _to_int(item.get("quantity"), default=0)
-                unit_price = _to_decimal(item.get("unit_price"), default="0")
-                total_price = _to_decimal(item.get("total_price"), default="0")
+                unit_price = item.get("unit_price")
+                total_price = item.get("total_price")
                 if not item_name or quantity <= 0:
                     result.source_rows_skipped += 1
                     logger.warning(
