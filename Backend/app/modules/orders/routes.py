@@ -56,6 +56,7 @@ from app.modules.orders.models import (
     OrderPlatform,
     OrderStatus,
     ShippingStatus,
+    PhysicalScan,
 )
 from app.modules.orders.schemas.orders import (
     OrderBrief,
@@ -1595,6 +1596,72 @@ async def import_tracking_from_link(
         success=True,
         errors=all_errors,
     )
+
+
+class BarcodeScanRequest(BaseModel):
+    tracking_number: str
+    scanned_by: Optional[str] = None
+
+
+class BarcodeScanResponse(BaseModel):
+    matched: bool
+    message: str
+    order_id: Optional[int] = None
+    platform: Optional[str] = None
+
+
+@router.post("/scans", response_model=BarcodeScanResponse)
+async def create_physical_scan(
+    _staff: AdminOrSalesUser,
+    body: BarcodeScanRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Log a physical barcode scan of a package.
+    Matches the barcode to an existing order's tracking number.
+    If matched, marks the order as SHIPPED/SHIPPING.
+    """
+    import re
+    # Clean the scanned barcode (remove whitespaces)
+    scanned_barcode = re.sub(r"\s+", "", body.tracking_number.strip())
+    
+    # Query database for order with matching tracking number
+    stmt = select(Order).where(func.lower(Order.tracking_number) == func.lower(scanned_barcode))
+    order = (await db.execute(stmt)).scalars().first()
+    
+    is_matched = order is not None
+    
+    # Save the scan log
+    scan = PhysicalScan(
+        tracking_number=scanned_barcode,
+        scanned_by=body.scanned_by or "Web Scanner",
+        is_matched=is_matched,
+    )
+    db.add(scan)
+    
+    if is_matched:
+        # Update order status to shipped/shipping if found
+        order.status = OrderStatus.SHIPPED
+        order.shipping_status = ShippingStatus.SHIPPING
+        order.zoho_sync_status = ZohoSyncStatus.DIRTY
+        db.add(order)
+        message = f"Matched order '{order.external_order_id}' successfully."
+        order_id = order.id
+        platform = order.platform.value
+    else:
+        message = "No matching order found for this tracking number."
+        order_id = None
+        platform = None
+        
+    await db.commit()
+    
+    return BarcodeScanResponse(
+        matched=is_matched,
+        message=message,
+        order_id=order_id,
+        platform=platform,
+    )
+
 
 
 # ============================================================================

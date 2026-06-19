@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     Enum,
@@ -491,3 +492,48 @@ class OrderItem(Base, TimestampMixin):
             f"<OrderItem(id={self.id}, order={self.order_id}, "
             f"status={self.status.value})>"
         )
+
+
+class PhysicalScan(Base, TimestampMixin):
+    """
+    Log of physical barcode scans of outgoing packages.
+    """
+    __tablename__ = "physical_scans"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        autoincrement=True,
+    )
+    tracking_number: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+        comment="The scanned barcode/tracking number.",
+    )
+    scanned_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        comment="When the barcode was physically scanned.",
+    )
+    scanned_by: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Name or username of the operator (or chat bot ID).",
+    )
+    is_matched: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default="false",
+        comment="Whether a matching order was found in the database at the time of scan.",
+    )
+
+    __table_args__ = (
+        Index("ix_physical_scans_tracking", "tracking_number"),
+        Index("ix_physical_scans_scanned_at", "scanned_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<PhysicalScan(id={self.id}, tracking={self.tracking_number}, matched={self.is_matched})>"
+
