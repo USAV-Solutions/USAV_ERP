@@ -9,7 +9,7 @@ Returns domain: imports cancellation, return, and refund signals from eBay, Ecwi
 - Schemas for dashboard list/detail, marketplace sync responses, and Zoho validation/sync responses.
 
 ## Common Pitfalls
-- Do not mutate `orders.status`, `order_item.status`, or `orders.platform_data` from this module. The Zoho return path only writes return-level Zoho sync fields and may fill missing return/order Zoho mapping IDs found during validation.
+- Return ingestion mirrors linked-order status for cancelled, refunded, partially refunded, and returned records. Keep `order_status_enum` migrations in sync with `OrderStatus` values or the whole return import transaction can roll back after marketplace fetch succeeds.
 - Zoho Sales Return sync must validate before calling Zoho create: local linked order, Zoho Sales Order ID/search hit, local order-item match, Zoho Sales Order line match, local available quantity, and Zoho shipped quantity must all pass. Before create, it also marks matched Zoho items `is_returnable=true` when Zoho says the item is not returnable.
 - `Order.zoho_id` is the local Zoho Sales Order ID. Return item mapping is resolved from linked/local order item data against live Zoho Sales Order line items; there is no persisted `order_item` Zoho Sales Order line ID column. Zoho Sales Return line payloads need both the live line ID (`salesorder_item_id`) and product `item_id`.
 - Partial returns and partial cancellations are line-quantity problems. Keep `return_item` quantities authoritative instead of flattening them into one header-only status.
