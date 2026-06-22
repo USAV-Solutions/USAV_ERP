@@ -43,7 +43,6 @@ class ReturnNormalizedStatus(str, enum.Enum):
     CANCELLED = "CANCELLED"
     PARTIALLY_CANCELLED = "PARTIALLY_CANCELLED"
     UNKNOWN = "UNKNOWN"
-    UNMATCHED_ORDER = "UNMATCHED_ORDER"
 
 
 class ReturnZohoSyncStatus(str, enum.Enum):

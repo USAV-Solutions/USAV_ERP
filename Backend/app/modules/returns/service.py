@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.integrations.base import BasePlatformClient
 from app.modules.orders.models import IntegrationSyncStatus, Order, OrderItem, OrderPlatform, OrderFulfillmentChannel, OrderStatus
-from app.modules.returns.models import ReturnItem, ReturnNormalizedStatus, ReturnRecord, ReturnSyncState
+from app.modules.returns.models import ReturnItem, ReturnNormalizedStatus, ReturnRecord, ReturnSyncState, ReturnZohoSyncStatus
 from app.modules.returns.schemas.sync import ReturnSyncResponse
 from app.repositories.orders.order_repository import OrderRepository
 from app.repositories.returns.record_repository import ReturnRecordRepository
@@ -285,11 +285,12 @@ class ReturnSyncService:
             
         linked_order = await self._find_linked_order(record.platform, record.external_order_id)
         if not linked_order:
-            record.normalized_status = ReturnNormalizedStatus.UNMATCHED_ORDER
+            record.zoho_sync_status = ReturnZohoSyncStatus.MISSING_LOCAL_ORDER
             await self.session.commit()
             return record
             
         record.linked_order_id = linked_order.id
+        record.zoho_sync_status = ReturnZohoSyncStatus.PENDING
 
         if not record.customer_name and linked_order.customer_name:
             record.customer_name = linked_order.customer_name
@@ -298,33 +299,6 @@ class ReturnSyncService:
         if not record.currency and linked_order.currency:
             record.currency = linked_order.currency
         
-        # Determine the correct status to update the order with
-        # If record.normalized_status is UNMATCHED_ORDER, we might not have the original status easily, 
-        # but we can try to recalculate or just use the simplest assumption.
-        # However, to be safe, if we have raw_payload, we could ideally re-normalize.
-        # For simplicity, we just use the current status map if it's not UNMATCHED_ORDER, 
-        # or rely on the UI/sync to have the correct status in source_status.
-        
-        # Instead of guessing, let's look at source_status.
-        # But to be robust, we can just do a basic map from source_status or reason if normalized_status is UNMATCHED_ORDER
-        # However, if normalized_status is UNMATCHED_ORDER, it means it was previously unmatched. 
-        # It's better if we didn't overwrite normalized_status with UNMATCHED_ORDER, but we did.
-        # So let's re-guess it from refunded_amount or cancelled_qty_total
-        returned_qty = sum(item.returned_qty for item in record.items)
-        cancelled_qty = sum(item.cancelled_qty for item in record.items)
-        
-        assumed_status = record.normalized_status
-        if assumed_status == ReturnNormalizedStatus.UNMATCHED_ORDER:
-            if returned_qty > 0:
-                assumed_status = ReturnNormalizedStatus.RETURNED
-            elif cancelled_qty > 0:
-                assumed_status = ReturnNormalizedStatus.CANCELLED
-            elif record.refunded_amount > Decimal("0"):
-                assumed_status = ReturnNormalizedStatus.REFUNDED
-            else:
-                assumed_status = ReturnNormalizedStatus.RETURNED
-            record.normalized_status = assumed_status
-
         status_map = {
             ReturnNormalizedStatus.RETURNED: OrderStatus.RETURN,
             ReturnNormalizedStatus.PARTIALLY_RETURNED: OrderStatus.RETURN,
@@ -405,6 +379,8 @@ class ReturnSyncService:
             if not record.currency and linked_order.currency:
                 record.currency = linked_order.currency
 
+        zoho_sync_status = ReturnZohoSyncStatus.PENDING
+
         if linked_order_id is not None:
             response.linked_orders += 1
             
@@ -420,7 +396,7 @@ class ReturnSyncService:
             if new_status:
                 linked_order.status = new_status
         else:
-            record.normalized_status = ReturnNormalizedStatus.UNMATCHED_ORDER
+            zoho_sync_status = ReturnZohoSyncStatus.MISSING_LOCAL_ORDER
 
         item_rows, linked_items = self._build_item_rows(linked_order, record.items)
         response.linked_items += linked_items
@@ -446,6 +422,7 @@ class ReturnSyncService:
             "refunded_amount": record.refunded_amount,
             "currency": record.currency,
             "raw_payload": record.raw_payload,
+            "zoho_sync_status": zoho_sync_status,
         }
         incoming_snapshot = self._build_snapshot(payload, item_rows)
 
@@ -539,6 +516,9 @@ class ReturnSyncService:
             "fulfillment_channel": payload.get("fulfillment_channel").value
             if hasattr(payload.get("fulfillment_channel"), "value")
             else str(payload.get("fulfillment_channel")),
+            "zoho_sync_status": payload.get("zoho_sync_status").value
+            if hasattr(payload.get("zoho_sync_status"), "value")
+            else str(payload.get("zoho_sync_status")),
             "order_total_amount": str(_to_decimal(payload["order_total_amount"])),
             "refunded_amount": str(_to_decimal(payload["refunded_amount"])),
             "items": [
@@ -586,6 +566,7 @@ class ReturnSyncService:
             "refunded_amount": existing.refunded_amount,
             "currency": existing.currency,
             "raw_payload": existing.raw_payload,
+            "zoho_sync_status": existing.zoho_sync_status,
         }
         return self._build_snapshot(payload, item_rows)
 

@@ -448,8 +448,8 @@ class EcwidClient(BasePlatformClient):
             while True:
                 try:
                     params = {
-                        "createdFrom": start_timestamp,
-                        "createdTo": end_timestamp,
+                        "updatedFrom": start_timestamp,
+                        "updatedTo": end_timestamp,
                         "limit": limit,
                         "offset": offset,
                     }
