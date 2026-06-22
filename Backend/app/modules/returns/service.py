@@ -219,6 +219,7 @@ class ReturnSyncService:
             await self.session.commit()
         except Exception as exc:
             await self.session.rollback()
+            logger.exception("Return range sync failed for %s", platform_name)
             response.success = False
             response.errors.append(f"{type(exc).__name__}: {exc}")
         return response
