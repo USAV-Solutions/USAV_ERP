@@ -1,4 +1,4 @@
-﻿# Backend\scripts
+# Backend\scripts
 
 ## What This Folder Does
 One-off operational scripts for backfills, cleanup, reconciliation, and migrations support.
@@ -26,6 +26,7 @@ One-off operational scripts for backfills, cleanup, reconciliation, and migratio
 - `zoho_sync_q1_pos_with_receives_and_bills.py` creates purchase receives via Inventory API with `purchaseorder_id` in query params (in addition to payload) to satisfy Zoho PO-association validation (`code:9`).
 - In bill-first mode, `zoho_sync_q1_pos_with_receives_and_bills.py` enriches receive line items with `bill_line_item_id` by mapping bill response lines (`purchaseorder_item_id` -> bill `line_item_id`), enabling receives after bill creation on Zoho-locked PO items.
 - `zoho_sync_q1_pos_with_receives_and_bills.py` prints `[bill-debug]` and `[receive-debug]` payload/response logs only when `--debug` is passed.
+- `zoho_resolve_delivery.py` fetches Zoho POs from Jan 1 to May 1 2026, parses received dates from notes and terms using regex and dateutil, saves a CSV report to `scripts/zoho_delivery_report.csv`, and then iterates over valid entries to create bills and receives sequentially, enriching bills with PO lines and receives with bill lines mapping.
 
 ## Child Folders
 - (No child folders)

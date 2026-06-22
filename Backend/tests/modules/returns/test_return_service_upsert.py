@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.models import OrderPlatform, ReturnNormalizedStatus
+from app.models import OrderPlatform, ReturnNormalizedStatus, ReturnZohoSyncStatus
 from app.modules.orders.models import OrderFulfillmentChannel
 from app.modules.returns.schemas.sync import ReturnSyncResponse
 from app.modules.returns.service import (
@@ -112,6 +112,7 @@ async def test_upsert_record_returns_unchanged_for_identical_snapshot():
         order_total_amount=Decimal("20.00"),
         refunded_amount=Decimal("0"),
         currency="USD",
+        zoho_sync_status=ReturnZohoSyncStatus.PENDING,
         raw_payload={"orderId": "EB-1"},
         items=[
             SimpleNamespace(
