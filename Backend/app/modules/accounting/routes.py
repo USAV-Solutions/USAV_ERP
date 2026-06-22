@@ -381,6 +381,7 @@ async def _build_sales_order_report(
             Order.tax_amount.label("tax_amount"),
             Order.shipping_amount.label("shipping_amount"),
             Customer.name.label("customer"),
+            Order.tracking_number.label("tracking_number"),
         )
         .join(OrderItem, OrderItem.order_id == Order.id)
         .outerjoin(ProductVariant, ProductVariant.id == OrderItem.variant_id)
@@ -460,6 +461,7 @@ async def _build_sales_order_report(
                     "shipping": str(Decimal(row["shipping_amount"] or 0).quantize(Decimal("0.01"))),
                     "handling": str(Decimal("0").quantize(Decimal("0.01"))),
                     "customer": row["customer"],
+                    "tracking_number": row["tracking_number"] or "",
                 }
             )
         return report_rows
@@ -777,6 +779,7 @@ async def export_sales_order_reports(
             "shipping",
             "handling",
             "customer",
+            "tracking_number",
         ]
     stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
