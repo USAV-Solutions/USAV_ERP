@@ -380,7 +380,7 @@ export default function ReturnsManagement() {
         <Stack direction="row" spacing={1}>
           <input
             type="file"
-            accept=".csv"
+            accept=".csv,.tsv"
             style={{ display: 'none' }}
             ref={fileInputRef}
             onChange={handleFileChange}
@@ -410,7 +410,7 @@ export default function ReturnsManagement() {
           >
             <MenuItem onClick={() => { setSyncActionsAnchorEl(null); fileInputRef.current?.click(); }}>
               <ListItemIcon><UploadFile fontSize="small" /></ListItemIcon>
-              <ListItemText>{importMutation.isPending ? 'Importing...' : 'Import Amazon CSV'}</ListItemText>
+              <ListItemText>{importMutation.isPending ? 'Importing...' : 'Import Amazon Return CSV/TSV'}</ListItemText>
             </MenuItem>
             <MenuItem onClick={() => { setSyncActionsAnchorEl(null); setSyncDialogOpen(true); }}>
               <ListItemIcon><Sync fontSize="small" /></ListItemIcon>

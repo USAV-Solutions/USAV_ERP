@@ -58,6 +58,29 @@ def _build_record() -> NormalizedReturnRecord:
 
 
 @pytest.mark.asyncio
+async def test_find_linked_order_uses_external_reference_lookup_when_available():
+    class Repo:
+        def __init__(self):
+            self.reference_calls = []
+
+        async def get_by_external_reference(self, platform, external_order_id):
+            self.reference_calls.append((platform, external_order_id))
+            return SimpleNamespace(id=11)
+
+        async def get_with_items(self, order_id):
+            return SimpleNamespace(id=order_id, items=[])
+
+    service = _build_service()
+    repo = Repo()
+    service.order_repo = repo
+
+    order = await service._find_linked_order(OrderPlatform.AMAZON, "112-123")
+
+    assert order.id == 11
+    assert repo.reference_calls == [(OrderPlatform.AMAZON, "112-123")]
+
+
+@pytest.mark.asyncio
 async def test_upsert_record_links_existing_order_and_item():
     service = _build_service()
     service.order_repo.get_by_external_id = AsyncMock(return_value=SimpleNamespace(id=11))

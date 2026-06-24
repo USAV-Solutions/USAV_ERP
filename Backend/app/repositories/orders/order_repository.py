@@ -7,7 +7,7 @@ deduplication-safe upserts and filtered queries for the dashboard.
 from datetime import datetime
 from typing import Optional, Sequence
 
-from sqlalchemy import select, func, and_, desc
+from sqlalchemy import select, func, and_, desc, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -53,6 +53,24 @@ class OrderRepository(BaseRepository[Order]):
             and_(
                 Order.platform == platform,
                 Order.external_order_id == external_order_id,
+            )
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_by_external_reference(
+        self,
+        platform: OrderPlatform,
+        external_order_id: str,
+    ) -> Optional[Order]:
+        """Look up an order by platform ID or order number."""
+        stmt = select(Order).where(
+            and_(
+                Order.platform == platform,
+                or_(
+                    Order.external_order_id == external_order_id,
+                    Order.external_order_number == external_order_id,
+                ),
             )
         )
         result = await self.session.execute(stmt)

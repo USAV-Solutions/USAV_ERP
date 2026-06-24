@@ -250,7 +250,14 @@ async def import_amazon_csv(
 ):
     try:
         content = await file.read()
-        file_text = content.decode("utf-8-sig")
+        for encoding in ("utf-8-sig", "cp1252", "latin-1"):
+            try:
+                file_text = content.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            raise ValueError("Unsupported text encoding")
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file format") from exc
 

@@ -79,7 +79,7 @@ class NormalizedReturnRecord:
 
 def _to_decimal(value: object) -> Decimal:
     try:
-        return Decimal(str(value or 0))
+        return Decimal(str(value or 0).replace(",", ""))
     except Exception:
         return Decimal("0")
 
@@ -116,8 +116,25 @@ def _parse_datetime(value: Any) -> Optional[datetime]:
         try:
             return _ensure_utc(datetime.fromisoformat(text.replace("Z", "+00:00")))
         except ValueError:
-            return None
+            pass
+        for fmt in ("%d-%b-%Y", "%d-%B-%Y", "%m/%d/%Y", "%Y-%m-%d"):
+            try:
+                return _ensure_utc(datetime.strptime(text, fmt))
+            except ValueError:
+                continue
+        return None
     return None
+
+
+def _normalize_header(value: object) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", str(value or "").strip().lower()).strip("-")
+
+
+def _safe_int(value: object) -> int:
+    try:
+        return max(int(Decimal(str(value or "0").replace(",", "").strip() or "0")), 0)
+    except Exception:
+        return 0
 
 
 def _coerce_list(value: Any) -> list[Any]:
@@ -226,16 +243,58 @@ class ReturnSyncService:
 
     async def import_amazon_returns_csv(self, file_content: str) -> ReturnSyncResponse:
         response = ReturnSyncResponse(platform="AMAZON")
-        reader = csv.DictReader(file_content.splitlines())
-        records = {}
+        records = self._normalize_amazon_csv_records(file_content)
+
+        try:
+            await self._ingest_records(records, response)
+            await self.session.commit()
+        except Exception as exc:
+            await self.session.rollback()
+            response.success = False
+            response.errors.append(f"{type(exc).__name__}: {exc}")
+        return response
+
+    def _normalize_amazon_csv_records(self, file_content: str) -> list[NormalizedReturnRecord]:
+        rows = self._read_amazon_csv_rows(file_content)
+        if not rows:
+            return []
+        headers = set(rows[0].keys())
+        if {"return-date", "order-id", "detailed-disposition"}.issubset(headers):
+            return self._normalize_amazon_fba_return_rows(rows)
+        if {"order-id", "return-quantity", "amazon-rma-id"}.issubset(headers):
+            return self._normalize_amazon_return_report_rows(rows)
+        return self._normalize_amazon_cancel_order_rows(rows)
+
+    def _read_amazon_csv_rows(self, file_content: str) -> list[dict[str, str]]:
+        lines = file_content.splitlines()
+        if not lines:
+            return []
+        delimiter = "\t" if lines[0].count("\t") > lines[0].count(",") else ","
+        reader = csv.DictReader(lines, delimiter=delimiter)
+        rows: list[dict[str, str]] = []
         for row in reader:
+            normalized = {
+                _normalize_header(key): str(value or "").strip()
+                for key, value in row.items()
+                if key is not None
+            }
+            if any(normalized.values()):
+                rows.append(normalized)
+        return rows
+
+    def _normalize_amazon_cancel_order_rows(
+        self,
+        rows: Sequence[dict[str, str]],
+    ) -> list[NormalizedReturnRecord]:
+        records: dict[str, NormalizedReturnRecord] = {}
+        for row in rows:
             if row.get("order-status", "").strip().lower() != "cancelled":
                 continue
-            
+
             amazon_order_id = row.get("amazon-order-id", "").strip()
             if not amazon_order_id:
                 continue
-            
+
             if amazon_order_id not in records:
                 fc = row.get("fulfillment-channel", "").strip().lower()
                 fulfillment_channel = OrderFulfillmentChannel.SELF_FULFILLED
@@ -255,29 +314,140 @@ class ReturnSyncService:
                     items=[],
                     order_total_amount=Decimal("0"),
                     refunded_amount=Decimal("0"),
+                    raw_payload={"rows": []},
                 )
 
             item = NormalizedReturnItem(
                 external_item_id=row.get("order-item-id"),
                 external_sku=row.get("sku"),
                 item_name=row.get("product-name") or "Unknown",
-                ordered_qty=int(row.get("quantity") or 0),
-                cancelled_qty=int(row.get("quantity") or 0),
-                refunded_amount=Decimal(row.get("item-price") or "0") + Decimal(row.get("item-tax") or "0"),
+                ordered_qty=_safe_int(row.get("quantity")),
+                cancelled_qty=_safe_int(row.get("quantity")),
+                refunded_amount=_to_decimal(row.get("item-price")) + _to_decimal(row.get("item-tax")),
                 payload=row,
             )
             records[amazon_order_id].items.append(item)
             records[amazon_order_id].order_total_amount += item.refunded_amount
             records[amazon_order_id].refunded_amount += item.refunded_amount
+            records[amazon_order_id].raw_payload["rows"].append(row)
+        return list(records.values())
 
-        try:
-            await self._ingest_records(list(records.values()), response)
-            await self.session.commit()
-        except Exception as exc:
-            await self.session.rollback()
-            response.success = False
-            response.errors.append(f"{type(exc).__name__}: {exc}")
-        return response
+    def _normalize_amazon_return_report_rows(
+        self,
+        rows: Sequence[dict[str, str]],
+    ) -> list[NormalizedReturnRecord]:
+        records: dict[str, NormalizedReturnRecord] = {}
+        for row in rows:
+            amazon_order_id = row.get("order-id", "").strip()
+            if not amazon_order_id:
+                continue
+
+            rma_id = row.get("amazon-rma-id") or row.get("merchant-rma-id") or ""
+            order_item_id = row.get("order-item-id") or ""
+            record_key = f"{amazon_order_id}:{rma_id or order_item_id or row.get('return-request-date')}"
+            return_qty = _safe_int(row.get("return-quantity"))
+            ordered_qty = _safe_int(row.get("order-quantity")) or return_qty
+            refunded_amount = _to_decimal(row.get("refunded-amount"))
+            order_amount = _to_decimal(row.get("order-amount"))
+
+            if record_key not in records:
+                records[record_key] = NormalizedReturnRecord(
+                    external_record_key=record_key,
+                    external_order_id=amazon_order_id,
+                    external_return_id=rma_id or None,
+                    platform=OrderPlatform.AMAZON,
+                    source="AMAZON_RETURN_REPORT",
+                    normalized_status=ReturnNormalizedStatus.RETURNED,
+                    fulfillment_channel=OrderFulfillmentChannel.SELF_FULFILLED,
+                    ordered_at=_parse_datetime(row.get("order-date")),
+                    event_at=_parse_datetime(row.get("return-delivery-date"))
+                    or _parse_datetime(row.get("return-request-date")),
+                    last_source_updated_at=_parse_datetime(row.get("return-request-date")),
+                    source_status=row.get("return-request-status") or None,
+                    source_substatus=row.get("resolution") or None,
+                    reason=row.get("return-reason") or None,
+                    currency=row.get("currency-code") or "USD",
+                    items=[],
+                    order_total_amount=Decimal("0"),
+                    refunded_amount=Decimal("0"),
+                    raw_payload={"rows": []},
+                )
+
+            item = NormalizedReturnItem(
+                external_item_id=order_item_id or None,
+                external_sku=row.get("merchant-sku") or None,
+                item_name=row.get("item-name") or "Unknown",
+                ordered_qty=ordered_qty,
+                returned_qty=return_qty,
+                refunded_amount=refunded_amount,
+                payload=row,
+            )
+            record = records[record_key]
+            record.items.append(item)
+            record.order_total_amount += order_amount
+            record.refunded_amount += refunded_amount
+            record.raw_payload["rows"].append(row)
+
+        for record in records.values():
+            record.normalized_status = self._status_from_return_quantities(record.items)
+        return list(records.values())
+
+    def _normalize_amazon_fba_return_rows(
+        self,
+        rows: Sequence[dict[str, str]],
+    ) -> list[NormalizedReturnRecord]:
+        records: dict[str, NormalizedReturnRecord] = {}
+        for row in rows:
+            amazon_order_id = row.get("order-id", "").strip()
+            if not amazon_order_id:
+                continue
+
+            lpn = row.get("license-plate-number") or ""
+            record_key = f"{amazon_order_id}:{lpn or row.get('sku') or row.get('return-date')}"
+            return_qty = _safe_int(row.get("quantity"))
+            if record_key not in records:
+                records[record_key] = NormalizedReturnRecord(
+                    external_record_key=record_key,
+                    external_order_id=amazon_order_id,
+                    external_return_id=lpn or None,
+                    platform=OrderPlatform.AMAZON,
+                    source="AMAZON_FBA_RETURN_REPORT",
+                    normalized_status=ReturnNormalizedStatus.RETURNED,
+                    fulfillment_channel=OrderFulfillmentChannel.AMAZON_FBA,
+                    event_at=_parse_datetime(row.get("return-date")),
+                    last_source_updated_at=_parse_datetime(row.get("return-date")),
+                    source_status=row.get("status") or None,
+                    source_substatus=row.get("detailed-disposition") or None,
+                    reason=row.get("reason") or None,
+                    items=[],
+                    raw_payload={"rows": []},
+                )
+
+            item = NormalizedReturnItem(
+                external_item_id=row.get("fnsku") or row.get("asin") or None,
+                external_sku=row.get("sku") or None,
+                item_name=row.get("product-name") or "Unknown",
+                ordered_qty=return_qty,
+                returned_qty=return_qty,
+                payload=row,
+            )
+            record = records[record_key]
+            record.items.append(item)
+            record.raw_payload["rows"].append(row)
+
+        for record in records.values():
+            record.normalized_status = self._status_from_return_quantities(record.items)
+        return list(records.values())
+
+    def _status_from_return_quantities(
+        self,
+        items: Sequence[NormalizedReturnItem],
+    ) -> ReturnNormalizedStatus:
+        ordered_qty = sum(_safe_int(item.ordered_qty) for item in items)
+        returned_qty = sum(_safe_int(item.returned_qty) for item in items)
+        if ordered_qty and 0 < returned_qty < ordered_qty:
+            return ReturnNormalizedStatus.PARTIALLY_RETURNED
+        return ReturnNormalizedStatus.RETURNED
 
     async def rematch_record(self, record_id: int) -> ReturnRecord:
         record = await self.record_repo.get_with_items(record_id)
@@ -455,7 +625,10 @@ class ReturnSyncService:
         return "updated"
 
     async def _find_linked_order(self, platform: OrderPlatform, external_order_id: str) -> Optional[Order]:
-        order = await self.order_repo.get_by_external_id(platform, external_order_id)
+        if hasattr(type(self.order_repo), "get_by_external_reference"):
+            order = await self.order_repo.get_by_external_reference(platform, external_order_id)
+        else:
+            order = await self.order_repo.get_by_external_id(platform, external_order_id)
         if order is None:
             return None
         return await self.order_repo.get_with_items(order.id)
