@@ -31,6 +31,7 @@ import {
   CheckCircle,
   Add,
   NoteAlt,
+  Visibility,
 } from '@mui/icons-material'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -222,7 +223,7 @@ export default function OrderItemsPanel({ orderId, headerAction }: OrderItemsPan
             </TableRow>
           )}
           {order.items.map((item: OrderItemDetail) => (
-            <ItemRow key={item.id} item={item} onAction={invalidate} />
+            <ItemRow key={item.id} item={item} platform={order.platform} onAction={invalidate} />
           ))}
           <TableRow>
             <TableCell colSpan={8}>
@@ -394,7 +395,7 @@ function AddOrderItemRow({ orderId, onChanged, onDone }: { orderId: number; onCh
 
 // ── Item Row with actions ────────────────────────────────────────────
 
-function ItemRow({ item, onAction }: { item: OrderItemDetail; onAction: () => void }) {
+function ItemRow({ item, platform, onAction }: { item: OrderItemDetail; platform: string; onAction: () => void }) {
   const [selectedVariant, setSelectedVariant] = useState<VariantSearchResult | null>(null)
   const [showMatch, setShowMatch] = useState(false)
   const [promptOpen, setPromptOpen] = useState(false)
@@ -472,6 +473,13 @@ function ItemRow({ item, onAction }: { item: OrderItemDetail; onAction: () => vo
     setPromptOpen(true)
   }
 
+  let itemLink = null
+  if (platform === 'AMAZON' && item.external_asin) {
+    itemLink = `https://amazon.com/dp/${item.external_asin.trim()}`
+  } else if (platform.startsWith('EBAY_') && item.external_item_id) {
+    itemLink = `https://www.ebay.com/itm/${item.external_item_id.trim()}`
+  }
+
   return (
     <>
       <LongPressTableRow
@@ -514,6 +522,20 @@ function ItemRow({ item, onAction }: { item: OrderItemDetail; onAction: () => vo
         </TableCell>
         <TableCell align="center">
           <Stack direction="row" spacing={0.5} justifyContent="center">
+            {itemLink && (
+              <Tooltip title="View on platform">
+                <IconButton
+                  size="small"
+                  color="info"
+                  href={itemLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Visibility fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )}
             {item.status === 'UNMATCHED' && (
               <Tooltip title="Match to variant">
                 <IconButton
