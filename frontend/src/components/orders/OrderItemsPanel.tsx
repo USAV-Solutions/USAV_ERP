@@ -474,8 +474,14 @@ function ItemRow({ item, platform, onAction }: { item: OrderItemDetail; platform
   }
 
   let itemLink = null
-  if (platform === 'AMAZON' && item.external_asin) {
-    itemLink = `https://amazon.com/dp/${item.external_asin.trim()}`
+  if (platform === 'AMAZON') {
+    let finalAsin = item.external_asin?.trim()
+    if (!finalAsin && item.external_sku && !item.external_sku.includes('-')) {
+      finalAsin = item.external_sku.trim()
+    }
+    if (finalAsin) {
+      itemLink = `https://amazon.com/dp/${finalAsin}`
+    }
   } else if (platform.startsWith('EBAY_') && item.external_item_id) {
     itemLink = `https://www.ebay.com/itm/${item.external_item_id.trim()}`
   }
