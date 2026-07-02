@@ -328,6 +328,17 @@ async def update_return_record(
     return detail
 
 
+@router.delete("/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_return_record(
+    record_id: int,
+    _admin: AdminUser,
+    service: ReturnSyncService = Depends(get_return_service),
+):
+    try:
+        await service.delete_record(record_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
 
 @router.post("/sync", response_model=list[ReturnSyncResponse])
 async def sync_returns(

@@ -463,6 +463,14 @@ class ReturnSyncService:
         await self.session.refresh(record)
         return record
 
+    async def delete_record(self, record_id: int) -> None:
+        record = await self.record_repo.get_with_items(record_id)
+        if not record:
+            raise LookupError(f"Return record {record_id} not found")
+        
+        await self.session.delete(record)
+        await self.session.commit()
+
     async def rematch_record(self, record_id: int) -> ReturnRecord:
         record = await self.record_repo.get_with_items(record_id)
         if not record:

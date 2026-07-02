@@ -95,3 +95,7 @@ export async function updateReturnRecord(recordId: number, body: ReturnRecordUpd
   return data
 }
 
+export async function deleteReturnRecord(recordId: number): Promise<void> {
+  await axiosClient.delete(RETURNS.RECORD(recordId))
+}
+

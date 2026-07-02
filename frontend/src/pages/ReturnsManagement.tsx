@@ -55,6 +55,7 @@ import {
   importAmazonReturns,
   rematchReturnRecord,
   updateReturnRecord,
+  deleteReturnRecord,
 } from '../api/returns'
 import type {
   ReturnListResponse,
@@ -263,6 +264,21 @@ export default function ReturnsManagement() {
     },
     onError: (error) => {
       setSnackbarMessage(`Update failed: ${(error as Error).message}`)
+    }
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedReturn) throw new Error('No return selected')
+      return deleteReturnRecord(selectedReturn.id)
+    },
+    onSuccess: () => {
+      setSnackbarMessage('Return deleted successfully')
+      setEditDialogOpen(false)
+      void queryClient.invalidateQueries({ queryKey: ['returns'] })
+    },
+    onError: (error) => {
+      setSnackbarMessage(`Delete failed: ${(error as Error).message}`)
     }
   })
 
@@ -955,8 +971,17 @@ export default function ReturnsManagement() {
         onClose={() => setEditDialogOpen(false)}
         title="Edit Return"
         onSave={() => updateMutation.mutate()}
+        onDelete={() => deleteMutation.mutate()}
         saveDisabled={!selectedReturn || !canEditReturn}
+        deleteDisabled={!selectedReturn || !canEditReturn}
         saveLoading={updateMutation.isPending}
+        deleteLoading={deleteMutation.isPending}
+        deleteConfirmTitle="Delete Return"
+        deleteConfirmMessage={
+          <Typography>
+            Delete return for order <strong>{selectedReturn?.external_order_id}</strong>? This action cannot be undone.
+          </Typography>
+        }
       >
         <Stack spacing={2} sx={{ mt: 1 }}>
           <FormControl fullWidth size="small">
