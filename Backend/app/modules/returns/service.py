@@ -483,7 +483,7 @@ class ReturnSyncService:
             linked_order.status = new_status
             
         # Also re-link items
-        _, linked_items_count = self._build_item_rows(
+        item_rows, linked_items_count = self._build_item_rows(
             linked_order, 
             [NormalizedReturnItem(
                 external_item_id=item.external_item_id,
@@ -497,18 +497,16 @@ class ReturnSyncService:
             ) for item in record.items]
         )
         
-        # Link order items properly
-        for item in record.items:
-            linked_item = self._link_order_item(
-                linked_order,
-                NormalizedReturnItem(
-                    external_item_id=item.external_item_id,
-                    external_sku=item.external_sku,
-                    item_name=item.item_name,
-                )
-            )
-            if linked_item:
-                item.linked_order_item_id = linked_item.id
+        # Link order items properly and update refund amount
+        for item, row in zip(record.items, item_rows):
+            if row.get("linked_order_item_id"):
+                item.linked_order_item_id = row["linked_order_item_id"]
+            if row.get("refunded_amount") and row["refunded_amount"] > (item.refunded_amount or Decimal("0")):
+                item.refunded_amount = row["refunded_amount"]
+
+        new_total_refund = sum((item.refunded_amount or Decimal("0")) for item in record.items)
+        if new_total_refund > (record.refunded_amount or Decimal("0")):
+            record.refunded_amount = new_total_refund
 
         await self.session.commit()
         return record
@@ -571,6 +569,10 @@ class ReturnSyncService:
 
         item_rows, linked_items = self._build_item_rows(linked_order, record.items)
         response.linked_items += linked_items
+
+        new_total_refund = sum(row.get("refunded_amount", Decimal("0")) for row in item_rows)
+        if new_total_refund > (record.refunded_amount or Decimal("0")):
+            record.refunded_amount = new_total_refund
 
         payload = {
             "platform": record.platform,
@@ -648,6 +650,11 @@ class ReturnSyncService:
                     item.item_name = linked_order_item.item_name
                 if not item.external_sku and linked_order_item.external_sku:
                     item.external_sku = linked_order_item.external_sku
+            item_refund = item.refunded_amount
+            if item_refund == Decimal("0") and linked_order_item is not None and linked_order_item.unit_price > Decimal("0"):
+                qty = max(int(item.returned_qty or 0), int(item.cancelled_qty or 0)) or 1
+                item_refund = linked_order_item.unit_price * Decimal(qty)
+
             rows.append(
                 {
                     "linked_order_item_id": linked_order_item.id if linked_order_item else None,
@@ -657,7 +664,7 @@ class ReturnSyncService:
                     "ordered_qty": max(int(item.ordered_qty or 0), 0),
                     "returned_qty": max(int(item.returned_qty or 0), 0),
                     "cancelled_qty": max(int(item.cancelled_qty or 0), 0),
-                    "refunded_amount": item.refunded_amount,
+                    "refunded_amount": item_refund,
                     "item_payload": item.payload,
                 }
             )
