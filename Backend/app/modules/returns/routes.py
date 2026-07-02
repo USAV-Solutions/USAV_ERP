@@ -27,6 +27,7 @@ from app.modules.returns.schemas import (
     ReturnListResponse,
     ReturnRecordBrief,
     ReturnRecordDetail,
+    ReturnRecordUpdate,
     ReturnZohoLineValidationResponse,
     ReturnZohoSyncRangeRequest,
     ReturnZohoSyncRangeResponse,
@@ -306,6 +307,26 @@ async def rematch_return_record(
     detail.returned_qty_total = sum(int(item.returned_qty or 0) for item in record.items)
     detail.cancelled_qty_total = sum(int(item.cancelled_qty or 0) for item in record.items)
     return detail
+
+
+@router.patch("/{record_id}", response_model=ReturnRecordDetail)
+async def update_return_record(
+    record_id: int,
+    body: ReturnRecordUpdate,
+    _admin: AdminUser,
+    service: ReturnSyncService = Depends(get_return_service),
+):
+    try:
+        record = await service.update_record(record_id, body.model_dump(exclude_unset=True))
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    
+    detail = ReturnRecordDetail.model_validate(record)
+    detail.item_count = len(record.items or [])
+    detail.returned_qty_total = sum(int(item.returned_qty or 0) for item in record.items)
+    detail.cancelled_qty_total = sum(int(item.cancelled_qty or 0) for item in record.items)
+    return detail
+
 
 
 @router.post("/sync", response_model=list[ReturnSyncResponse])

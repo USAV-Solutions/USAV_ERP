@@ -61,6 +61,15 @@ class ReturnRecordBrief(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ReturnRecordUpdate(BaseModel):
+    normalized_status: Optional[ReturnNormalizedStatus] = None
+    reason: Optional[str] = None
+    customer_name: Optional[str] = None
+    customer_email: Optional[str] = None
+    refunded_amount: Optional[Decimal] = None
+    zoho_sync_status: Optional[ReturnZohoSyncStatus] = None
+
+
 class ReturnRecordDetail(ReturnRecordBrief):
     raw_payload: Optional[dict] = None
     items: list[ReturnItemDetail] = Field(default_factory=list)

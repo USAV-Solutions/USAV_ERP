@@ -10,6 +10,7 @@ import type {
   ReturnSyncResponse,
   ReturnSyncStatusResponse,
   ReturnZohoValidationResponse,
+  ReturnRecordUpdate,
 } from '../types/returns'
 
 export interface ListReturnsParams {
@@ -86,6 +87,11 @@ export async function importAmazonReturns(file: File): Promise<ReturnSyncRespons
 
 export async function rematchReturnRecord(recordId: number): Promise<ReturnRecordDetail> {
   const { data } = await axiosClient.post<ReturnRecordDetail>(RETURNS.REMATCH_RECORD(recordId))
+  return data
+}
+
+export async function updateReturnRecord(recordId: number, body: ReturnRecordUpdate): Promise<ReturnRecordDetail> {
+  const { data } = await axiosClient.patch<ReturnRecordDetail>(RETURNS.RECORD(recordId), body)
   return data
 }
 

@@ -22,6 +22,7 @@ import {
   MenuItem,
   Paper,
   Select,
+  Snackbar,
   Stack,
   Table,
   TableBody,
@@ -40,6 +41,8 @@ import { KeyboardArrowDown, KeyboardArrowUp, Sync, DateRange, UploadFile, Refres
 
 import SearchField from '../components/common/SearchField'
 import LongPressTableRow from '../components/common/LongPressTableRow'
+import HoldActionPromptDialog from '../components/common/HoldActionPromptDialog'
+import { useAuth } from '../hooks/useAuth'
 import TablePaginationWithPageJump from '../components/common/TablePaginationWithPageJump'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import {
@@ -51,6 +54,7 @@ import {
   syncReturnsRange,
   importAmazonReturns,
   rematchReturnRecord,
+  updateReturnRecord,
 } from '../api/returns'
 import type {
   ReturnListResponse,
@@ -169,6 +173,9 @@ function SummaryCards({ counts, total }: { counts: Record<string, number>; total
 }
 
 export default function ReturnsManagement() {
+  const { hasRole } = useAuth()
+  const canEditReturn = hasRole(['ADMIN', 'SALES_REP'])
+
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
   const returnView = searchParams.get('view') === 'fba' ? 'fba' : 'self'
@@ -217,6 +224,47 @@ export default function ReturnsManagement() {
     sortDir !== 'desc',
   ].filter(Boolean).length
   const hasActiveFilters = activeFilterCount > 0 || !!searchInput
+
+  const [selectedReturn, setSelectedReturn] = useState<ReturnRecordBrief | null>(null)
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [editNormalizedStatus, setEditNormalizedStatus] = useState<ReturnNormalizedStatus | ''>('')
+  const [editReason, setEditReason] = useState('')
+  const [editRefundedAmount, setEditRefundedAmount] = useState('')
+  const [editZohoSyncStatus, setEditZohoSyncStatus] = useState<ReturnZohoSyncStatus | ''>('')
+  const [snackbarMessage, setSnackbarMessage] = useState('')
+
+  const handleEditClick = (row: ReturnRecordBrief) => {
+    if (!canEditReturn) return
+    setSelectedReturn(row)
+    setEditNormalizedStatus(row.normalized_status)
+    setEditReason(row.reason || '')
+    setEditRefundedAmount(row.refunded_amount?.toString() || '0')
+    setEditZohoSyncStatus(row.zoho_sync_status)
+    setEditDialogOpen(true)
+  }
+
+  const updateMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedReturn) throw new Error('No return selected')
+      return updateReturnRecord(selectedReturn.id, {
+        normalized_status: editNormalizedStatus ? (editNormalizedStatus as ReturnNormalizedStatus) : undefined,
+        reason: editReason.trim() || undefined,
+        refunded_amount: editRefundedAmount ? parseFloat(editRefundedAmount) : undefined,
+        zoho_sync_status: editZohoSyncStatus ? (editZohoSyncStatus as ReturnZohoSyncStatus) : undefined,
+      })
+    },
+    onSuccess: () => {
+      setSnackbarMessage('Return updated successfully')
+      setEditDialogOpen(false)
+      void queryClient.invalidateQueries({ queryKey: ['returns'] })
+      if (expandedId === selectedReturn?.id) {
+        void queryClient.invalidateQueries({ queryKey: ['return-record', expandedId] })
+      }
+    },
+    onError: (error) => {
+      setSnackbarMessage(`Update failed: ${(error as Error).message}`)
+    }
+  })
 
   const resetFilters = () => {
     setPlatformFilter('')
@@ -518,6 +566,8 @@ export default function ReturnsManagement() {
                       payload={row}
                       rowSx={{ cursor: 'pointer', '& > *': { borderBottom: expanded ? 'unset' : undefined } }}
                       onClick={() => setExpandedId(expanded ? null : row.id)}
+                      enableLongPress={canEditReturn}
+                      onLongPress={() => handleEditClick(row)}
                     >
                       <TableCell sx={{ px: 1 }}>
                         <IconButton size="small">
@@ -899,6 +949,63 @@ export default function ReturnsManagement() {
           ) : null}
         </DialogActions>
       </Dialog>
+
+      <HoldActionPromptDialog
+        open={editDialogOpen}
+        onClose={() => setEditDialogOpen(false)}
+        title="Edit Return"
+        onSave={() => updateMutation.mutate()}
+        saveDisabled={!selectedReturn || !canEditReturn}
+        saveLoading={updateMutation.isPending}
+      >
+        <Stack spacing={2} sx={{ mt: 1 }}>
+          <FormControl fullWidth size="small">
+            <InputLabel>Status</InputLabel>
+            <Select
+              value={editNormalizedStatus}
+              onChange={(e) => setEditNormalizedStatus(e.target.value as ReturnNormalizedStatus)}
+              label="Status"
+            >
+              {STATUS_OPTIONS.map((status) => (
+                <MenuItem key={status} value={status}>{formatStatusLabel(status)}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <TextField
+            fullWidth
+            size="small"
+            label="Reason"
+            value={editReason}
+            onChange={(e) => setEditReason(e.target.value)}
+          />
+          <TextField
+            fullWidth
+            size="small"
+            label="Refunded Amount"
+            type="number"
+            value={editRefundedAmount}
+            onChange={(e) => setEditRefundedAmount(e.target.value)}
+          />
+          <FormControl fullWidth size="small">
+            <InputLabel>Zoho Sync Status</InputLabel>
+            <Select
+              value={editZohoSyncStatus}
+              onChange={(e) => setEditZohoSyncStatus(e.target.value as ReturnZohoSyncStatus)}
+              label="Zoho Sync Status"
+            >
+              {['PENDING', 'READY_TO_SYNC', 'MISSING_LOCAL_ORDER', 'MISSING_ZOHO_ORDER', 'MISSING_LINE_ITEM_MAPPING', 'QUANTITY_CONFLICT', 'ALREADY_SYNCED', 'SYNCED', 'ERROR'].map((s) => (
+                <MenuItem key={s} value={s}>{formatStatusLabel(s)}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Stack>
+      </HoldActionPromptDialog>
+
+      <Snackbar open={!!snackbarMessage} autoHideDuration={4000} onClose={() => setSnackbarMessage('')}>
+        <Alert onClose={() => setSnackbarMessage('')} severity="info">
+          {snackbarMessage}
+        </Alert>
+      </Snackbar>
     </Box>
   )
 }
