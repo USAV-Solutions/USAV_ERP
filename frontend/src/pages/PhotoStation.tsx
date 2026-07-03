@@ -202,17 +202,18 @@ export default function PhotoStation() {
       else if (genericOrder) orderNum = genericOrder[0]
       setDetectedOrder(orderNum)
 
-      // 3. Extract Shipping Carrier Tracking Number
-      // UPS: 1Z[A-Z0-9]{16}
-      const upsTrack = text.replace(/\s+/g, '').match(/\b1Z[A-Z0-9]{16}\b/i)
-      // USPS: 92/94 followed by 20 digits or generic 22 digits starting with 9
-      const uspsTrack = text.replace(/\s+/g, '').match(/\b9[24]\d{20}\b/) || text.replace(/\s+/g, '').match(/\b\d{20,22}\b/)
+      // 3. Extract Tracking Number (with spaces removed for robustness)
+      const noSpacesText = text.replace(/\s+/g, '')
+      // UPS: 1Z... (18 chars)
+      const upsTrack = noSpacesText.match(/1Z[A-Z0-9]{16}/i)
+      // USPS: 94... or 92... (20 to 22 digits)
+      const uspsTrack = noSpacesText.match(/9[24]\d{18,20}/)
       // FedEx: 12 or 15 digits
-      const fedexTrack = text.replace(/\s+/g, '').match(/\b\d{12}\b/) || text.replace(/\s+/g, '').match(/\b\d{15}\b/)
+      const fedexTrack = noSpacesText.match(/\b\d{12}\b/) || noSpacesText.match(/\b\d{15}\b/)
 
       let trackNum = ''
-      if (upsTrack) trackNum = upsTrack[0]
-      else if (uspsTrack && uspsTrack[0].startsWith('9')) trackNum = uspsTrack[0]
+      if (upsTrack) trackNum = upsTrack[0].toUpperCase()
+      else if (uspsTrack) trackNum = uspsTrack[0]
       else if (fedexTrack) trackNum = fedexTrack[0]
       setDetectedTracking(trackNum)
 
