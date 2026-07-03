@@ -282,6 +282,16 @@ class Order(Base, ZohoSyncMixin, TimestampMixin):
         String(50), nullable=True, comment="Shipping carrier (UPS, FedEx, USPS).",
     )
 
+    # ---- Verification ----
+    verify_status: Mapped[Optional[str]] = mapped_column(
+        String(50), nullable=True, default="UNVERIFIED", server_default="UNVERIFIED",
+        comment="Verification status: UNVERIFIED, VERIFIED, READY, ERROR_MISSING_TRACKING, ERROR_COUNT_MISMATCH.",
+    )
+    packing_metadata: Mapped[Optional[dict]] = mapped_column(
+        JSONB, nullable=True, default={}, server_default="{}",
+        comment="Metadata containing links to Synology NAS photos.",
+    )
+
     # ---- Metadata ----
     platform_data: Mapped[Optional[dict]] = mapped_column(
         JSONB, nullable=True,

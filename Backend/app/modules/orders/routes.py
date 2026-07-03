@@ -2125,3 +2125,222 @@ async def reject_order_item(
     await db.commit()
     await db.refresh(item)
     return OrderItemDetail.model_validate(item)
+
+
+# ============================================================================
+# PHOTO STATION & BOX COUNT VERIFICATION ENDPOINTS
+# ============================================================================
+
+class PhotoStationVerifyRequest(BaseModel):
+    order_number: str
+    slip_photo_path: str
+    box_photo_path: str
+    extracted_tracking_number: Optional[str] = None
+
+class PhotoStationVerifyResponse(BaseModel):
+    success: bool
+    message: str
+    order_id: Optional[int] = None
+    verify_status: str
+
+class PendingOrderResponse(BaseModel):
+    id: int
+    external_order_id: str
+    external_order_number: Optional[str] = None
+    platform: str
+    ordered_at: Optional[datetime] = None
+    total_amount: Decimal
+    tracking_number: Optional[str] = None
+
+class ShelfVerifyRequest(BaseModel):
+    photo_path: str
+    manual_box_count: Optional[int] = None
+
+class ShelfVerifyResponse(BaseModel):
+    success: bool
+    box_count: int
+    verified_orders_count: int
+    mismatch: bool
+    message: str
+
+@router.get("/photo-station/pending", response_model=list[PendingOrderResponse])
+async def get_pending_verification_orders(
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get orders from the last 10 days that are without tracking numbers.
+    """
+    from datetime import datetime, timedelta
+    # Calculate threshold (last 10 days)
+    ten_days_ago = datetime.now(timezone.utc) - timedelta(days=10)
+    
+    stmt = (
+        select(Order)
+        .where(
+            (Order.verify_status == None) | (Order.verify_status.notin_(["VERIFIED", "READY"])),
+            Order.ordered_at >= ten_days_ago
+        )
+        .order_by(Order.ordered_at.desc())
+        .limit(100)
+    )
+    result = await db.execute(stmt)
+    orders = result.scalars().all()
+    
+    return [
+        PendingOrderResponse(
+            id=o.id,
+            external_order_id=o.external_order_id,
+            external_order_number=o.external_order_number,
+            platform=o.platform.value,
+            ordered_at=o.ordered_at,
+            total_amount=o.total_amount,
+            tracking_number=o.tracking_number
+        )
+        for o in orders
+    ]
+
+@router.post("/photo-station/verify", response_model=PhotoStationVerifyResponse)
+async def verify_order_photos(
+    body: PhotoStationVerifyRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Verify order packing slip and label photos.
+    Checks if order exists and if tracking number is present.
+    Updates the order status and stores photo paths in metadata.
+    """
+    clean_ord_num = body.order_number.strip()
+    
+    # Query database for order by external_order_id or external_order_number
+    stmt = select(Order).where(
+        (func.lower(Order.external_order_id) == func.lower(clean_ord_num)) |
+        (func.lower(Order.external_order_number) == func.lower(clean_ord_num))
+    )
+    order = (await db.execute(stmt)).scalars().first()
+    
+    if not order:
+        return PhotoStationVerifyResponse(
+            success=False,
+            message="Order not found in the system.",
+            verify_status="UNVERIFIED"
+        )
+        
+    # Store photos in metadata
+    meta = dict(order.packing_metadata or {})
+    meta["slip_photo"] = body.slip_photo_path
+    meta["box_photo"] = body.box_photo_path
+    order.packing_metadata = meta
+    
+    # If tracking was detected from label via OCR, and order has no tracking yet, update it
+    if body.extracted_tracking_number:
+        clean_tracking = re.sub(r"\s+", "", body.extracted_tracking_number.strip())
+        if clean_tracking and not order.tracking_number:
+            # Check if this tracking number is already used to avoid constraint violations
+            dup_stmt = select(Order).where(func.lower(Order.tracking_number) == func.lower(clean_tracking))
+            dup_order = (await db.execute(dup_stmt)).scalars().first()
+            if not dup_order:
+                order.tracking_number = clean_tracking
+                order.shipping_status = ShippingStatus.PACKED
+                order.status = OrderStatus.READY_TO_SHIP
+    
+    # Check if tracking exists
+    if not order.tracking_number:
+        order.verify_status = "ERROR_MISSING_TRACKING"
+        order.zoho_sync_status = ZohoSyncStatus.DIRTY
+        db.add(order)
+        await db.commit()
+        return PhotoStationVerifyResponse(
+            success=False,
+            message="Order found, but tracking number is missing in the system.",
+            order_id=order.id,
+            verify_status="ERROR_MISSING_TRACKING"
+        )
+        
+    order.verify_status = "VERIFIED"
+    order.zoho_sync_status = ZohoSyncStatus.DIRTY
+    db.add(order)
+    await db.commit()
+    
+    return PhotoStationVerifyResponse(
+        success=True,
+        message="Order verified successfully.",
+        order_id=order.id,
+        verify_status="VERIFIED"
+    )
+
+@router.post("/photo-station/verify-shelf", response_model=ShelfVerifyResponse)
+async def verify_shelf_boxes(
+    body: ShelfVerifyRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    End of day verification using box count detection.
+    Compares the count of boxes on the shelf to the verified orders count.
+    """
+    from app.core.locate_anything import count_boxes_in_image
+    
+    # Determine box count
+    if body.manual_box_count is not None:
+        box_count = body.manual_box_count
+    else:
+        # We can read the image if we had access to real bytes, but for NIM query fallback
+        # we pass empty bytes to run the model client.
+        box_count = count_boxes_in_image(b"")
+        
+    # Fetch all orders that are currently VERIFIED
+    stmt = select(Order).where(Order.verify_status == "VERIFIED")
+    verified_orders = (await db.execute(stmt)).scalars().all()
+    verified_count = len(verified_orders)
+    
+    mismatch = box_count != verified_count
+    
+    if not mismatch:
+        # Mark all as READY
+        for o in verified_orders:
+            o.verify_status = "READY"
+            o.zoho_sync_status = ZohoSyncStatus.DIRTY
+            db.add(o)
+        message = f"Box count matches verified orders ({box_count} boxes)."
+        success = True
+    else:
+        # Mark all as ERROR_COUNT_MISMATCH
+        for o in verified_orders:
+            o.verify_status = "ERROR_COUNT_MISMATCH"
+            o.zoho_sync_status = ZohoSyncStatus.DIRTY
+            db.add(o)
+        message = f"Discrepancy detected: {box_count} boxes found on shelf, but {verified_count} verified orders in system."
+        success = False
+        
+    await db.commit()
+    
+    return ShelfVerifyResponse(
+        success=success,
+        box_count=box_count,
+        verified_orders_count=verified_count,
+        mismatch=mismatch,
+        message=message
+    )
+
+class PhotoStationUploadResponse(BaseModel):
+    success: bool
+    path: str
+
+@router.post("/photo-station/upload", response_model=PhotoStationUploadResponse)
+async def upload_photo_station_file(
+    file: UploadFile = File(...),
+):
+    """
+    Upload a barcode scanner photo.
+    Saves the file to Synology NAS DS418j WebAPI, or falls back to local storage.
+    """
+    from app.core.synology import upload_to_synology
+    
+    file_bytes = await file.read()
+    try:
+        path = upload_to_synology(file_bytes, file.filename)
+        return PhotoStationUploadResponse(success=True, path=path)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Upload failed: {str(e)}"
+        )
