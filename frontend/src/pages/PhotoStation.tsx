@@ -229,7 +229,11 @@ export default function PhotoStation() {
 
   const handleUploadAndSave = async () => {
     if (!selectedOrder) return
-    const orderIdToVerify = detectedOrder || selectedOrder.external_order_id
+    const orderIdToVerify = (detectedOrder || selectedOrder.external_order_id || '').trim()
+    if (!orderIdToVerify) {
+      alert('Please detect or manually enter the Order Number reference first.')
+      return
+    }
 
     setIsSubmitting(true)
     setSubmitResult(null)
@@ -277,10 +281,11 @@ export default function PhotoStation() {
 
   const triggerMockCapture = () => {
     if (!selectedOrder) return
+    const orderId = selectedOrder.external_order_id || `SO-${Math.floor(100000 + Math.random() * 900000)}`
     if (captureStep === 1) {
       setSlipPhoto('https://via.placeholder.com/640x480.png?text=Mock+Slip+Photo')
-      setDetectedOrder(selectedOrder.external_order_id)
-      setDetectedPlatform(selectedOrder.platform)
+      setDetectedOrder(orderId)
+      setDetectedPlatform(selectedOrder.platform || 'MANUAL')
       setDetectedTracking(`94001${Math.floor(10000000000000000 + Math.random() * 9000000000000000)}`)
     } else {
       setBoxPhoto('https://via.placeholder.com/640x480.png?text=Mock+Box+Photo')
@@ -333,6 +338,19 @@ export default function PhotoStation() {
           disabled={isLoadingOrders}
         >
           Refresh List
+        </Button>
+        <Button
+          variant="contained"
+          color="secondary"
+          startIcon={<CameraAlt />}
+          onClick={() => handleOpenCapture({
+            id: 0,
+            external_order_id: '',
+            platform: 'MANUAL',
+            total_amount: 0
+          })}
+        >
+          Direct Capture
         </Button>
       </Box>
 
@@ -410,7 +428,7 @@ export default function PhotoStation() {
       >
         <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Typography variant="h6">
-            Pack Verification: {selectedOrder?.external_order_id} ({selectedOrder?.platform})
+            Pack Verification: {selectedOrder?.external_order_id || 'Direct Capture'} ({selectedOrder?.platform || 'MANUAL'})
           </Typography>
           <IconButton onClick={handleCloseModal}>
             <Close />
