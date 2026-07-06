@@ -1154,6 +1154,7 @@ async def import_orders_from_file(
         SalesImportFileSource.AMAZON_FBA_CSV,
         SalesImportFileSource.SHIPSTATION_CUSTOMER_CSV,
         SalesImportFileSource.TRACKING_CSV,
+        SalesImportFileSource.SHIPPING_STATUS_CSV,
     }:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1200,6 +1201,69 @@ async def import_orders_from_file(
             errors=errors,
         )
 
+
+    if source == SalesImportFileSource.SHIPPING_STATUS_CSV:
+        reader = csv.DictReader(io.StringIO(text))
+        rows_seen = 0
+        rows_skipped = 0
+        updated_count = 0
+        
+        processed_orders = set()
+
+        for row in reader:
+            rows_seen += 1
+            order_number = row.get("order_number", "").strip()
+            scraped_status = row.get("scraped_status", "").strip().upper()
+            
+            if not order_number:
+                rows_skipped += 1
+                continue
+                
+            if order_number in processed_orders:
+                continue
+                
+            shipping_status = ShippingStatus.PENDING
+            if scraped_status == "DELIVERED":
+                shipping_status = ShippingStatus.DELIVERED
+            elif scraped_status == "SHIPPED":
+                shipping_status = ShippingStatus.SHIPPING
+            elif scraped_status == "RETURNED":
+                shipping_status = ShippingStatus.RETURNED
+            elif scraped_status == "REFUNDED":
+                shipping_status = ShippingStatus.REFUNDED
+            elif scraped_status == "CANCELLED":
+                shipping_status = ShippingStatus.CANCELLED
+                
+            stmt = select(Order).where(
+                (Order.external_order_id == order_number) | (Order.external_order_number == order_number)
+            )
+            orders = (await db.execute(stmt)).scalars().all()
+            if not orders:
+                rows_skipped += 1
+                continue
+                
+            for order in orders:
+                order.shipping_status = shipping_status
+                db.add(order)
+            
+            processed_orders.add(order_number)
+            updated_count += len(orders)
+            
+        await db.commit()
+
+        return SalesImportFileResponse(
+            source=source,
+            source_rows_seen=rows_seen,
+            source_rows_skipped=rows_skipped,
+            customers_created=0,
+            customers_updated=0,
+            new_orders=updated_count,
+            new_items=0,
+            auto_matched=0,
+            skipped_duplicates=0,
+            success=True,
+            errors=[],
+        )
 
     if source == SalesImportFileSource.SHIPSTATION_CUSTOMER_CSV:
         customers, rows_seen, rows_skipped = _parse_shipstation_customer_csv(text)

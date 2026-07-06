@@ -89,6 +89,7 @@ class SalesImportFileSource(str, Enum):
     AMAZON_FBA_CSV = "AMAZON_FBA_CSV"
     SHIPSTATION_CUSTOMER_CSV = "SHIPSTATION_CUSTOMER_CSV"
     TRACKING_CSV = "TRACKING_CSV"
+    SHIPPING_STATUS_CSV = "SHIPPING_STATUS_CSV"
 
 
 class SalesImportApiRequest(BaseModel):
