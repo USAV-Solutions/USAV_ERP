@@ -5,10 +5,11 @@ Sales orders domain: ingestion/import, listing-centric matching, filtering, cust
 
 ## Typical Contents
 - Python modules, schemas, or support assets scoped to this domain.
-- `routes.py`: Holds endpoints including `/orders/photo-station/verify`, `/orders/photo-station/verify-shelf`, and `/orders/photo-station/upload`.
+- `routes.py`: Holds endpoints including `/orders/photo-station/verify`, `/orders/photo-station/verify-shelf`, `/orders/photo-station/upload`, and `/orders/photo-station/extract-ocr`.
 
 ## Common Pitfalls
 - **Order Verification States:** `orders.verify_status` transitions between `UNVERIFIED` (default), `VERIFIED` (photos captured and tracking exists), `READY` (shelf count validation matches), `ERROR_MISSING_TRACKING`, and `ERROR_COUNT_MISMATCH`. Keep status mutations aligned with business logic.
+- **Gemini Vision OCR Extraction:** The `/orders/photo-station/extract-ocr` endpoint requires a valid `GEMINI_API_KEY` or `GOOGLE_API_KEY` environment variable on the backend container. It uses the `google-genai` SDK to run zero-shot parsing of marketplace name, Order ID, and tracking numbers from packing slips, bypassing client-side Tesseract.js.
 - **Packing Metadata:** `orders.packing_metadata` stores JSON paths to Synology NAS photo attachments (`slip_photo` and `box_photo`).
 - **FileStation/Upload Proxying:** Frontend uploads base64 canvas captures to `/api/orders/photo-station/upload` which uploads to Synology DS418j FileStation API via DSM WebAPI. If NAS is offline or unconfigured, it defaults to saving locally under `Backend/static/photos/` as a fallback.
 - **End-of-Day Box Count:** `/photo-station/verify-shelf` queries `locate_anything.py` using NVIDIA Locate Anything 3B model prompt. If the counted boxes mismatch today's `VERIFIED` order count, all active verified orders are flagged as `ERROR_COUNT_MISMATCH` and a discrepancy warning is returned.

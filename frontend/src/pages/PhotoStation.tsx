@@ -33,7 +33,6 @@ import {
   Search,
   Refresh,
 } from '@mui/icons-material'
-import { createWorker } from 'tesseract.js'
 import axios from 'axios'
 
 interface PendingOrder {
@@ -135,61 +134,41 @@ export default function PhotoStation() {
     e.target.value = ''
   }
 
-  // Advanced OCR regex-based parser
+  // Advanced Gemini Vision AI-based OCR extractor
   const runOCR = async (dataUrl: string) => {
     setIsOcrLoading(true)
     setOcrError(null)
     try {
-      const worker = await createWorker('eng')
-      const ret = await worker.recognize(dataUrl)
-      await worker.terminate()
+      // 1. Convert captured base64 dataUrl to binary Blob
+      const res = await fetch(dataUrl)
+      const blob = await res.blob()
       
-      const text = ret.data.text
-      console.log('OCR Raw Text Block:', text)
-
-      // 1. Recognize Platforms and Packing Slip Formats
-      let platform = ''
-      if (/amazon/i.test(text)) platform = 'AMAZON'
-      else if (/ebay/i.test(text)) platform = 'EBAY'
-      else if (/ecwid/i.test(text)) platform = 'ECWID'
-      else if (/walmart/i.test(text)) platform = 'WALMART'
-      setDetectedPlatform(platform)
-
-      // 2. Extract Order Number
-      // Amazon order ID: 114-0294090-0548272
-      const amazonOrder = text.match(/\b\d{3}-\d{7}-\d{7}\b/)
-      // eBay order ID: 12-34567-89012 or standard numeric sequence
-      const ebayOrder = text.match(/\b\d{2}-\d{5}-\d{5}\b/)
-      // Generic order: SO-xxxx or 5-to-15 digit sequence
-      const genericOrder = text.match(/\b(?:SO-)?\d{5,15}\b/i)
-
-      let orderNum = ''
-      if (amazonOrder) orderNum = amazonOrder[0]
-      else if (ebayOrder) orderNum = ebayOrder[0]
-      else if (genericOrder) orderNum = genericOrder[0]
-      setDetectedOrder(orderNum)
-
-      // 3. Extract Tracking Number (with spaces removed for robustness)
-      const noSpacesText = text.replace(/\s+/g, '')
-      // UPS: 1Z... (18 chars)
-      const upsTrack = noSpacesText.match(/1Z[A-Z0-9]{16}/i)
-      // USPS: 94... or 92... (20 to 22 digits)
-      const uspsTrack = noSpacesText.match(/9[24]\d{18,20}/)
-      // FedEx: 12 or 15 digits
-      const fedexTrack = noSpacesText.match(/\b\d{12}\b/) || noSpacesText.match(/\b\d{15}\b/)
-
-      let trackNum = ''
-      if (upsTrack) trackNum = upsTrack[0].toUpperCase()
-      else if (uspsTrack) trackNum = uspsTrack[0]
-      else if (fedexTrack) trackNum = fedexTrack[0]
-      setDetectedTracking(trackNum)
-
-      if (!orderNum && !trackNum) {
-        setOcrError('Could not recognize order ID or tracking barcode. Try taking the photo under direct light.')
+      // 2. Append to FormData
+      const fd = new FormData()
+      fd.append('file', blob, 'slip.jpg')
+      
+      // 3. Post to backend AI extraction endpoint
+      const response = await axios.post('/api/orders/photo-station/extract-ocr', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+      
+      const { success, platform, order_id, tracking_number, message } = response.data
+      
+      if (success) {
+        setDetectedPlatform(platform || 'UNKNOWN')
+        setDetectedOrder(order_id || '')
+        setDetectedTracking(tracking_number || '')
+        
+        if (!order_id && !tracking_number) {
+          setOcrError('Gemini analyzed the image, but could not locate the Order ID or Tracking Number. Please check lighting or input manually.')
+        }
+      } else {
+        setOcrError(message || 'AI extraction failed. Please enter details manually.')
       }
-    } catch (err) {
-      console.error('OCR analysis failed:', err)
-      setOcrError('Failed to read image. Please enter details manually.')
+    } catch (err: any) {
+      console.error('AI OCR analysis failed:', err)
+      const errMsg = err.response?.data?.detail || err.message || 'Failed to connect to AI server.'
+      setOcrError(`AI OCR failed: ${errMsg}. Please enter details manually.`)
     } finally {
       setIsOcrLoading(false)
     }
@@ -446,7 +425,7 @@ export default function PhotoStation() {
               {filteredOrders.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} align="center" sx={{ py: 6 }}>
-                    No pending orders without tracking in the last 10 days.
+                    No pending unverified orders in the last 10 days.
                   </TableCell>
                 </TableRow>
               ) : (
