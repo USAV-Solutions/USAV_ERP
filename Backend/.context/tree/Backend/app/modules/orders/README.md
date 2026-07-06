@@ -1,13 +1,17 @@
 # Backend\app\modules\orders
 
 ## What This Folder Does
-Sales orders domain: ingestion/import, listing-centric matching, filtering, customer CSV upsert, order sync state, and the split between self-fulfilled orders vs Amazon FBA orders.
+Sales orders domain: ingestion/import, listing-centric matching, filtering, customer CSV upsert, order sync state, the split between self-fulfilled orders vs Amazon FBA orders, and **Photo Station package verification workflow** including end-of-day box counting.
 
 ## Typical Contents
 - Python modules, schemas, or support assets scoped to this domain.
-- Folder-specific logic that should remain cohesive inside this boundary.
+- `routes.py`: Holds endpoints including `/orders/photo-station/verify`, `/orders/photo-station/verify-shelf`, and `/orders/photo-station/upload`.
 
 ## Common Pitfalls
+- **Order Verification States:** `orders.verify_status` transitions between `UNVERIFIED` (default), `VERIFIED` (photos captured and tracking exists), `READY` (shelf count validation matches), `ERROR_MISSING_TRACKING`, and `ERROR_COUNT_MISMATCH`. Keep status mutations aligned with business logic.
+- **Packing Metadata:** `orders.packing_metadata` stores JSON paths to Synology NAS photo attachments (`slip_photo` and `box_photo`).
+- **FileStation/Upload Proxying:** Frontend uploads base64 canvas captures to `/api/orders/photo-station/upload` which uploads to Synology DS418j FileStation API via DSM WebAPI. If NAS is offline or unconfigured, it defaults to saving locally under `Backend/static/photos/` as a fallback.
+- **End-of-Day Box Count:** `/photo-station/verify-shelf` queries `locate_anything.py` using NVIDIA Locate Anything 3B model prompt. If the counted boxes mismatch today's `VERIFIED` order count, all active verified orders are flagged as `ERROR_COUNT_MISMATCH` and a discrepancy warning is returned.
 - Forgetting to align platform/source enums across model, schema, migration, and frontend types.
 - Adding filters in route layer but not implementing repository query logic.
 - Bypassing OrderSyncService ingestion path and breaking dedupe/matching consistency.
@@ -31,6 +35,13 @@ Sales orders domain: ingestion/import, listing-centric matching, filtering, cust
 - Sales-order line items can now be added manually via `POST /orders/{order_id}/items`; new rows mark order `zoho_sync_status=DIRTY`, set item status from `variant_id` (`MATCHED` vs `UNMATCHED`), and recalculate order subtotal/total from line totals while preserving any previously inferred handling delta.
 - Sales-order line items now support inline maintenance via `PATCH /orders/items/{item_id}` and `DELETE /orders/items/{item_id}`; successful edits/deletes mark parent order `zoho_sync_status=DIRTY` and recalculate order subtotal/total from current line totals.
 - Admin can bulk re-check unmatched line items via `POST /orders/sync/refresh-matching`; it tries `external_item_id` → `platform_listing.external_ref_id` first, then normalized name matching (`lowercase` + punctuation/spacing removed) between `item_name` and `platform_listing.listed_name`, and auto-sets `order_item.variant_id/status` when a mapped active listing is found.
+- Tracking number uniqueness and validation: Tracking numbers are unique across all orders in the database. Manual updates assigning duplicate tracking numbers fail with 400.
+- Order and shipping status constraints: Changing order status to `SHIPPED`/`DELIVERED` or shipping status to `SHIPPING`/`DELIVERED` requires a tracking number.
+- `TRACKING_CSV` file import source: Allows bulk updating order tracking details. Matches automatically update orders to `SHIPPED`/`SHIPPING`, auto-detect carrier, and mark Zoho `DIRTY`.
+- Orders persist `fulfillment_channel` separately from `source`.
+- `GET /orders` and `GET /orders/sync/status` filter by `fulfillment_channel`.
+- `AMAZON_FBA_CSV` imports Amazon orders and maps customers using `Customer.amazon_buyer_id`.
+- FBA orders cannot be downgraded back to `SELF_FULFILLED` by regular API syncs.
 - Tracking number uniqueness and validation: Tracking numbers are unique across all orders in the database. Manual updates attempting to assign duplicate tracking numbers will fail with 400 Bad Request. Background syncs and tracking CSV imports will log a warning and skip duplicates.
 - Order and shipping status constraints: Changing order status to `SHIPPED` or `DELIVERED`, or shipping status to `SHIPPING` or `DELIVERED`, requires a tracking number.
 - `TRACKING_CSV` file import source: Allows bulk updating order tracking details using daily Google Sheet summary files (Platform in Col A, Order Number in Col B, Tracking in Col I). Successful matches automatically update orders to `SHIPPED`/`SHIPPING`, auto-detect carrier, and mark Zoho sync status `DIRTY`. Missing orders, empty tracking numbers, and Google Sheets scientific-notation tracking values are ignored.
@@ -42,8 +53,7 @@ Sales orders domain: ingestion/import, listing-centric matching, filtering, cust
 - Standard API / ShipStation CSV imports create new orders as `SELF_FULFILLED`; if an existing Amazon order was previously upgraded by FBA CSV import, later API syncs must not downgrade it back.
 
 ## Recent Behavior Change: Platform Listing mappings
-
-- The `_learn_listing` flow now allows multiple `PlatformListing` rows for the same `variant_id` on the same `platform` as long as each listing has a unique `external_ref_id`. The service prefers to update an existing listing when the incoming `external_ref_id` already exists; it will block creating a conflicting mapping that would point the same `external_ref_id` at a different variant. This change prevents accidental deduplication of distinct listings that reference the same internal variant.
+- The `_learn_listing` flow allows multiple listings per `variant_id` on the same platform as long as `external_ref_id` is unique.
 
 ## Child Folders
 - `schemas/`

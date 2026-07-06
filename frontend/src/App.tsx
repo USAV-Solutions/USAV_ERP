@@ -16,6 +16,9 @@ import BankConversion from './pages/accounting/BankConversion'
 import UserManagement from './pages/UserManagement'
 import Layout from './components/common/Layout'
 import RoleGuard from './components/guards/RoleGuard'
+import PhotoStation from './pages/PhotoStation'
+import EndOfDayVerification from './pages/EndOfDayVerification'
+
 
 function App() {
   const { isAuthenticated } = useAuth()
@@ -43,6 +46,8 @@ function App() {
         <Route element={<RoleGuard allowedRoles={['ADMIN', 'WAREHOUSE_OP']} />}>
           <Route path="/warehouse/ops" element={<WarehouseOps />} />
           <Route path="/scan" element={<WarehouseScan />} />
+          <Route path="/scan/photo-station" element={<PhotoStation />} />
+          <Route path="/scan/end-of-day" element={<EndOfDayVerification />} />
         </Route>
 
         {/* Catalog Routes */}
