@@ -2225,11 +2225,15 @@ async def extract_ocr_from_slip(
     import os
     import json
     
+    logger.info(f"Received OCR extraction request. Filename: {file.filename}, Content-Type: {file.content_type}")
+    
     image_bytes = await file.read()
+    logger.info(f"Read image payload of size: {len(image_bytes)} bytes")
     
     # Check if API key is configured
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if not api_key:
+        logger.warning("Gemini API key is not configured. Missing GEMINI_API_KEY / GOOGLE_API_KEY.")
         return OCRExtractResponse(
             success=False,
             platform="UNKNOWN",
@@ -2243,6 +2247,7 @@ async def extract_ocr_from_slip(
         from google.genai import types
         
         # Initialize client
+        logger.info("Initializing GenAI client...")
         client = genai.Client(api_key=api_key)
         
         # Prompt Gemini with strict JSON guidelines
@@ -2255,6 +2260,7 @@ async def extract_ocr_from_slip(
             "Do not wrap the response in markdown code blocks like ```json."
         )
         
+        logger.info("Sending request to gemini-2.5-flash model...")
         response = client.models.generate_content(
             model='gemini-2.5-flash',
             contents=[
@@ -2268,12 +2274,15 @@ async def extract_ocr_from_slip(
         
         # Parse the JSON response
         text_resp = response.text.strip()
+        logger.info(f"Received raw text response from Gemini: {text_resp}")
+        
         # Strip potential markdown code block markers if the model included them
         text_resp = re.sub(r"^```(?:json)?\n", "", text_resp)
         text_resp = re.sub(r"\n```$", "", text_resp)
         text_resp = text_resp.strip()
         
         data = json.loads(text_resp)
+        logger.info(f"Successfully parsed Gemini JSON payload: {data}")
         
         return OCRExtractResponse(
             success=True,
@@ -2284,6 +2293,7 @@ async def extract_ocr_from_slip(
         )
         
     except Exception as e:
+        logger.error(f"Gemini Vision AI extraction failed: {str(e)}", exc_info=True)
         return OCRExtractResponse(
             success=False,
             platform="UNKNOWN",
