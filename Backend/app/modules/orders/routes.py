@@ -2207,6 +2207,91 @@ class PhotoStationVerifyResponse(BaseModel):
     order_id: Optional[int] = None
     verify_status: str
 
+class OCRExtractResponse(BaseModel):
+    success: bool
+    platform: str
+    order_id: str
+    tracking_number: str
+    message: str
+
+@router.post("/photo-station/extract-ocr", response_model=OCRExtractResponse)
+async def extract_ocr_from_slip(
+    file: UploadFile = File(...),
+):
+    """
+    Upload a packing slip image and extract Platform, Order ID, and Tracking Number
+    using Google's Gemini Vision AI API (gemini-2.5-flash).
+    """
+    import os
+    import json
+    
+    image_bytes = await file.read()
+    
+    # Check if API key is configured
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        return OCRExtractResponse(
+            success=False,
+            platform="UNKNOWN",
+            order_id="",
+            tracking_number="",
+            message="Gemini API key is not configured. Please set GEMINI_API_KEY in the environment."
+        )
+        
+    try:
+        from google import genai
+        from google.genai import types
+        
+        # Initialize client
+        client = genai.Client(api_key=api_key)
+        
+        # Prompt Gemini with strict JSON guidelines
+        prompt = (
+            "Analyze this packing slip image. Extract the following details:\n"
+            "1. Platform (marketplace platform like AMAZON, EBAY, WALMART, SHOPIFY, ECWID, etc.)\n"
+            "2. Order ID (e.g. 114-0294090-0548272 for Amazon, 26-14651-46671 for eBay, or standard order numbers)\n"
+            "3. Shipping Carrier Tracking Number (UPS: 1Z..., USPS: 20-22 digits starting with 9, FedEx: 12/15 digits)\n\n"
+            "Return the result STRICTLY as a raw JSON object with keys: 'platform', 'order_id', and 'tracking_number'. "
+            "Do not wrap the response in markdown code blocks like ```json."
+        )
+        
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=[
+                types.Part.from_bytes(
+                    data=image_bytes,
+                    mime_type=file.content_type or 'image/jpeg',
+                ),
+                prompt
+            ]
+        )
+        
+        # Parse the JSON response
+        text_resp = response.text.strip()
+        # Strip potential markdown code block markers if the model included them
+        text_resp = re.sub(r"^```(?:json)?\n", "", text_resp)
+        text_resp = re.sub(r"\n```$", "", text_resp)
+        text_resp = text_resp.strip()
+        
+        data = json.loads(text_resp)
+        
+        return OCRExtractResponse(
+            success=True,
+            platform=str(data.get("platform", "UNKNOWN")).upper(),
+            order_id=str(data.get("order_id", "")),
+            tracking_number=str(data.get("tracking_number", "")),
+            message="Successfully extracted packing details."
+        )
+        
+    except Exception as e:
+        return OCRExtractResponse(
+            success=False,
+            platform="UNKNOWN",
+            order_id="",
+            tracking_number="",
+            message=f"Gemini Vision AI extraction failed: {str(e)}"
+        )
+
 class PendingOrderResponse(BaseModel):
     id: int
     external_order_id: str
@@ -2242,9 +2327,9 @@ async def get_pending_verification_orders(
         select(Order)
         .where(
             (Order.verify_status == None) | (Order.verify_status.notin_(["VERIFIED", "READY"])),
-            Order.ordered_at >= ten_days_ago
+            (Order.ordered_at >= ten_days_ago) | (Order.created_at >= ten_days_ago)
         )
-        .order_by(Order.ordered_at.desc())
+        .order_by(Order.created_at.desc())
         .limit(100)
     )
     result = await db.execute(stmt)

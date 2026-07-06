@@ -195,3 +195,55 @@ async def test_get_pending_verification_orders():
     assert res[0].external_order_id == "SO-111"
     assert res[0].platform == "AMAZON"
     assert res[0].total_amount == Decimal("99.99")
+
+
+@pytest.mark.asyncio
+async def test_extract_ocr_from_slip_no_api_key(monkeypatch):
+    """Verify that extract_ocr_from_slip returns a clear error if GEMINI_API_KEY is not set."""
+    from app.modules.orders.routes import extract_ocr_from_slip
+    from fastapi import UploadFile
+    import io
+    
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    
+    mock_file = UploadFile(
+        filename="test.jpg",
+        file=io.BytesIO(b"dummy image data")
+    )
+    
+    res = await extract_ocr_from_slip(file=mock_file)
+    
+    assert res.success is False
+    assert "Gemini API key is not configured" in res.message
+    assert res.platform == "UNKNOWN"
+
+
+@pytest.mark.asyncio
+async def test_extract_ocr_from_slip_success(monkeypatch):
+    """Verify extract_ocr_from_slip successfully invokes and parses Gemini API response."""
+    from app.modules.orders.routes import extract_ocr_from_slip
+    from fastapi import UploadFile
+    import io
+    from unittest.mock import patch
+    
+    monkeypatch.setenv("GEMINI_API_KEY", "test_key")
+    
+    mock_client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.text = '{"platform": "EBAY", "order_id": "26-14651-46671", "tracking_number": "9434608106244166618373"}'
+    mock_client.models.generate_content.return_value = mock_response
+    
+    mock_file = UploadFile(
+        filename="test.jpg",
+        file=io.BytesIO(b"dummy image data")
+    )
+    
+    with patch("google.genai.Client", return_value=mock_client):
+        res = await extract_ocr_from_slip(file=mock_file)
+        
+    assert res.success is True
+    assert res.platform == "EBAY"
+    assert res.order_id == "26-14651-46671"
+    assert res.tracking_number == "9434608106244166618373"
+
