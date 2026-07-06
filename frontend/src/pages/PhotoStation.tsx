@@ -75,9 +75,7 @@ export default function PhotoStation() {
     verify_status: string
   } | null>(null)
 
-  const videoRef = useRef<HTMLVideoElement | null>(null)
-  const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const streamRef = useRef<MediaStream | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   // Fetch pending verification queue
   const fetchPendingOrders = async () => {
@@ -96,38 +94,6 @@ export default function PhotoStation() {
     fetchPendingOrders()
   }, [])
 
-  // Start webcam when modal is open and on step 1 or 2
-  useEffect(() => {
-    if (isModalOpen && (captureStep === 1 || captureStep === 2)) {
-      startCamera()
-    } else {
-      stopCamera()
-    }
-    return () => stopCamera()
-  }, [isModalOpen, captureStep])
-
-  const startCamera = async () => {
-    stopCamera()
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' } // Prefer back camera on mobile
-      })
-      streamRef.current = stream
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-      }
-    } catch (err) {
-      console.error('Error starting camera:', err)
-    }
-  }
-
-  const stopCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop())
-      streamRef.current = null
-    }
-  }
-
   const handleOpenCapture = (order: PendingOrder) => {
     setSelectedOrder(order)
     setCaptureStep(1)
@@ -142,30 +108,31 @@ export default function PhotoStation() {
   }
 
   const handleCloseModal = () => {
-    stopCamera()
     setIsModalOpen(false)
     setSelectedOrder(null)
   }
 
-  const capturePhoto = () => {
-    if (!videoRef.current || !canvasRef.current) return
-    const video = videoRef.current
-    const canvas = canvasRef.current
-    const context = canvas.getContext('2d')
-    if (!context) return
+  const triggerFileCapture = () => {
+    fileInputRef.current?.click()
+  }
 
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
-    context.drawImage(video, 0, 0, canvas.width, canvas.height)
-    const dataUrl = canvas.toDataURL('image/jpeg')
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
 
-    if (captureStep === 1) {
-      setSlipPhoto(dataUrl)
-      runOCR(dataUrl)
-    } else {
-      setBoxPhoto(dataUrl)
-      setCaptureStep(3)
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      const dataUrl = reader.result as string
+      if (captureStep === 1) {
+        setSlipPhoto(dataUrl)
+        runOCR(dataUrl)
+      } else {
+        setBoxPhoto(dataUrl)
+        setCaptureStep(3)
+      }
     }
+    reader.readAsDataURL(file)
+    e.target.value = ''
   }
 
   // Advanced OCR regex-based parser
@@ -311,6 +278,109 @@ export default function PhotoStation() {
     )
   })
 
+  const renderCapturePanel = (
+    photo: string | null,
+    title: string,
+    onRetake: () => void
+  ) => {
+    return (
+      <Box sx={{ width: '100%', position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        {!photo ? (
+          <Box
+            onClick={triggerFileCapture}
+            sx={{
+              width: '100%',
+              minHeight: 320,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              p: 3,
+              textAlign: 'center',
+              color: '#888',
+              '&:hover': { color: '#bbb' }
+            }}
+          >
+            <CameraAlt sx={{ fontSize: 64, mb: 2 }} />
+            <Typography variant="body1" sx={{ color: '#fff', mb: 1 }}>
+              {title}
+            </Typography>
+            <Typography variant="caption" color="textSecondary">
+              Click the shutter button below or tap this screen to take photo
+            </Typography>
+          </Box>
+        ) : (
+          <Box sx={{ position: 'relative', width: '100%' }}>
+            <img src={photo} alt={title} style={{ width: '100%', display: 'block', maxHeight: 400, objectFit: 'contain' }} />
+            <Button
+              variant="contained"
+              color="error"
+              size="small"
+              startIcon={<Replay />}
+              onClick={onRetake}
+              sx={{ position: 'absolute', top: 12, right: 12, bgcolor: 'rgba(211, 47, 47, 0.9)' }}
+            >
+              Retake
+            </Button>
+          </Box>
+        )}
+
+        {/* Shutter Bar Overlay */}
+        {!photo && (
+          <Box
+            sx={{
+              width: '100%',
+              bgcolor: 'rgba(0,0,0,0.85)',
+              py: 2,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 4,
+              position: 'relative'
+            }}
+          >
+            <Button
+              variant="text"
+              sx={{ color: '#aaa', minWidth: 80 }}
+              onClick={triggerMockCapture}
+            >
+              Mock
+            </Button>
+
+            {/* iOS Circular Shutter Button */}
+            <Box
+              onClick={triggerFileCapture}
+              sx={{
+                width: 72,
+                height: 72,
+                borderRadius: '50%',
+                border: '4px solid #fff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                transition: 'transform 0.1s ease',
+                '&:active': { transform: 'scale(0.92)' }
+              }}
+            >
+              <Box
+                sx={{
+                  width: 54,
+                  height: 54,
+                  borderRadius: '50%',
+                  bgcolor: '#fff',
+                }}
+              />
+            </Box>
+
+            <Box sx={{ minWidth: 80 }} />
+          </Box>
+        )}
+      </Box>
+    )
+  }
+
   return (
     <Box sx={{ p: 1 }}>
       <Typography variant="h5" sx={{ mb: 2 }}>
@@ -453,55 +523,36 @@ export default function PhotoStation() {
                   justifyContent: 'center',
                 }}
               >
-                {(captureStep === 1 || captureStep === 2) ? (
-                  <Box sx={{ width: '100%', position: 'relative' }}>
-                    <video
-                      ref={videoRef}
-                      autoPlay
-                      playsInline
-                      style={{ width: '100%', height: 'auto', display: 'block' }}
-                    />
-                    <Box
-                      sx={{
-                        position: 'absolute',
-                        bottom: 16,
-                        left: '50%',
-                        transform: 'translateX(-50%)',
-                        display: 'flex',
-                        gap: 2,
-                      }}
-                    >
-                      <Button
-                        variant="contained"
-                        color="secondary"
-                        startIcon={<CameraAlt />}
-                        onClick={capturePhoto}
-                      >
-                        {captureStep === 1 ? 'Capture Slip & Label' : 'Capture Packed Box'}
-                      </Button>
-                      <Button
-                        variant="outlined"
-                        color="inherit"
-                        sx={{ bgcolor: 'rgba(0,0,0,0.5)' }}
-                        onClick={triggerMockCapture}
-                      >
-                        Mock Capture
-                      </Button>
-                    </Box>
-                  </Box>
-                ) : (
+                {captureStep === 1 && renderCapturePanel(
+                  slipPhoto,
+                  'Ready to Capture Slip & Label',
+                  () => {
+                    setSlipPhoto(null)
+                    setDetectedOrder('')
+                    setDetectedTracking('')
+                    setDetectedPlatform('')
+                  }
+                )}
+
+                {captureStep === 2 && renderCapturePanel(
+                  boxPhoto,
+                  'Ready to Capture Packed Box',
+                  () => setBoxPhoto(null)
+                )}
+
+                {captureStep === 3 && (
                   <Grid container spacing={0}>
                     <Grid item xs={6}>
                       <Typography align="center" variant="caption" sx={{ display: 'block', bgcolor: '#333', color: 'white', py: 0.5 }}>
                         Slip & Label
                       </Typography>
-                      <img src={slipPhoto || ''} alt="Slip" style={{ width: '100%', display: 'block' }} />
+                      <img src={slipPhoto || ''} alt="Slip" style={{ width: '100%', display: 'block', maxHeight: 300, objectFit: 'contain' }} />
                     </Grid>
                     <Grid item xs={6}>
                       <Typography align="center" variant="caption" sx={{ display: 'block', bgcolor: '#333', color: 'white', py: 0.5 }}>
                         Box Photo
                       </Typography>
-                      <img src={boxPhoto || ''} alt="Box" style={{ width: '100%', display: 'block' }} />
+                      <img src={boxPhoto || ''} alt="Box" style={{ width: '100%', display: 'block', maxHeight: 300, objectFit: 'contain' }} />
                     </Grid>
                   </Grid>
                 )}
@@ -681,7 +732,14 @@ export default function PhotoStation() {
         </DialogActions>
       </Dialog>
 
-      <canvas ref={canvasRef} style={{ display: 'none' }} />
+      <input
+        type="file"
+        accept="image/*"
+        capture="environment"
+        ref={fileInputRef}
+        style={{ display: 'none' }}
+        onChange={handleFileChange}
+      />
     </Box>
   )
 }
