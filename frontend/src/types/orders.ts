@@ -30,6 +30,7 @@ export type SalesImportFileSource =
   | 'AMAZON_FBA_CSV'
   | 'SHIPSTATION_CUSTOMER_CSV'
   | 'TRACKING_CSV'
+  | 'SHIPPING_STATUS_CSV'
 export type OrderFulfillmentChannel = 'SELF_FULFILLED' | 'AMAZON_FBA'
 
 export type OrderStatus =
