@@ -87,7 +87,7 @@ async def test_upsert_record_links_existing_order_and_item():
     service.order_repo.get_with_items = AsyncMock(
         return_value=SimpleNamespace(
             id=11,
-            items=[SimpleNamespace(id=22, external_item_id="ITEM-1", external_sku="SKU-1", item_name="Item 1")],
+            items=[SimpleNamespace(id=22, external_item_id="ITEM-1", external_sku="SKU-1", item_name="Item 1", unit_price=Decimal("0"))],
         )
     )
     service.record_repo.get_by_external_key = AsyncMock(return_value=None)
@@ -111,7 +111,7 @@ async def test_upsert_record_returns_unchanged_for_identical_snapshot():
     service.order_repo.get_with_items = AsyncMock(
         return_value=SimpleNamespace(
             id=11,
-            items=[SimpleNamespace(id=22, external_item_id="ITEM-1", external_sku="SKU-1", item_name="Item 1")],
+            items=[SimpleNamespace(id=22, external_item_id="ITEM-1", external_sku="SKU-1", item_name="Item 1", unit_price=Decimal("0"))],
         )
     )
     existing = SimpleNamespace(
