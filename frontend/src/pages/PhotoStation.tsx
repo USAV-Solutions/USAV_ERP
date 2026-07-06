@@ -278,6 +278,109 @@ export default function PhotoStation() {
     )
   })
 
+  const renderCapturePanel = (
+    photo: string | null,
+    title: string,
+    onRetake: () => void
+  ) => {
+    return (
+      <Box sx={{ width: '100%', position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        {!photo ? (
+          <Box
+            onClick={triggerFileCapture}
+            sx={{
+              width: '100%',
+              minHeight: 320,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              p: 3,
+              textAlign: 'center',
+              color: '#888',
+              '&:hover': { color: '#bbb' }
+            }}
+          >
+            <CameraAlt sx={{ fontSize: 64, mb: 2 }} />
+            <Typography variant="body1" sx={{ color: '#fff', mb: 1 }}>
+              {title}
+            </Typography>
+            <Typography variant="caption" color="textSecondary">
+              Click the shutter button below or tap this screen to take photo
+            </Typography>
+          </Box>
+        ) : (
+          <Box sx={{ position: 'relative', width: '100%' }}>
+            <img src={photo} alt={title} style={{ width: '100%', display: 'block', maxHeight: 400, objectFit: 'contain' }} />
+            <Button
+              variant="contained"
+              color="error"
+              size="small"
+              startIcon={<Replay />}
+              onClick={onRetake}
+              sx={{ position: 'absolute', top: 12, right: 12, bgcolor: 'rgba(211, 47, 47, 0.9)' }}
+            >
+              Retake
+            </Button>
+          </Box>
+        )}
+
+        {/* Shutter Bar Overlay */}
+        {!photo && (
+          <Box
+            sx={{
+              width: '100%',
+              bgcolor: 'rgba(0,0,0,0.85)',
+              py: 2,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 4,
+              position: 'relative'
+            }}
+          >
+            <Button
+              variant="text"
+              sx={{ color: '#aaa', minWidth: 80 }}
+              onClick={triggerMockCapture}
+            >
+              Mock
+            </Button>
+
+            {/* iOS Circular Shutter Button */}
+            <Box
+              onClick={triggerFileCapture}
+              sx={{
+                width: 72,
+                height: 72,
+                borderRadius: '50%',
+                border: '4px solid #fff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                transition: 'transform 0.1s ease',
+                '&:active': { transform: 'scale(0.92)' }
+              }}
+            >
+              <Box
+                sx={{
+                  width: 54,
+                  height: 54,
+                  borderRadius: '50%',
+                  bgcolor: '#fff',
+                }}
+              />
+            </Box>
+
+            <Box sx={{ minWidth: 80 }} />
+          </Box>
+        )}
+      </Box>
+    )
+  }
+
   return (
     <Box sx={{ p: 1 }}>
       <Typography variant="h5" sx={{ mb: 2 }}>
@@ -420,203 +523,21 @@ export default function PhotoStation() {
                   justifyContent: 'center',
                 }}
               >
-                {captureStep === 1 && (
-                  <Box sx={{ width: '100%', position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    {!slipPhoto ? (
-                      <Box
-                        onClick={triggerFileCapture}
-                        sx={{
-                          width: '100%',
-                          minHeight: 320,
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          cursor: 'pointer',
-                          p: 3,
-                          textAlign: 'center',
-                          color: '#888',
-                          '&:hover': { color: '#bbb' }
-                        }}
-                      >
-                        <CameraAlt sx={{ fontSize: 64, mb: 2 }} />
-                        <Typography variant="body1" sx={{ color: '#fff', mb: 1 }}>
-                          Ready to Capture Slip & Label
-                        </Typography>
-                        <Typography variant="caption" color="textSecondary">
-                          Click the shutter button below or tap this screen to take photo
-                        </Typography>
-                      </Box>
-                    ) : (
-                      <Box sx={{ position: 'relative', width: '100%' }}>
-                        <img src={slipPhoto} alt="Slip" style={{ width: '100%', display: 'block', maxHeight: 400, objectFit: 'contain' }} />
-                        <Button
-                          variant="contained"
-                          color="error"
-                          size="small"
-                          startIcon={<Replay />}
-                          onClick={() => {
-                            setSlipPhoto(null)
-                            setDetectedOrder('')
-                            setDetectedTracking('')
-                            setDetectedPlatform('')
-                          }}
-                          sx={{ position: 'absolute', top: 12, right: 12, bgcolor: 'rgba(211, 47, 47, 0.9)' }}
-                        >
-                          Retake
-                        </Button>
-                      </Box>
-                    )}
-
-                    {/* Shutter Bar Overlay */}
-                    {!slipPhoto && (
-                      <Box
-                        sx={{
-                          width: '100%',
-                          bgcolor: 'rgba(0,0,0,0.85)',
-                          py: 2,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: 4,
-                          position: 'relative'
-                        }}
-                      >
-                        <Button
-                          variant="text"
-                          sx={{ color: '#aaa', minWidth: 80 }}
-                          onClick={triggerMockCapture}
-                        >
-                          Mock
-                        </Button>
-
-                        {/* iOS Circular Shutter Button */}
-                        <Box
-                          onClick={triggerFileCapture}
-                          sx={{
-                            width: 72,
-                            height: 72,
-                            borderRadius: '50%',
-                            border: '4px solid #fff',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            cursor: 'pointer',
-                            transition: 'transform 0.1s ease',
-                            '&:active': { transform: 'scale(0.92)' }
-                          }}
-                        >
-                          <Box
-                            sx={{
-                              width: 54,
-                              height: 54,
-                              borderRadius: '50%',
-                              bgcolor: '#fff',
-                            }}
-                          />
-                        </Box>
-
-                        <Box sx={{ minWidth: 80 }} />
-                      </Box>
-                    )}
-                  </Box>
+                {captureStep === 1 && renderCapturePanel(
+                  slipPhoto,
+                  'Ready to Capture Slip & Label',
+                  () => {
+                    setSlipPhoto(null)
+                    setDetectedOrder('')
+                    setDetectedTracking('')
+                    setDetectedPlatform('')
+                  }
                 )}
 
-                {captureStep === 2 && (
-                  <Box sx={{ width: '100%', position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    {!boxPhoto ? (
-                      <Box
-                        onClick={triggerFileCapture}
-                        sx={{
-                          width: '100%',
-                          minHeight: 320,
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          cursor: 'pointer',
-                          p: 3,
-                          textAlign: 'center',
-                          color: '#888',
-                          '&:hover': { color: '#bbb' }
-                        }}
-                      >
-                        <CameraAlt sx={{ fontSize: 64, mb: 2 }} />
-                        <Typography variant="body1" sx={{ color: '#fff', mb: 1 }}>
-                          Ready to Capture Packed Box
-                        </Typography>
-                        <Typography variant="caption" color="textSecondary">
-                          Click the shutter button below or tap this screen to take photo
-                        </Typography>
-                      </Box>
-                    ) : (
-                      <Box sx={{ position: 'relative', width: '100%' }}>
-                        <img src={boxPhoto} alt="Box" style={{ width: '100%', display: 'block', maxHeight: 400, objectFit: 'contain' }} />
-                        <Button
-                          variant="contained"
-                          color="error"
-                          size="small"
-                          startIcon={<Replay />}
-                          onClick={() => setBoxPhoto(null)}
-                          sx={{ position: 'absolute', top: 12, right: 12, bgcolor: 'rgba(211, 47, 47, 0.9)' }}
-                        >
-                          Retake
-                        </Button>
-                      </Box>
-                    )}
-
-                    {/* Shutter Bar Overlay */}
-                    {!boxPhoto && (
-                      <Box
-                        sx={{
-                          width: '100%',
-                          bgcolor: 'rgba(0,0,0,0.85)',
-                          py: 2,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: 4,
-                          position: 'relative'
-                        }}
-                      >
-                        <Button
-                          variant="text"
-                          sx={{ color: '#aaa', minWidth: 80 }}
-                          onClick={triggerMockCapture}
-                        >
-                          Mock
-                        </Button>
-
-                        {/* iOS Circular Shutter Button */}
-                        <Box
-                          onClick={triggerFileCapture}
-                          sx={{
-                            width: 72,
-                            height: 72,
-                            borderRadius: '50%',
-                            border: '4px solid #fff',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            cursor: 'pointer',
-                            transition: 'transform 0.1s ease',
-                            '&:active': { transform: 'scale(0.92)' }
-                          }}
-                        >
-                          <Box
-                            sx={{
-                              width: 54,
-                              height: 54,
-                              borderRadius: '50%',
-                              bgcolor: '#fff',
-                            }}
-                          />
-                        </Box>
-
-                        <Box sx={{ minWidth: 80 }} />
-                      </Box>
-                    )}
-                  </Box>
+                {captureStep === 2 && renderCapturePanel(
+                  boxPhoto,
+                  'Ready to Capture Packed Box',
+                  () => setBoxPhoto(null)
                 )}
 
                 {captureStep === 3 && (
