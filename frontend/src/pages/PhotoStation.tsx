@@ -41,7 +41,7 @@ interface PendingOrder {
   external_order_number?: string
   platform: string
   ordered_at?: string
-  total_amount: number
+  total_amount: string | number | null
   tracking_number?: string
 }
 
@@ -449,7 +449,7 @@ export default function PhotoStation() {
                     <TableCell>
                       {order.ordered_at ? new Date(order.ordered_at).toLocaleDateString() : '-'}
                     </TableCell>
-                    <TableCell>${order.total_amount.toFixed(2)}</TableCell>
+                    <TableCell>${parseFloat(order.total_amount ?? 0).toFixed(2)}</TableCell>
                     <TableCell align="right">
                       <Button
                         variant="contained"
