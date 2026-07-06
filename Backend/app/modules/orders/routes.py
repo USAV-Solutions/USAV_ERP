@@ -2225,7 +2225,7 @@ async def extract_ocr_from_slip(
     import os
     import json
     
-    logger.info(f"Received OCR extraction request. Filename: {file.filename}, Content-Type: {file.content_type}")
+    logger.info("Received OCR extraction request.")
     
     image_bytes = await file.read()
     logger.info(f"Read image payload of size: {len(image_bytes)} bytes")
@@ -2274,7 +2274,6 @@ async def extract_ocr_from_slip(
         
         # Parse the JSON response
         text_resp = response.text.strip()
-        logger.info(f"Received raw text response from Gemini: {text_resp}")
         
         # Strip potential markdown code block markers if the model included them
         text_resp = re.sub(r"^```(?:json)?\n", "", text_resp)
@@ -2282,7 +2281,7 @@ async def extract_ocr_from_slip(
         text_resp = text_resp.strip()
         
         data = json.loads(text_resp)
-        logger.info(f"Successfully parsed Gemini JSON payload: {data}")
+        logger.info("Successfully parsed Gemini JSON payload.")
         
         return OCRExtractResponse(
             success=True,
@@ -2293,7 +2292,7 @@ async def extract_ocr_from_slip(
         )
         
     except Exception as e:
-        logger.error(f"Gemini Vision AI extraction failed: {str(e)}", exc_info=True)
+        logger.error("Gemini Vision AI extraction failed.", exc_info=True)
         return OCRExtractResponse(
             success=False,
             platform="UNKNOWN",
