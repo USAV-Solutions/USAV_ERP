@@ -80,7 +80,7 @@ export default function PhotoStation() {
   const fetchPendingOrders = async () => {
     setIsLoadingOrders(true)
     try {
-      const res = await axios.get('/api/orders/photo-station/pending')
+      const res = await axios.get('/api/v1/orders/photo-station/pending')
       setPendingOrders(res.data)
     } catch (err) {
       console.error('Failed to fetch pending orders:', err)
@@ -148,7 +148,7 @@ export default function PhotoStation() {
       fd.append('file', blob, 'slip.jpg')
       
       // 3. Post to backend AI extraction endpoint
-      const response = await axios.post('/api/orders/photo-station/extract-ocr', fd, {
+      const response = await axios.post('/api/v1/orders/photo-station/extract-ocr', fd, {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
       
@@ -193,17 +193,17 @@ export default function PhotoStation() {
       // 2. Upload Slip
       const fd1 = new FormData()
       fd1.append('file', slipBlob, `${orderIdToVerify}_slip.jpg`)
-      const res1 = await axios.post('/api/orders/photo-station/upload', fd1)
+      const res1 = await axios.post('/api/v1/orders/photo-station/upload', fd1)
       const slipPath = res1.data.path
 
       // 3. Upload Box
       const fd2 = new FormData()
       fd2.append('file', boxBlob, `${orderIdToVerify}_box.jpg`)
-      const res2 = await axios.post('/api/orders/photo-station/upload', fd2)
+      const res2 = await axios.post('/api/v1/orders/photo-station/upload', fd2)
       const boxPath = res2.data.path
 
       // 4. Verify & save tracking in Backend
-      const verifyRes = await axios.post('/api/orders/photo-station/verify', {
+      const verifyRes = await axios.post('/api/v1/orders/photo-station/verify', {
         order_number: orderIdToVerify,
         slip_photo_path: slipPath,
         box_photo_path: boxPath,

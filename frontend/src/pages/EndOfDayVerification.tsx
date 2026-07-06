@@ -90,12 +90,12 @@ export default function EndOfDayVerification() {
         const blob = await fetch(shelfPhoto).then((r) => r.blob())
         const fd = new FormData()
         fd.append('file', blob, 'packed_shelf.jpg')
-        const uploadRes = await axios.post('/api/orders/photo-station/upload', fd)
+        const uploadRes = await axios.post('/api/v1/orders/photo-station/upload', fd)
         uploadedPath = uploadRes.data.path
       }
 
       // Verify box counts against verified orders database
-      const verifyRes = await axios.post('/api/orders/photo-station/verify-shelf', {
+      const verifyRes = await axios.post('/api/v1/orders/photo-station/verify-shelf', {
         photo_path: uploadedPath || '/volume1/photo/shelf.jpg',
         manual_box_count: manualCount ? parseInt(manualCount, 10) : null,
       })
