@@ -2225,15 +2225,27 @@ async def extract_ocr_from_slip(
     import os
     import json
     
-    logger.info("Received OCR extraction request.")
+    logger.info("[OCR] Received extraction request.")
     
     image_bytes = await file.read()
-    logger.info(f"Read image payload of size: {len(image_bytes)} bytes")
+    image_size_kb = len(image_bytes) / 1024
+    mime_type = file.content_type or 'image/jpeg'
+    logger.info(f"[OCR] Image received: size={image_size_kb:.1f}KB mime={mime_type}")
+    
+    if len(image_bytes) == 0:
+        logger.warning("[OCR] Empty image payload received — aborting.")
+        return OCRExtractResponse(
+            success=False,
+            platform="UNKNOWN",
+            order_id="",
+            tracking_number="",
+            message="Empty image payload."
+        )
     
     # Check if API key is configured
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if not api_key:
-        logger.warning("Gemini API key is not configured. Missing GEMINI_API_KEY / GOOGLE_API_KEY.")
+        logger.error("[OCR] CRITICAL: Gemini API key is not configured. Set GEMINI_API_KEY in environment.")
         return OCRExtractResponse(
             success=False,
             platform="UNKNOWN",
@@ -2241,13 +2253,14 @@ async def extract_ocr_from_slip(
             tracking_number="",
             message="Gemini API key is not configured. Please set GEMINI_API_KEY in the environment."
         )
+    logger.info("[OCR] API key found. Proceeding with Gemini Vision.")
         
     try:
         from google import genai
         from google.genai import types
         
         # Initialize client
-        logger.info("Initializing GenAI client...")
+        logger.info("[OCR] Initializing GenAI client...")
         client = genai.Client(api_key=api_key)
         
         # Prompt Gemini with strict JSON guidelines
@@ -2260,7 +2273,7 @@ async def extract_ocr_from_slip(
             "Do not wrap the response in markdown code blocks like ```json."
         )
         
-        logger.info("Sending request to gemini-2.5-flash model...")
+        logger.info(f"[OCR] Sending {image_size_kb:.1f}KB image to gemini-2.5-flash...")
         response = client.models.generate_content(
             model='gemini-2.5-flash',
             contents=[
@@ -2281,18 +2294,35 @@ async def extract_ocr_from_slip(
         text_resp = text_resp.strip()
         
         data = json.loads(text_resp)
-        logger.info("Successfully parsed Gemini JSON payload.")
+        
+        extracted_platform = str(data.get("platform", "UNKNOWN")).upper()
+        has_order_id = bool(data.get("order_id", ""))
+        has_tracking = bool(data.get("tracking_number", ""))
+        logger.info(
+            f"[OCR] Extraction succeeded. platform={extracted_platform} "
+            f"has_order_id={has_order_id} has_tracking={has_tracking}"
+        )
         
         return OCRExtractResponse(
             success=True,
-            platform=str(data.get("platform", "UNKNOWN")).upper(),
+            platform=extracted_platform,
             order_id=str(data.get("order_id", "")),
             tracking_number=str(data.get("tracking_number", "")),
             message="Successfully extracted packing details."
         )
         
+    except json.JSONDecodeError:
+        logger.error("[OCR] Failed to parse Gemini response as JSON. Model may have returned unexpected format.", exc_info=True)
+        return OCRExtractResponse(
+            success=False,
+            platform="UNKNOWN",
+            order_id="",
+            tracking_number="",
+            message="Gemini returned a non-JSON response. Please retry."
+        )
     except Exception as e:
-        logger.error("Gemini Vision AI extraction failed.", exc_info=True)
+        error_type = type(e).__name__
+        logger.error(f"[OCR] Extraction failed. error_type={error_type}", exc_info=True)
         return OCRExtractResponse(
             success=False,
             platform="UNKNOWN",
