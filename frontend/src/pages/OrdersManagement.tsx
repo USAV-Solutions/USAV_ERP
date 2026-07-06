@@ -7,7 +7,7 @@
  *   - Paginated MUI Table of OrderBrief rows with expandable item rows
  *   - OrderSyncButton in the header
  */
-import { useState, Fragment } from 'react'
+import { useState, Fragment, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   Box,
@@ -222,6 +222,7 @@ export default function OrdersManagement() {
   const [rangeSyncResults, setRangeSyncResults] = useState<SyncResponse[] | null>(null)
   const [trackingUploadDialogOpen, setTrackingUploadDialogOpen] = useState(false)
   const [trackingSheetUrl, setTrackingSheetUrl] = useState<string>('')
+  const shippingStatusUploadInputRef = useRef<HTMLInputElement>(null)
 
   // ── Queries ──────────────────────────────────────────────────────
 
@@ -431,6 +432,38 @@ export default function OrdersManagement() {
       setSnackbarOpen(true)
     },
   })
+
+  const shippingStatusUploadMutation = useMutation({
+    mutationFn: (file: File) => importOrdersFromFile('SHIPPING_STATUS_CSV', file),
+    onSuccess: async (data) => {
+      const summary = [
+        `Updated ${data.new_orders} order(s).`,
+        `Rows seen: ${data.source_rows_seen}.`,
+        `Skipped: ${data.source_rows_skipped}.`,
+      ]
+      setSnackbarSeverity('success')
+      setSnackbarMessage(summary.join(' '))
+      setSnackbarOpen(true)
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+    },
+    onError: (error: { response?: { data?: { detail?: string } }; message?: string }) => {
+      const detail = error.response?.data?.detail || error.message || 'Shipping status upload failed.'
+      setSnackbarSeverity('error')
+      setSnackbarMessage(detail)
+      setSnackbarOpen(true)
+    },
+  })
+
+  const handleShippingStatusFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file) {
+      shippingStatusUploadMutation.mutate(file)
+    }
+    if (shippingStatusUploadInputRef.current) {
+      shippingStatusUploadInputRef.current.value = ''
+    }
+    handleCloseSaleActionsMenu()
+  }
 
   const saveHoldOrderMutation = useMutation({
     mutationFn: async () => {
@@ -770,6 +803,15 @@ export default function OrdersManagement() {
                 Sync tracking from Google Sheet
               </MenuItem>
             )}
+            {hasRole(['ADMIN', 'SALES_REP']) && (
+              <MenuItem
+                onClick={() => {
+                  shippingStatusUploadInputRef.current?.click()
+                }}
+              >
+                Upload Shipping Status CSV
+              </MenuItem>
+            )}
             {hasRole(['ADMIN']) && (
               <MenuItem
                 onClick={() => {
@@ -809,7 +851,18 @@ export default function OrdersManagement() {
               </MenuItem>
             )}
           </Menu>
-          {hasRole(['ADMIN', 'SALES_REP']) && <OrderImportButton fulfillmentChannel={fulfillmentChannel} />}
+          {hasRole(['ADMIN', 'SALES_REP']) && (
+            <>
+              <input
+                type="file"
+                accept=".csv"
+                style={{ display: 'none' }}
+                ref={shippingStatusUploadInputRef}
+                onChange={handleShippingStatusFileUpload}
+              />
+              <OrderImportButton fulfillmentChannel={fulfillmentChannel} />
+            </>
+          )}
         </Stack>
       </Box>
 

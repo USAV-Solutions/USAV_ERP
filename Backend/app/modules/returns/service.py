@@ -12,7 +12,8 @@ from typing import Any, Optional, Sequence
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.integrations.base import BasePlatformClient
-from app.modules.orders.models import IntegrationSyncStatus, Order, OrderItem, OrderPlatform, OrderFulfillmentChannel, OrderStatus
+from app.models.entities import ZohoSyncStatus
+from app.modules.orders.models import IntegrationSyncStatus, Order, OrderItem, OrderPlatform, OrderFulfillmentChannel, OrderStatus, ShippingStatus
 from app.modules.returns.models import ReturnItem, ReturnNormalizedStatus, ReturnRecord, ReturnSyncState, ReturnZohoSyncStatus
 from app.modules.returns.schemas.sync import ReturnSyncResponse
 from app.repositories.orders.order_repository import OrderRepository
@@ -449,6 +450,27 @@ class ReturnSyncService:
             return ReturnNormalizedStatus.PARTIALLY_RETURNED
         return ReturnNormalizedStatus.RETURNED
 
+    async def update_record(self, record_id: int, update_data: dict) -> ReturnRecord:
+        record = await self.record_repo.get_with_items(record_id)
+        if not record:
+            raise LookupError(f"Return record {record_id} not found")
+        
+        for key, value in update_data.items():
+            if value is not None:
+                setattr(record, key, value)
+        
+        await self.session.commit()
+        await self.session.refresh(record)
+        return record
+
+    async def delete_record(self, record_id: int) -> None:
+        record = await self.record_repo.get_with_items(record_id)
+        if not record:
+            raise LookupError(f"Return record {record_id} not found")
+        
+        await self.session.delete(record)
+        await self.session.commit()
+
     async def rematch_record(self, record_id: int) -> ReturnRecord:
         record = await self.record_repo.get_with_items(record_id)
         if not record:
@@ -471,19 +493,21 @@ class ReturnSyncService:
             record.currency = linked_order.currency
         
         status_map = {
-            ReturnNormalizedStatus.RETURNED: OrderStatus.RETURN,
-            ReturnNormalizedStatus.PARTIALLY_RETURNED: OrderStatus.RETURN,
-            ReturnNormalizedStatus.REFUNDED: OrderStatus.REFUNDED,
-            ReturnNormalizedStatus.PARTIALLY_REFUNDED: OrderStatus.PARTIALLY_REFUNDED,
-            ReturnNormalizedStatus.CANCELLED: OrderStatus.CANCELLED,
-            ReturnNormalizedStatus.PARTIALLY_CANCELLED: OrderStatus.CANCELLED,
+            ReturnNormalizedStatus.RETURNED: (OrderStatus.RETURN, ShippingStatus.RETURNED),
+            ReturnNormalizedStatus.PARTIALLY_RETURNED: (OrderStatus.RETURN, ShippingStatus.RETURNED),
+            ReturnNormalizedStatus.REFUNDED: (OrderStatus.REFUNDED, ShippingStatus.REFUNDED),
+            ReturnNormalizedStatus.PARTIALLY_REFUNDED: (OrderStatus.PARTIALLY_REFUNDED, ShippingStatus.REFUNDED),
+            ReturnNormalizedStatus.CANCELLED: (OrderStatus.CANCELLED, ShippingStatus.CANCELLED),
+            ReturnNormalizedStatus.PARTIALLY_CANCELLED: (OrderStatus.CANCELLED, ShippingStatus.CANCELLED),
         }
-        new_status = status_map.get(record.normalized_status)
-        if new_status:
-            linked_order.status = new_status
+        new_statuses = status_map.get(record.normalized_status)
+        if new_statuses:
+            linked_order.status = new_statuses[0]
+            linked_order.shipping_status = new_statuses[1]
+            linked_order.zoho_sync_status = ZohoSyncStatus.PENDING
             
         # Also re-link items
-        _, linked_items_count = self._build_item_rows(
+        item_rows, linked_items_count = self._build_item_rows(
             linked_order, 
             [NormalizedReturnItem(
                 external_item_id=item.external_item_id,
@@ -497,18 +521,16 @@ class ReturnSyncService:
             ) for item in record.items]
         )
         
-        # Link order items properly
-        for item in record.items:
-            linked_item = self._link_order_item(
-                linked_order,
-                NormalizedReturnItem(
-                    external_item_id=item.external_item_id,
-                    external_sku=item.external_sku,
-                    item_name=item.item_name,
-                )
-            )
-            if linked_item:
-                item.linked_order_item_id = linked_item.id
+        # Link order items properly and update refund amount
+        for item, row in zip(record.items, item_rows):
+            if row.get("linked_order_item_id"):
+                item.linked_order_item_id = row["linked_order_item_id"]
+            if row.get("refunded_amount") and row["refunded_amount"] > (item.refunded_amount or Decimal("0")):
+                item.refunded_amount = row["refunded_amount"]
+
+        new_total_refund = sum((item.refunded_amount or Decimal("0")) for item in record.items)
+        if new_total_refund > (record.refunded_amount or Decimal("0")):
+            record.refunded_amount = new_total_refund
 
         await self.session.commit()
         return record
@@ -556,21 +578,27 @@ class ReturnSyncService:
             response.linked_orders += 1
             
             status_map = {
-                ReturnNormalizedStatus.RETURNED: OrderStatus.RETURN,
-                ReturnNormalizedStatus.PARTIALLY_RETURNED: OrderStatus.RETURN,
-                ReturnNormalizedStatus.REFUNDED: OrderStatus.REFUNDED,
-                ReturnNormalizedStatus.PARTIALLY_REFUNDED: OrderStatus.PARTIALLY_REFUNDED,
-                ReturnNormalizedStatus.CANCELLED: OrderStatus.CANCELLED,
-                ReturnNormalizedStatus.PARTIALLY_CANCELLED: OrderStatus.CANCELLED,
+                ReturnNormalizedStatus.RETURNED: (OrderStatus.RETURN, ShippingStatus.RETURNED),
+                ReturnNormalizedStatus.PARTIALLY_RETURNED: (OrderStatus.RETURN, ShippingStatus.RETURNED),
+                ReturnNormalizedStatus.REFUNDED: (OrderStatus.REFUNDED, ShippingStatus.REFUNDED),
+                ReturnNormalizedStatus.PARTIALLY_REFUNDED: (OrderStatus.PARTIALLY_REFUNDED, ShippingStatus.REFUNDED),
+                ReturnNormalizedStatus.CANCELLED: (OrderStatus.CANCELLED, ShippingStatus.CANCELLED),
+                ReturnNormalizedStatus.PARTIALLY_CANCELLED: (OrderStatus.CANCELLED, ShippingStatus.CANCELLED),
             }
-            new_status = status_map.get(record.normalized_status)
-            if new_status:
-                linked_order.status = new_status
+            new_statuses = status_map.get(record.normalized_status)
+            if new_statuses:
+                linked_order.status = new_statuses[0]
+                linked_order.shipping_status = new_statuses[1]
+                linked_order.zoho_sync_status = ZohoSyncStatus.PENDING
         else:
             zoho_sync_status = ReturnZohoSyncStatus.MISSING_LOCAL_ORDER
 
         item_rows, linked_items = self._build_item_rows(linked_order, record.items)
         response.linked_items += linked_items
+
+        new_total_refund = sum(row.get("refunded_amount", Decimal("0")) for row in item_rows)
+        if new_total_refund > (record.refunded_amount or Decimal("0")):
+            record.refunded_amount = new_total_refund
 
         payload = {
             "platform": record.platform,
@@ -648,6 +676,11 @@ class ReturnSyncService:
                     item.item_name = linked_order_item.item_name
                 if not item.external_sku and linked_order_item.external_sku:
                     item.external_sku = linked_order_item.external_sku
+            item_refund = item.refunded_amount
+            if item_refund == Decimal("0") and linked_order_item is not None and linked_order_item.unit_price > Decimal("0"):
+                qty = max(int(item.returned_qty or 0), int(item.cancelled_qty or 0)) or 1
+                item_refund = linked_order_item.unit_price * Decimal(qty)
+
             rows.append(
                 {
                     "linked_order_item_id": linked_order_item.id if linked_order_item else None,
@@ -657,7 +690,7 @@ class ReturnSyncService:
                     "ordered_qty": max(int(item.ordered_qty or 0), 0),
                     "returned_qty": max(int(item.returned_qty or 0), 0),
                     "cancelled_qty": max(int(item.cancelled_qty or 0), 0),
-                    "refunded_amount": item.refunded_amount,
+                    "refunded_amount": item_refund,
                     "item_payload": item.payload,
                 }
             )

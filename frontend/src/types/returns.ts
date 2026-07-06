@@ -82,6 +82,15 @@ export interface ReturnRecordDetail extends ReturnRecordBrief {
   items: ReturnItemDetail[]
 }
 
+export interface ReturnRecordUpdate {
+  normalized_status?: ReturnNormalizedStatus
+  reason?: string
+  customer_name?: string
+  customer_email?: string
+  refunded_amount?: number
+  zoho_sync_status?: ReturnZohoSyncStatus
+}
+
 export interface ReturnListResponse {
   total: number
   skip: number

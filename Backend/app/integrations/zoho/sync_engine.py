@@ -2286,6 +2286,13 @@ async def sync_order_outbound(order_id: int) -> None:
                         so = await zoho.create_sales_order(payload_retry)
                     payload = payload_retry
                     new_hash = generate_payload_hash(payload)
+                elif "Sales Order does not exist" in msg or "1002" in msg:
+                    logger.warning(
+                        "sync_order_outbound: Sales Order does not exist for order %s (zoho_id=%s). Clearing zoho_id and retrying as create.",
+                        order_id, order.zoho_id,
+                    )
+                    order.zoho_id = None
+                    so = await zoho.create_sales_order(payload)
                 else:
                     raise
 
