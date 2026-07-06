@@ -2327,17 +2327,12 @@ async def get_pending_verification_orders(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Get orders from the last 10 days that are without tracking numbers.
+    Get all pending unverified and not-ready orders.
     """
-    from datetime import datetime, timedelta
-    # Calculate threshold (last 10 days)
-    ten_days_ago = datetime.now(timezone.utc) - timedelta(days=10)
-    
     stmt = (
         select(Order)
         .where(
-            (Order.verify_status == None) | (Order.verify_status.notin_(["VERIFIED", "READY"])),
-            (Order.ordered_at >= ten_days_ago) | (Order.created_at >= ten_days_ago)
+            (Order.verify_status == None) | (Order.verify_status.notin_(["VERIFIED", "READY"]))
         )
         .order_by(Order.created_at.desc())
         .limit(100)
