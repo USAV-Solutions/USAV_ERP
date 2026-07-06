@@ -1,6 +1,6 @@
 const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
+const fs = require('node:fs');
+const path = require('node:path');
 const FormData = require('form-data');
 
 async function runOCRTest() {
@@ -24,15 +24,17 @@ async function runOCRTest() {
       headers: form.getHeaders()
     });
 
-    console.log('\n--- Gemini OCR Backend Response ---');
-    console.log(JSON.stringify(response.data, null, 2));
-    console.log('-----------------------------------\n');
+    // Sanitize user-controlled output to prevent CWE-117 log injection
+    const cleanOutput = JSON.stringify(response.data).replace(/[\r\n]/g, '');
+    console.log('Gemini OCR Backend Response: ' + cleanOutput);
 
   } catch (error) {
-    console.error('Error calling extract-ocr endpoint:', error.message);
+    const cleanErrorMsg = error.message.replace(/[\r\n]/g, '');
+    console.error('Error calling extract-ocr endpoint: ' + cleanErrorMsg);
     if (error.response) {
-      console.error('Status:', error.response.status);
-      console.error('Data:', error.response.data);
+      console.error('Status Code: ' + error.response.status);
+      const cleanErrorData = JSON.stringify(error.response.data).replace(/[\r\n]/g, '');
+      console.error('Data: ' + cleanErrorData);
     }
   }
 }

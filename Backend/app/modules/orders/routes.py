@@ -2216,7 +2216,7 @@ class OCRExtractResponse(BaseModel):
 
 @router.post("/photo-station/extract-ocr", response_model=OCRExtractResponse)
 async def extract_ocr_from_slip(
-    file: UploadFile = File(...),
+    file: Annotated[UploadFile, File(...)],
 ):
     """
     Upload a packing slip image and extract Platform, Order ID, and Tracking Number
