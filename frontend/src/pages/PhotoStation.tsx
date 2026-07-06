@@ -425,7 +425,7 @@ export default function PhotoStation() {
               {filteredOrders.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} align="center" sx={{ py: 6 }}>
-                    No pending unverified orders in the last 10 days.
+                    No pending unverified orders.
                   </TableCell>
                 </TableRow>
               ) : (

@@ -2225,11 +2225,15 @@ async def extract_ocr_from_slip(
     import os
     import json
     
+    logger.info("Received OCR extraction request.")
+    
     image_bytes = await file.read()
+    logger.info(f"Read image payload of size: {len(image_bytes)} bytes")
     
     # Check if API key is configured
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if not api_key:
+        logger.warning("Gemini API key is not configured. Missing GEMINI_API_KEY / GOOGLE_API_KEY.")
         return OCRExtractResponse(
             success=False,
             platform="UNKNOWN",
@@ -2243,6 +2247,7 @@ async def extract_ocr_from_slip(
         from google.genai import types
         
         # Initialize client
+        logger.info("Initializing GenAI client...")
         client = genai.Client(api_key=api_key)
         
         # Prompt Gemini with strict JSON guidelines
@@ -2255,6 +2260,7 @@ async def extract_ocr_from_slip(
             "Do not wrap the response in markdown code blocks like ```json."
         )
         
+        logger.info("Sending request to gemini-2.5-flash model...")
         response = client.models.generate_content(
             model='gemini-2.5-flash',
             contents=[
@@ -2268,12 +2274,14 @@ async def extract_ocr_from_slip(
         
         # Parse the JSON response
         text_resp = response.text.strip()
+        
         # Strip potential markdown code block markers if the model included them
         text_resp = re.sub(r"^```(?:json)?\n", "", text_resp)
         text_resp = re.sub(r"\n```$", "", text_resp)
         text_resp = text_resp.strip()
         
         data = json.loads(text_resp)
+        logger.info("Successfully parsed Gemini JSON payload.")
         
         return OCRExtractResponse(
             success=True,
@@ -2284,6 +2292,7 @@ async def extract_ocr_from_slip(
         )
         
     except Exception as e:
+        logger.error("Gemini Vision AI extraction failed.", exc_info=True)
         return OCRExtractResponse(
             success=False,
             platform="UNKNOWN",
@@ -2317,17 +2326,12 @@ async def get_pending_verification_orders(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Get orders from the last 10 days that are without tracking numbers.
+    Get all pending unverified and not-ready orders.
     """
-    from datetime import datetime, timedelta
-    # Calculate threshold (last 10 days)
-    ten_days_ago = datetime.now(timezone.utc) - timedelta(days=10)
-    
     stmt = (
         select(Order)
         .where(
-            (Order.verify_status == None) | (Order.verify_status.notin_(["VERIFIED", "READY"])),
-            (Order.ordered_at >= ten_days_ago) | (Order.created_at >= ten_days_ago)
+            (Order.verify_status == None) | (Order.verify_status.notin_(["VERIFIED", "READY"]))
         )
         .order_by(Order.created_at.desc())
         .limit(100)
