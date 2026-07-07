@@ -14,6 +14,11 @@ for _logger_name in ("pdfminer", "pdfminer.pdfinterp", "pdfminer.psparser", "pdf
     logging.getLogger(_logger_name).setLevel(logging.WARNING)
 
 
+# Constant regex pattern for matching date fields in PayPal statements (e.g., 4/1/26)
+PAYPAL_DATE_PATTERN = re.compile(r"^\d{1,2}/\d{1,2}/\d{2,4}")
+
+
+
 def _clean_amount(amount: str) -> str:
     return amount.replace(" ", "").replace("$", "").replace(",", "")
 
@@ -468,7 +473,7 @@ def parse_paypal(pdf_bytes: bytes) -> pd.DataFrame:
             for table in tables:
                 for raw_row in table:
                     row = [str(cell).strip() if cell else "" for cell in (raw_row or [])]
-                    if not row or not re.match(r"^\d{1,2}/\d{1,2}/\d{2,4}", row[0]):
+                    if not row or not PAYPAL_DATE_PATTERN.match(row[0]):
                         continue
 
                     date = row[0].split("\n")[0].strip()

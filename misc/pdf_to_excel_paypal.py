@@ -4,6 +4,10 @@ import re
 import os
 from pathlib import Path
 
+# Constant regex pattern for matching date fields in PayPal statements (e.g., 4/1/26)
+PAYPAL_DATE_PATTERN = re.compile(r"^\d{1,2}/\d{1,2}/\d{2,4}")
+
+
 def parse_paypal_pdf(pdf_path, output_excel_path):
     extracted_data = []
     
@@ -17,7 +21,7 @@ def parse_paypal_pdf(pdf_path, output_excel_path):
                     row = [str(cell).strip() if cell else "" for cell in row]
                     
                     # Ensure the row has enough columns and starts with a Date (e.g., 4/1/26)
-                    if not row or not re.match(r"^\d{1,2}/\d{1,2}/\d{2,4}", row[0]):
+                    if not row or not PAYPAL_DATE_PATTERN.match(row[0]):
                         continue
                         
                     date = row[0].split('\n')[0].strip() # Take just the first date if lines merged

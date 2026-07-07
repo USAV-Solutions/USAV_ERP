@@ -48,7 +48,7 @@ _seatalk_token_cache: dict[str, any] = {
 @router.post("/token", response_model=Token)
 async def login_for_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
-    db: AsyncSession = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """
     OAuth2 compatible token login.
@@ -97,7 +97,7 @@ async def get_current_user_info(
 async def change_own_password(
     password_data: PasswordChange,
     current_user: CurrentUser,
-    db: AsyncSession = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Change current user's password."""
     if not verify_password(password_data.current_password, current_user.hashed_password):
@@ -206,7 +206,7 @@ async def _get_seatalk_employee(code: str) -> SeaTalkCodeResponse:
 async def seatalk_oauth_callback(
     code: Annotated[str, Query(description="Authorization code from SeaTalk")],
     state: Annotated[Optional[str], Query(description="State parameter for CSRF protection")] = None,
-    db: AsyncSession = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """
     Handle SeaTalk OAuth callback.
@@ -318,7 +318,7 @@ async def list_users(
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
     role: Annotated[UserRole | None, Query(description="Filter by role")] = None,
     is_active: Annotated[bool | None, Query(description="Filter by active status")] = None,
-    db: AsyncSession = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """List all users (Admin only)."""
     repo = UserRepository(db)
@@ -344,7 +344,7 @@ async def list_users(
 async def create_user(
     user_data: UserCreate,
     current_user: AdminUser,
-    db: AsyncSession = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Create a new user (Admin only). Roles are assigned by admins."""
     repo = UserRepository(db)
@@ -368,7 +368,7 @@ async def create_user(
 async def get_user(
     user_id: int,
     current_user: AdminUser,
-    db: AsyncSession = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Get a specific user by ID (Admin only)."""
     repo = UserRepository(db)
@@ -389,7 +389,7 @@ async def update_user(
     user_id: int,
     user_data: UserUpdate,
     current_user: AdminUser,
-    db: AsyncSession = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Update a user (Admin only, supports both PUT and PATCH)."""
     repo = UserRepository(db)
@@ -417,7 +417,7 @@ async def update_user(
 async def delete_user(
     user_id: int,
     current_user: AdminUser,
-    db: AsyncSession = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Delete a user (Admin only)."""
     repo = UserRepository(db)
@@ -441,7 +441,7 @@ async def delete_user(
 async def deactivate_user(
     user_id: int,
     current_user: AdminUser,
-    db: AsyncSession = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Deactivate a user account (Admin only)."""
     repo = UserRepository(db)
@@ -468,7 +468,7 @@ async def deactivate_user(
 async def activate_user(
     user_id: int,
     current_user: AdminUser,
-    db: AsyncSession = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Activate a user account (Admin only)."""
     repo = UserRepository(db)

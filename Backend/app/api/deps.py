@@ -90,7 +90,9 @@ def require_roles(*allowed_roles: UserRole):
         async def admin_endpoint(user: User = Depends(require_roles(UserRole.ADMIN))):
             ...
     """
-    async def role_checker(
+    # FastAPI runs async dependencies directly on the event loop, avoiding threadpool scheduling overhead.
+    # We keep it async def even without internal awaits to optimize performance for simple in-memory checks.
+    async def role_checker(  # nosonar
         current_user: Annotated[User, Depends(get_current_user)],
     ) -> User:
         # Superusers bypass role checks
@@ -109,7 +111,9 @@ def require_roles(*allowed_roles: UserRole):
 
 
 # Pre-built role dependencies for common use cases
-async def require_admin(
+# FastAPI runs async dependencies directly on the event loop, avoiding threadpool scheduling overhead.
+# We keep it async def even without internal awaits to optimize performance for simple in-memory checks.
+async def require_admin(  # nosonar
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> User:
     """Require ADMIN role."""
@@ -121,7 +125,9 @@ async def require_admin(
     return current_user
 
 
-async def require_admin_or_sales(
+# FastAPI runs async dependencies directly on the event loop, avoiding threadpool scheduling overhead.
+# We keep it async def even without internal awaits to optimize performance for simple in-memory checks.
+async def require_admin_or_sales(  # nosonar
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> User:
     """Require ADMIN or SALES_REP role."""
@@ -133,7 +139,9 @@ async def require_admin_or_sales(
     return current_user
 
 
-async def require_admin_or_warehouse(
+# FastAPI runs async dependencies directly on the event loop, avoiding threadpool scheduling overhead.
+# We keep it async def even without internal awaits to optimize performance for simple in-memory checks.
+async def require_admin_or_warehouse(  # nosonar
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> User:
     """Require ADMIN or WAREHOUSE_OP role."""
