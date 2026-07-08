@@ -2063,8 +2063,6 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
         inferred_handling = stored_platform_total - (line_total + shipping_amount)
     else:
         inferred_handling = stored_platform_total - (line_total + tax_amount + shipping_amount)
-    if inferred_handling < Decimal("0"):
-        inferred_handling = Decimal("0")
 
     payload["shipping_charge"] = float(shipping_amount)
 
