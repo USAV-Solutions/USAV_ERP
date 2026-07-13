@@ -226,6 +226,10 @@ class Order(Base, ZohoSyncMixin, TimestampMixin):
         default=ZohoSyncStatus.PENDING,
         comment="Outbound Zoho sync status.",
     )
+    zoho_marked_as_fulfilled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false",
+        comment="Whether this order was successfully marked as fulfilled in Zoho.",
+    )
     shipping_status: Mapped[ShippingStatus] = mapped_column(
         Enum(ShippingStatus, name="shipping_status_enum", create_constraint=False),
         nullable=False,
