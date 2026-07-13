@@ -212,14 +212,16 @@ export default function OrdersManagement() {
   const [bulkToDate, setBulkToDate] = useState('')
   const [bulkFailureDetails, setBulkFailureDetails] = useState<string[]>([])
   const [saleActionsAnchorEl, setSaleActionsAnchorEl] = useState<null | HTMLElement>(null)
-  const [syncOrdersDialogOpen, setSyncOrdersDialogOpen] = useState(false)
-  const [syncOrdersPlatform, setSyncOrdersPlatform] = useState('')
-  const [syncOrdersResults, setSyncOrdersResults] = useState<SyncResponse[] | null>(null)
+
   const [rangeSyncDialogOpen, setRangeSyncDialogOpen] = useState(false)
-  const [rangeSyncPlatform, setRangeSyncPlatform] = useState('')
+  const [rangeSyncLoading, setRangeSyncLoading] = useState(false)
+  const [rangeSyncError, setRangeSyncError] = useState<string | null>(null)
   const [rangeSyncSince, setRangeSyncSince] = useState('')
   const [rangeSyncUntil, setRangeSyncUntil] = useState('')
-  const [rangeSyncResults, setRangeSyncResults] = useState<SyncResponse[] | null>(null)
+  const [rangeSyncProgress, setRangeSyncProgress] = useState({ queued: 0, success: 0, failed: 0 })
+  const [rangeSyncTotal, setRangeSyncTotal] = useState(0)
+  const [rangeSyncDone, setRangeSyncDone] = useState(false)
+  const [rangeSyncFailureDetails, setRangeSyncFailureDetails] = useState<string[]>([])
   const [trackingUploadDialogOpen, setTrackingUploadDialogOpen] = useState(false)
   const [trackingSheetUrl, setTrackingSheetUrl] = useState<string>('')
   const shippingStatusUploadInputRef = useRef<HTMLInputElement>(null)
@@ -361,28 +363,8 @@ export default function OrdersManagement() {
     onSettled: () => setShippingUpdatingId(null),
   })
 
-  const syncOrdersMutation = useMutation({
-    mutationFn: () => syncOrders(syncOrdersPlatform ? { platform: syncOrdersPlatform } : {}),
-    onSuccess: (data) => {
-      setSyncOrdersResults(data)
-      queryClient.invalidateQueries({ queryKey: ['orders'] })
-      queryClient.invalidateQueries({ queryKey: ['syncStatus'] })
-    },
-  })
 
-  const rangeSyncMutation = useMutation({
-    mutationFn: () =>
-      syncOrdersRange({
-        platform: rangeSyncPlatform || undefined,
-        since: new Date(rangeSyncSince).toISOString(),
-        until: new Date(rangeSyncUntil).toISOString(),
-      }),
-    onSuccess: (data) => {
-      setRangeSyncResults(data)
-      queryClient.invalidateQueries({ queryKey: ['orders'] })
-      queryClient.invalidateQueries({ queryKey: ['syncStatus'] })
-    },
-  })
+
 
   const refreshMatchingMutation = useMutation({
     mutationFn: refreshUnmatchedItemMatching,
@@ -543,16 +525,111 @@ export default function OrdersManagement() {
     setSaleActionsAnchorEl(null)
   }
 
-  const handleCloseSyncOrdersDialog = () => {
-    setSyncOrdersDialogOpen(false)
-    setSyncOrdersResults(null)
-    syncOrdersMutation.reset()
-  }
 
   const handleCloseRangeSyncDialog = () => {
     setRangeSyncDialogOpen(false)
-    setRangeSyncResults(null)
-    rangeSyncMutation.reset()
+    setRangeSyncLoading(false)
+  }
+
+  const handleRangeSync = async () => {
+    if (!rangeSyncSince || !rangeSyncUntil) {
+      setRangeSyncError('Please select both Start and End date/time before starting sync.')
+      return
+    }
+
+    const startDate = new Date(rangeSyncSince)
+    const endDate = new Date(rangeSyncUntil)
+
+    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+      setRangeSyncError('Invalid date format.')
+      return
+    }
+
+    if (startDate > endDate) {
+      setRangeSyncError('Start date must be before End date.')
+      return
+    }
+
+    setRangeSyncLoading(true)
+    setRangeSyncError(null)
+    setRangeSyncDone(false)
+    setRangeSyncTotal(0)
+    setRangeSyncProgress({ queued: 0, success: 0, failed: 0 })
+    setRangeSyncFailureDetails([])
+
+    try {
+      const pageSize = 500
+      let skip = 0
+      let eligibleIds: number[] = []
+
+      while (true) {
+        const batch = await listOrders({ skip, limit: pageSize, zoho_sync_status: 'DIRTY', fulfillment_channel: fulfillmentChannel })
+        const matched = batch.items
+          .filter((o) => {
+            if (!o.ordered_at) {
+              return false
+            }
+
+            const orderedAt = new Date(o.ordered_at)
+            if (Number.isNaN(orderedAt.getTime())) {
+              return false
+            }
+
+            return orderedAt >= startDate && orderedAt <= endDate
+          })
+          .map((o) => o.id)
+        eligibleIds = eligibleIds.concat(matched)
+
+        if (batch.items.length < pageSize || eligibleIds.length >= 2000) {
+          break
+        }
+        skip += pageSize
+      }
+
+      setRangeSyncTotal(eligibleIds.length)
+
+      if (!eligibleIds.length) {
+        setRangeSyncDone(true)
+        setRangeSyncLoading(false)
+        return
+      }
+
+      let queued = 0
+      let success = 0
+      let failed = 0
+
+      for (const id of eligibleIds) {
+        try {
+          await forceSyncOrder(id)
+          queued += 1
+          success += 1
+          setRangeSyncProgress({ queued, success, failed })
+        } catch (err: unknown) {
+          queued += 1
+          failed += 1
+          setRangeSyncProgress({ queued, success, failed })
+
+          const detail = getErrorMessage(err)
+          setRangeSyncFailureDetails((prev) => {
+            if (prev.length >= 100) {
+              return prev
+            }
+            return [...prev, `Order #${id}: ${detail}`]
+          })
+        }
+      }
+
+      if (failed > 0) {
+        setRangeSyncError(`${failed} order(s) failed to sync to Zoho.`)
+      }
+      setRangeSyncDone(true)
+      queryClient.invalidateQueries({ queryKey: ['orders'] })
+      queryClient.invalidateQueries({ queryKey: ['syncStatus'] })
+    } catch (err: unknown) {
+      setRangeSyncError(getErrorMessage(err))
+    } finally {
+      setRangeSyncLoading(false)
+    }
   }
 
   const handleCloseTrackingUploadDialog = () => {
@@ -776,7 +853,7 @@ export default function OrdersManagement() {
             variant="outlined"
             onClick={handleOpenSaleActionsMenu}
             endIcon={<ArrowDropDown />}
-            disabled={bulkLoading || syncOrdersMutation.isPending || rangeSyncMutation.isPending || refreshMatchingMutation.isPending || trackingUploadMutation.isPending}
+            disabled={bulkLoading || rangeSyncLoading || refreshMatchingMutation.isPending || trackingUploadMutation.isPending}
           >
             Sale Actions
           </Button>
@@ -785,14 +862,7 @@ export default function OrdersManagement() {
             open={isSaleActionsMenuOpen}
             onClose={handleCloseSaleActionsMenu}
           >
-            <MenuItem
-              onClick={() => {
-                handleCloseSaleActionsMenu()
-                setSyncOrdersDialogOpen(true)
-              }}
-            >
-              Sync Orders
-            </MenuItem>
+
             {hasRole(['ADMIN', 'SALES_REP']) && (
               <MenuItem
                 onClick={() => {
@@ -817,6 +887,13 @@ export default function OrdersManagement() {
                 onClick={() => {
                   handleCloseSaleActionsMenu()
                   setRangeSyncDialogOpen(true)
+                  setRangeSyncError(null)
+                  setRangeSyncDone(false)
+                  setRangeSyncTotal(0)
+                  setRangeSyncProgress({ queued: 0, success: 0, failed: 0 })
+                  setRangeSyncSince('')
+                  setRangeSyncUntil('')
+                  setRangeSyncFailureDetails([])
                 }}
               >
                 Range Sync
@@ -1098,109 +1175,18 @@ export default function OrdersManagement() {
         />
       </Paper>
 
-      <Dialog open={syncOrdersDialogOpen} onClose={handleCloseSyncOrdersDialog} maxWidth="sm" fullWidth>
-        <DialogTitle>Sync Orders from Platform</DialogTitle>
+
+
+      <Dialog open={rangeSyncDialogOpen} onClose={rangeSyncLoading ? undefined : handleCloseRangeSyncDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>Admin: Zoho Sync by Date Range</DialogTitle>
         <DialogContent>
           <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <FormControl fullWidth>
-              <InputLabel>Platform</InputLabel>
-              <Select
-                value={syncOrdersPlatform}
-                onChange={(e: { target: { value: string } }) => setSyncOrdersPlatform(e.target.value)}
-                label="Platform"
-                disabled={syncOrdersMutation.isPending}
-              >
-                {SYNC_PLATFORM_OPTIONS.map((opt) => (
-                  <MenuItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            <Alert severity="info" variant="outlined">
-              Sync fetches new orders since the last successful sync for selected platform(s).
-              Duplicate orders are automatically skipped.
-            </Alert>
-
-            {syncOrdersMutation.isError && (
-              <Alert severity="error">
-                {(syncOrdersMutation.error as Error)?.message || 'Sync request failed.'}
-              </Alert>
-            )}
-
-            {syncOrdersResults && (
-              <Box>
-                <Typography variant="subtitle2" gutterBottom>
-                  Sync Results
-                </Typography>
-                <List dense disablePadding>
-                  {syncOrdersResults.map((r) => (
-                    <ListItem key={r.platform} disableGutters>
-                      <ListItemIcon sx={{ minWidth: 32 }}>
-                        {r.success ? (
-                          <CheckCircle color="success" fontSize="small" />
-                        ) : (
-                          <ErrorIcon color="error" fontSize="small" />
-                        )}
-                      </ListItemIcon>
-                      <ListItemText
-                        primary={r.platform}
-                        secondary={
-                          r.success
-                            ? `${r.new_orders} new orders, ${r.auto_matched} auto-matched, ${r.skipped_duplicates} skipped`
-                            : r.errors.join('; ')
-                        }
-                      />
-                    </ListItem>
-                  ))}
-                </List>
-              </Box>
-            )}
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseSyncOrdersDialog}>
-            {syncOrdersResults ? 'Close' : 'Cancel'}
-          </Button>
-          {!syncOrdersResults && (
-            <Button
-              variant="contained"
-              onClick={() => syncOrdersMutation.mutate()}
-              disabled={syncOrdersMutation.isPending}
-              startIcon={syncOrdersMutation.isPending ? <CircularProgress size={18} /> : <Sync />}
-            >
-              {syncOrdersMutation.isPending ? 'Syncing...' : 'Start Sync'}
-            </Button>
-          )}
-        </DialogActions>
-      </Dialog>
-
-      <Dialog open={rangeSyncDialogOpen} onClose={handleCloseRangeSyncDialog} maxWidth="sm" fullWidth>
-        <DialogTitle>Admin: Sync Orders by Date Range</DialogTitle>
-        <DialogContent>
-          <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <FormControl fullWidth>
-              <InputLabel>Platform</InputLabel>
-              <Select
-                value={rangeSyncPlatform}
-                onChange={(e) => setRangeSyncPlatform(e.target.value)}
-                label="Platform"
-                disabled={rangeSyncMutation.isPending}
-              >
-                {SYNC_PLATFORM_OPTIONS.map((opt) => (
-                  <MenuItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
             <TextField
               label="Start Date & Time"
               type="datetime-local"
               value={rangeSyncSince}
               onChange={(e) => setRangeSyncSince(e.target.value)}
-              disabled={rangeSyncMutation.isPending}
+              disabled={rangeSyncLoading}
               InputLabelProps={{ shrink: true }}
               fullWidth
             />
@@ -1209,63 +1195,85 @@ export default function OrdersManagement() {
               type="datetime-local"
               value={rangeSyncUntil}
               onChange={(e) => setRangeSyncUntil(e.target.value)}
-              disabled={rangeSyncMutation.isPending}
+              disabled={rangeSyncLoading}
               InputLabelProps={{ shrink: true }}
               fullWidth
             />
 
             <Alert severity="warning" variant="outlined">
-              Admin-only: fetches orders within selected date range. Duplicate orders are skipped.
+              Admin-only: fetches DIRTY orders within selected date range and pushes them to Zoho.
             </Alert>
 
-            {rangeSyncMutation.isError && (
+            {rangeSyncError && (
               <Alert severity="error">
-                {(rangeSyncMutation.error as Error)?.message || 'Sync request failed.'}
+                {rangeSyncError}
               </Alert>
             )}
 
-            {rangeSyncResults && (
+            {rangeSyncLoading && rangeSyncTotal > 0 && (
               <Box>
-                <Typography variant="subtitle2" gutterBottom>
-                  Sync Results
+                <Typography variant="body2" gutterBottom>
+                  Progress: {rangeSyncProgress.queued} / {rangeSyncTotal}
                 </Typography>
-                <List dense disablePadding>
-                  {rangeSyncResults.map((r) => (
-                    <ListItem key={r.platform} disableGutters>
-                      <ListItemIcon sx={{ minWidth: 32 }}>
-                        {r.success ? (
-                          <CheckCircle color="success" fontSize="small" />
-                        ) : (
-                          <ErrorIcon color="error" fontSize="small" />
-                        )}
-                      </ListItemIcon>
-                      <ListItemText
-                        primary={r.platform}
-                        secondary={
-                          r.success
-                            ? `${r.new_orders} new orders, ${r.auto_matched} auto-matched, ${r.skipped_duplicates} skipped`
-                            : r.errors.join('; ')
-                        }
-                      />
-                    </ListItem>
+                <LinearProgress
+                  variant="determinate"
+                  value={Math.round((rangeSyncProgress.queued / rangeSyncTotal) * 100)}
+                  sx={{ height: 10, borderRadius: 1 }}
+                />
+              </Box>
+            )}
+
+            {rangeSyncDone && (
+              <Box>
+                {rangeSyncTotal === 0 ? (
+                  <Alert severity="info">No DIRTY orders found in the given date range.</Alert>
+                ) : (
+                  <Alert severity={rangeSyncError ? 'warning' : 'success'}>
+                    Completed. {rangeSyncProgress.success} succeeded, {rangeSyncProgress.failed} failed.
+                  </Alert>
+                )}
+              </Box>
+            )}
+
+            {rangeSyncFailureDetails.length > 0 && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" color="error">
+                  Failure Details (First 100):
+                </Typography>
+                <Box
+                  sx={{
+                    maxHeight: 200,
+                    overflowY: 'auto',
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    p: 1,
+                    borderRadius: 1,
+                    bgcolor: 'background.paper',
+                    fontSize: '0.875rem',
+                  }}
+                >
+                  {rangeSyncFailureDetails.map((msg, i) => (
+                    <Box key={i} sx={{ mb: 0.5 }}>
+                      {msg}
+                    </Box>
                   ))}
-                </List>
+                </Box>
               </Box>
             )}
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseRangeSyncDialog}>
-            {rangeSyncResults ? 'Close' : 'Cancel'}
+          <Button onClick={handleCloseRangeSyncDialog} disabled={rangeSyncLoading}>
+            {rangeSyncDone ? 'Close' : 'Cancel'}
           </Button>
-          {!rangeSyncResults && (
+          {!rangeSyncDone && (
             <Button
               variant="contained"
-              onClick={() => rangeSyncMutation.mutate()}
-              disabled={!isValidRangeSync || rangeSyncMutation.isPending}
-              startIcon={rangeSyncMutation.isPending ? <CircularProgress size={18} /> : <DateRange />}
+              onClick={handleRangeSync}
+              disabled={rangeSyncLoading || !rangeSyncSince || !rangeSyncUntil}
+              startIcon={rangeSyncLoading ? <CircularProgress size={18} /> : <DateRange />}
             >
-              {rangeSyncMutation.isPending ? 'Syncing...' : 'Start Range Sync'}
+              {rangeSyncLoading ? 'Syncing...' : 'Start Range Sync'}
             </Button>
           )}
         </DialogActions>
