@@ -2325,7 +2325,7 @@ async def sync_order_outbound(order_id: int) -> None:
             )
 
             # After the sales order is synced, apply shipping-specific actions
-            from app.modules.orders.models import ShippingStatus
+            from app.modules.orders.models import ShippingStatus, OrderStatus
             if order.shipping_status in (
                 ShippingStatus.PACKED,
                 ShippingStatus.SHIPPING,
@@ -2337,6 +2337,23 @@ async def sync_order_outbound(order_id: int) -> None:
                     logger.warning(
                         "sync_order_outbound: shipping status sync failed for order %s: %s",
                         order_id, ship_exc,
+                    )
+
+            if (
+                order.shipping_status in (ShippingStatus.SHIPPING, ShippingStatus.DELIVERED)
+                or order.status == OrderStatus.SHIPPED
+            ) and not order.zoho_marked_as_fulfilled:
+                try:
+                    await zoho.mark_salesorder_fulfilled(order.zoho_id)
+                    order.zoho_marked_as_fulfilled = True
+                    order._updated_by_sync = True
+                    await db.commit()
+                    order._updated_by_sync = False
+                    logger.info("sync_order_outbound: order %s marked as fulfilled in Zoho", order_id)
+                except Exception as fulfill_exc:
+                    logger.warning(
+                        "sync_order_outbound: mark as fulfilled failed for order %s: %s",
+                        order_id, fulfill_exc,
                     )
         except RateLimitError as exc:
             order.zoho_sync_error = (
