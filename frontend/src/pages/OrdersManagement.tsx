@@ -92,6 +92,7 @@ const PLATFORM_LABELS: Record<OrderPlatform, string> = {
   EBAY_MEKONG: 'eBay Mekong',
   EBAY_USAV: 'eBay USAV',
   EBAY_DRAGON: 'eBay Dragon',
+  EBAY_PURCHASING: 'eBay Purchasing',
   ECWID: 'Ecwid',
   SHOPIFY: 'Shopify',
   WALMART: 'Walmart',

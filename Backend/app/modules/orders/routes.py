@@ -290,6 +290,10 @@ class _StaticImportClient(BasePlatformClient):
 
 
 def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
+    lines = file_text.splitlines()
+    while lines and (not lines[0].strip() or not lines[0].replace(",", "").strip()):
+        lines.pop(0)
+    file_text = "\n".join(lines)
     reader = csv.DictReader(io.StringIO(file_text))
     grouped: dict[str, dict] = {}
     seen = 0
@@ -350,7 +354,7 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
 
     def _detect_platform(row_data: dict[str, str]) -> str:
         if row_data.get("Sales Record Number"):
-            return "EBAY_USAV"
+            return "EBAY_PURCHASING"
         text = _platform_signal_text(row_data)
         if "SHOPIFY" in text:
             return "SHOPIFY"
@@ -424,6 +428,17 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
             skipped += 1
             continue
 
+        if "record(s) downloaded" in ext_order_id.lower() or "seller id" in ext_order_id.lower():
+            skipped += 1
+            continue
+
+        platform_name = _detect_platform(row)
+        import_source = "EBAY_SALE_ORDER_CSV" if platform_name == "EBAY_PURCHASING" else "SHIPSTATION_CSV"
+
+        if platform_name == "ECWID":
+            skipped += 1
+            continue
+
         quantity = _as_int(row, "Item - Qty", "quantity", "Count - Number of Items", "Quantity", default=1)
         unit_price = _as_float(row, "Item - Price", "unit_price", "Sold For", default=0.0)
         total_price = _as_float(row, "Item - Total", "item_total", "line_total", "Amount - Item Total", "total_price", default=0.0)
@@ -487,9 +502,9 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
                 "items": [],
                 "tracking_number": None,
                 "raw_data": {
-                    "import_source": "SHIPSTATION_CSV",
+                    "import_source": import_source,
                     "platform_name": platform_name,
-                    "source": "SHIPSTATION_CSV",
+                    "source": import_source,
                     "tracking_number": None,
                 },
                 "_tracking_parts": [],

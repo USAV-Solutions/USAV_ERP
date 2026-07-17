@@ -50,6 +50,7 @@ class OrderPlatform(str, enum.Enum):
     EBAY_MEKONG = "EBAY_MEKONG"
     EBAY_USAV = "EBAY_USAV"
     EBAY_DRAGON = "EBAY_DRAGON"
+    EBAY_PURCHASING = "EBAY_PURCHASING"
     ECWID = "ECWID"
     SHOPIFY = "SHOPIFY"
     WALMART = "WALMART"
