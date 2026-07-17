@@ -309,7 +309,7 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
         if not value:
             return default
         try:
-            return float(value)
+            return float(value.replace("$", "").replace(",", ""))
         except ValueError:
             return default
 
@@ -349,6 +349,8 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
         return " ".join(str(part or "").strip() for part in signal_parts).upper()
 
     def _detect_platform(row_data: dict[str, str]) -> str:
+        if row_data.get("Sales Record Number"):
+            return "EBAY_USAV"
         text = _platform_signal_text(row_data)
         if "SHOPIFY" in text:
             return "SHOPIFY"
@@ -416,18 +418,18 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
         valid_rows = raw_rows
 
     for row in valid_rows:
-        order_number = _pick(row, "Order - Number", "external_order_number", "order_number")
-        ext_order_id = order_number or _pick(row, "external_order_id", "order_id", "Order - CustomerID")
+        order_number = _pick(row, "Order - Number", "external_order_number", "order_number", "Order Number")
+        ext_order_id = order_number or _pick(row, "external_order_id", "order_id", "Order - CustomerID", "Sales Record Number")
         if not ext_order_id:
             skipped += 1
             continue
 
-        quantity = _as_int(row, "Item - Qty", "quantity", "Count - Number of Items", default=1)
-        unit_price = _as_float(row, "Item - Price", "unit_price", default=0.0)
+        quantity = _as_int(row, "Item - Qty", "quantity", "Count - Number of Items", "Quantity", default=1)
+        unit_price = _as_float(row, "Item - Price", "unit_price", "Sold For", default=0.0)
         total_price = _as_float(row, "Item - Total", "item_total", "line_total", "Amount - Item Total", "total_price", default=0.0)
         if unit_price == 0.0 or total_price == 0.0:
             subtotal_amount = _as_float(row, "subtotal_amount", "subtotal", "Amount - Order Subtotal", default=0.0)
-            total_amount = _as_float(row, "total_amount", "total", "Amount - Order Total", default=0.0)
+            total_amount = _as_float(row, "total_amount", "total", "Amount - Order Total", "Total Price", default=0.0)
             if is_shipstation_order_csv:
                 if unit_price == 0.0 and total_price > 0.0:
                     unit_price = total_price / quantity if quantity > 0 else 0.0
@@ -438,10 +440,10 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
                 if unit_price == 0.0:
                     unit_price = item_total_fallback / quantity if quantity > 0 else 0.0
                 if total_price == 0.0:
-                    total_price = item_total_fallback if item_total_fallback > 0 else (unit_price * quantity)
+                    total_price = (unit_price * quantity) if unit_price > 0 else item_total_fallback
 
         ordered_at = None
-        ordered_at_raw = _pick(row, "ordered_at", "Date - Order Date")
+        ordered_at_raw = _pick(row, "ordered_at", "Date - Order Date", "Sale Date")
         if ordered_at_raw:
             try:
                 ordered_at = datetime.fromisoformat(ordered_at_raw.replace("Z", "+00:00"))
@@ -449,7 +451,10 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
                 try:
                     ordered_at = datetime.strptime(ordered_at_raw, "%m/%d/%Y %I:%M:%S %p")
                 except ValueError:
-                    ordered_at = None
+                    try:
+                        ordered_at = datetime.strptime(ordered_at_raw, "%b-%d-%y")
+                    except ValueError:
+                        ordered_at = None
 
         platform_name = _detect_platform(row)
         if platform_name == "ECWID":
@@ -463,20 +468,20 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
                 "platform_name": platform_name,
                 "platform_order_id": ext_order_id,
                 "platform_order_number": order_number or None,
-                "customer_name": _pick(row, "customer_name", "Bill To - Name", "Ship To - Name") or None,
-                "customer_email": _pick(row, "customer_email", "Customer Email") or None,
-                "ship_address_line1": _pick(row, "shipping_address_line1", "Ship To - Address 1") or None,
-                "ship_address_line2": _pick(row, "shipping_address_line2", "Ship To - Address 2") or None,
+                "customer_name": _pick(row, "customer_name", "Bill To - Name", "Ship To - Name", "Buyer Name", "Buyer Username") or None,
+                "customer_email": _pick(row, "customer_email", "Customer Email", "Buyer Email") or None,
+                "ship_address_line1": _pick(row, "shipping_address_line1", "Ship To - Address 1", "Ship To Address 1") or None,
+                "ship_address_line2": _pick(row, "shipping_address_line2", "Ship To - Address 2", "Ship To Address 2") or None,
                 "ship_address_line3": _pick(row, "shipping_address_line3", "Ship To - Address 3") or None,
-                "ship_city": _pick(row, "shipping_city", "Ship To - City") or None,
-                "ship_state": _pick(row, "shipping_state", "Ship To - State") or None,
-                "ship_postal_code": _pick(row, "shipping_postal_code", "Ship To - Postal Code") or None,
-                "ship_country": _pick(row, "shipping_country", "Ship To - Country") or "US",
+                "ship_city": _pick(row, "shipping_city", "Ship To - City", "Ship To City") or None,
+                "ship_state": _pick(row, "shipping_state", "Ship To - State", "Ship To State") or None,
+                "ship_postal_code": _pick(row, "shipping_postal_code", "Ship To - Postal Code", "Ship To Zip") or None,
+                "ship_country": _pick(row, "shipping_country", "Ship To - Country", "Ship To Country") or "US",
                 "subtotal": _as_float(row, "subtotal_amount", "subtotal", "Amount - Order Subtotal", default=0.0),
-                "tax": _as_float(row, "tax_amount", "tax", "Amount - Order Tax", default=0.0),
-                "shipping": _as_float(row, "shipping_amount", "Amount - Shipping Cost", "shipping", "Amount - Order Shipping", default=0.0),
+                "tax": _as_float(row, "tax_amount", "tax", "Amount - Order Tax", "eBay Collected Tax", default=0.0),
+                "shipping": _as_float(row, "shipping_amount", "Amount - Shipping Cost", "shipping", "Amount - Order Shipping", "Shipping And Handling", default=0.0),
                 "handling": _as_float(row, "handling_amount", "handling", "Amount - Handling", "Amount - Handling Cost", default=0.0),
-                "total": _as_float(row, "total_amount", "total", "Amount - Order Total", default=0.0),
+                "total": _as_float(row, "total_amount", "total", "Amount - Order Total", "Total Price", default=0.0),
                 "currency": _pick(row, "currency") or "USD",
                 "ordered_at": ordered_at,
                 "items": [],
@@ -504,11 +509,11 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
 
         order_entry["items"].append(
             {
-                "platform_item_id": _pick(row, "external_item_id", "Order - Number") or None,
-                "platform_sku": _pick(row, "Item - SKU", "external_sku", "sku", "SKU") or None,
+                "platform_item_id": _pick(row, "external_item_id", "Order - Number", "Item Number") or None,
+                "platform_sku": _pick(row, "Item - SKU", "external_sku", "sku", "SKU", "Custom Label") or None,
                 "asin": (row.get("external_asin") or "").strip() or None,
                 "title": (
-                    _pick(row, "Item - Name", "item_name", "title", "Item Name", "Product Name")
+                    _pick(row, "Item - Name", "item_name", "title", "Item Name", "Product Name", "Item Title")
                     or "Imported order line"
                 ),
                 "quantity": quantity,
