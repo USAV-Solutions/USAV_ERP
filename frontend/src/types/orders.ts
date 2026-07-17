@@ -12,6 +12,7 @@ export type OrderPlatform =
   | 'EBAY_MEKONG'
   | 'EBAY_USAV'
   | 'EBAY_DRAGON'
+  | 'EBAY_PURCHASING'
   | 'ECWID'
   | 'SHOPIFY'
   | 'WALMART'
@@ -23,6 +24,7 @@ export type SalesImportApiSource =
   | 'EBAY_MEKONG'
   | 'EBAY_USAV'
   | 'EBAY_DRAGON'
+  | 'EBAY_PURCHASING'
   | 'WALMART'
 
 export type SalesImportFileSource =

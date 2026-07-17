@@ -43,7 +43,8 @@ function toApiUntilIso(dateText: string): string {
   return new Date(`${dateText}T23:59:59.999`).toISOString()
 }
 
-type ImportMode = 'api' | 'csv' | 'fba'
+type ImportMode = 'api' | 'csv'
+type CsvSource = 'shipstation' | 'ebay_purchasing' | 'fba'
 
 interface OrderImportButtonProps {
   fulfillmentChannel: OrderFulfillmentChannel
@@ -53,9 +54,12 @@ export default function OrderImportButton({ fulfillmentChannel }: OrderImportBut
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
   const [mode, setMode] = useState<ImportMode>(
-    fulfillmentChannel === 'AMAZON_FBA' ? 'fba' : 'api',
+    fulfillmentChannel === 'AMAZON_FBA' ? 'csv' : 'api',
   )
   const [apiSource, setApiSource] = useState<SalesImportApiSource>('ECWID')
+  const [csvSource, setCsvSource] = useState<CsvSource>(
+    fulfillmentChannel === 'AMAZON_FBA' ? 'fba' : 'shipstation',
+  )
   const [since, setSince] = useState('')
   const [until, setUntil] = useState('')
   const [csvFile, setCsvFile] = useState<File | null>(null)
@@ -63,7 +67,13 @@ export default function OrderImportButton({ fulfillmentChannel }: OrderImportBut
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    setMode(fulfillmentChannel === 'AMAZON_FBA' ? 'fba' : 'api')
+    if (fulfillmentChannel === 'AMAZON_FBA') {
+      setMode('csv')
+      setCsvSource('fba')
+    } else {
+      setMode('api')
+      setCsvSource('shipstation')
+    }
   }, [fulfillmentChannel])
 
   const apiMutation = useMutation({
@@ -88,7 +98,7 @@ export default function OrderImportButton({ fulfillmentChannel }: OrderImportBut
       if (!csvFile) {
         throw new Error('Please choose a CSV file.')
       }
-      return importOrdersFromFile(mode === 'fba' ? 'AMAZON_FBA_CSV' : 'CSV_GENERIC', csvFile)
+      return importOrdersFromFile(csvSource === 'fba' ? 'AMAZON_FBA_CSV' : 'CSV_GENERIC', csvFile)
     },
     onSuccess: (data) => {
       setMessage(
@@ -141,7 +151,6 @@ export default function OrderImportButton({ fulfillmentChannel }: OrderImportBut
               <Select value={mode} label="Mode" onChange={(e) => setMode(e.target.value as ImportMode)}>
                 <MenuItem value="api">API source</MenuItem>
                 <MenuItem value="csv">CSV file</MenuItem>
-                <MenuItem value="fba">FBA CSV</MenuItem>
               </Select>
             </FormControl>
 
@@ -179,20 +188,34 @@ export default function OrderImportButton({ fulfillmentChannel }: OrderImportBut
                 />
               </Stack>
             ) : (
-              <Box>
-                <Button component="label" variant="outlined">
-                  {mode === 'fba' ? 'Choose FBA CSV' : 'Choose CSV'}
-                  <input
-                    type="file"
-                    hidden
-                    accept=".csv,text/csv"
-                    onChange={(e) => setCsvFile(e.target.files?.[0] ?? null)}
-                  />
-                </Button>
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                  {csvFile ? csvFile.name : mode === 'fba' ? 'No FBA CSV selected' : 'No file selected'}
-                </Typography>
-              </Box>
+              <Stack spacing={2}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>CSV Source</InputLabel>
+                  <Select
+                    value={csvSource}
+                    label="CSV Source"
+                    onChange={(e) => setCsvSource(e.target.value as CsvSource)}
+                  >
+                    <MenuItem value="shipstation">Shipstation</MenuItem>
+                    <MenuItem value="ebay_purchasing">eBay Purchasing</MenuItem>
+                    <MenuItem value="fba">Amazon FBA</MenuItem>
+                  </Select>
+                </FormControl>
+                <Box>
+                  <Button component="label" variant="outlined">
+                    {csvSource === 'fba' ? 'Choose FBA CSV' : 'Choose CSV'}
+                    <input
+                      type="file"
+                      hidden
+                      accept=".csv,text/csv"
+                      onChange={(e) => setCsvFile(e.target.files?.[0] ?? null)}
+                    />
+                  </Button>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                    {csvFile ? csvFile.name : 'No file selected'}
+                  </Typography>
+                </Box>
+              </Stack>
             )}
 
             {error && <Alert severity="error">{error}</Alert>}
