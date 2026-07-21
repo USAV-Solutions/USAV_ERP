@@ -897,8 +897,8 @@ async def _process_tracking_import_rows(
         carrier = _detect_carrier(tracking)
         order.tracking_number = tracking
         order.carrier = carrier
-        order.status = OrderStatus.SHIPPED
-        order.shipping_status = ShippingStatus.SHIPPING
+        # order.status = OrderStatus.SHIPPED
+        # order.shipping_status = ShippingStatus.SHIPPING
         order.zoho_sync_status = ZohoSyncStatus.DIRTY
         db.add(order)
         updated_count += 1
