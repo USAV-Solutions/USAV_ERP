@@ -167,6 +167,7 @@ _IMPORT_SOURCE_TO_PLATFORM: dict[SalesImportApiSource, str] = {
     SalesImportApiSource.EBAY_MEKONG: "EBAY_MEKONG",
     SalesImportApiSource.EBAY_USAV: "EBAY_USAV",
     SalesImportApiSource.EBAY_DRAGON: "EBAY_DRAGON",
+    SalesImportApiSource.EBAY_PURCHASING: "EBAY_PURCHASING",
     SalesImportApiSource.WALMART: "WALMART",
 }
 
@@ -175,6 +176,7 @@ _PLATFORM_TO_SOURCE: dict[str, str] = {
     "EBAY_MEKONG": "EBAY_MEKONG_API",
     "EBAY_USAV": "EBAY_USAV_API",
     "EBAY_DRAGON": "EBAY_DRAGON_API",
+    "EBAY_PURCHASING": "EBAY_PURCHASING_API",
     "ECWID": "ECWID_API",
     "SHOPIFY": "SHOPIFY_API",
     "WALMART": "WALMART_API",
@@ -214,6 +216,7 @@ def _build_platform_clients() -> dict[str, BasePlatformClient]:
         "EBAY_MEKONG": settings.ebay_refresh_token_mekong,
         "EBAY_USAV": settings.ebay_refresh_token_usav,
         "EBAY_DRAGON": settings.ebay_refresh_token_dragon,
+        "EBAY_PURCHASING": settings.ebay_refresh_token_purchasing,
     }
     
     # Check shared eBay credentials

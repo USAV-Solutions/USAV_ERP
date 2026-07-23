@@ -27,6 +27,7 @@ const API_SOURCES: SalesImportApiSource[] = [
   'EBAY_MEKONG',
   'EBAY_USAV',
   'EBAY_DRAGON',
+  'EBAY_PURCHASING',
   'WALMART',
 ]
 
