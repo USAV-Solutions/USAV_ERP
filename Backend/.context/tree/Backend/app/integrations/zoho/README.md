@@ -31,6 +31,7 @@ Zoho client/sync engine used for outbound and inbound synchronization flows.
 - Purchase-order outbound sync now folds `tax_amount + shipping_amount + handling_amount` into line-item rates by splitting the charge pool evenly across PO lines. Do not send PO-level `adjustment`/`adjustment_description` for these charges, and keep the post-sync total guardrail aligned with `PurchaseOrder.total_amount`.
 - Zoho composite-item create/update payloads must use `mapped_items` (not `component_items`); Zoho returns `code:4` / `Invalid value passed for mapped_items` when the mapping key or mapped entry shape is wrong.
 - Zoho API requests using `httpx.AsyncClient` must configure a generous timeout (e.g., `timeout=30.0`) to avoid `ConnectTimeout` exceptions during slow or large-payload syncs.
+- Purchase-order outbound sync requires all line item variants to be registered in Zoho Inventory (so they have `zoho_item_id` populated). If any variant is unsynced, `sync_po_outbound` automatically invokes `sync_variant_outbound` to sync the variant first, preventing Zoho from rejecting the purchase order with 'non-purchase item' errors.
 
 ## Child Folders
 - (No child folders)

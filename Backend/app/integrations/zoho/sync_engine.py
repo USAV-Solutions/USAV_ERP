@@ -1626,6 +1626,17 @@ async def sync_po_outbound(
         try:
             zoho = ZohoClient()
 
+            # Ensure all line item variants are synced to Zoho first so they have zoho_item_id
+            for item in po.items or []:
+                variant = getattr(item, "variant", None)
+                if variant and not variant.zoho_item_id:
+                    logger.info(
+                        "sync_po_outbound: variant %s has no zoho_item_id, syncing to Zoho first",
+                        variant.id,
+                    )
+                    await sync_variant_outbound(variant.id)
+                    await db.refresh(variant)
+
             unmatched_item_id: Optional[str] = None
             if any(getattr(item, "variant", None) is None for item in (po.items or [])):
                 unmatched_item_id = await _ensure_unmatched_placeholder_item(zoho)
