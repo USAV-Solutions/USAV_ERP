@@ -1,0 +1,763 @@
+Date: Tue, 28 Jul 2026 08:00:26 +0000 (UTC)
+Message-ID: <92829663.5.1785225626010@58fbc1a516f0>
+Subject: Exported From Confluence
+MIME-Version: 1.0
+Content-Type: multipart/related; 
+	boundary="----=_Part_4_1249022900.1785225626009"
+
+------=_Part_4_1249022900.1785225626009
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+Content-Location: file:///C:/exported.html
+
+<html xmlns:o=3D'urn:schemas-microsoft-com:office:office'
+      xmlns:w=3D'urn:schemas-microsoft-com:office:word'
+      xmlns:v=3D'urn:schemas-microsoft-com:vml'
+      xmlns=3D'urn:w3-org-ns:HTML'>
+<head>
+    <meta http-equiv=3D"Content-Type" content=3D"text/html; charset=3Dutf-8=
+">
+    <title>USAV Business Process Documentation</title>
+    <!--[if gte mso 9]>
+    <xml>
+        <o:OfficeDocumentSettings>
+            <o:TargetScreenSize>1024x640</o:TargetScreenSize>
+            <o:PixelsPerInch>72</o:PixelsPerInch>
+            <o:AllowPNG/>
+        </o:OfficeDocumentSettings>
+        <w:WordDocument>
+            <w:View>Print</w:View>
+            <w:Zoom>90</w:Zoom>
+            <w:DoNotOptimizeForBrowser/>
+        </w:WordDocument>
+    </xml>
+    <![endif]-->
+    <style>
+                <!--
+        @page Section1 {
+            size: 8.5in 11.0in;
+            margin: 1.0in;
+            mso-header-margin: .5in;
+            mso-footer-margin: .5in;
+            mso-paper-source: 0;
+        }
+
+        table {
+            border: solid 1px;
+            border-collapse: collapse;
+        }
+
+        table td, table th {
+            border: solid 1px;
+            padding: 5px;
+        }
+
+        td {
+            page-break-inside: avoid;
+        }
+
+        tr {
+            page-break-after: avoid;
+        }
+
+        div.Section1 {
+            page: Section1;
+        }
+
+        /* Confluence print stylesheet. Common to all themes for print medi=
+a */
+/* Full of !important until we improve batching for print CSS */
+
+@media print {
+    #main {
+        padding-bottom: 1em !important; /* The default padding of 6em is to=
+o much for printouts */
+    }
+
+    body {
+        font: var(--ds-font-body-small, Arial, Helvetica, FreeSans, sans-se=
+rif);
+    }
+
+    body, #full-height-container, #main, #page, #content, .has-personal-sid=
+ebar #content {
+        background: var(--ds-surface, #fff) !important;
+        color: var(--ds-text, #000) !important;
+        border: 0 !important;
+        width: 100% !important;
+        height: auto !important;
+        min-height: auto !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        display: block !important;
+    }
+
+    a, a:link, a:visited, a:focus, a:hover, a:active {
+        color: var(--ds-text, #000);
+    }
+
+    #content h1,
+    #content h2,
+    #content h3,
+    #content h4,
+    #content h5,
+    #content h6 {
+        page-break-after: avoid;
+    }
+
+    pre {
+        font: var(--ds-font-code, Monaco, "Courier New", monospace);
+    }
+
+    #header,
+    .aui-header-inner,
+    #navigation,
+    #sidebar,
+    .sidebar,
+    #personal-info-sidebar,
+    .ia-fixed-sidebar,
+    .page-actions,
+    .navmenu,
+    .ajs-menu-bar,
+    .noprint,
+    .inline-control-link,
+    .inline-control-link a,
+    a.show-labels-editor,
+    .global-comment-actions,
+    .comment-actions,
+    .quick-comment-container,
+    #addcomment {
+        display: none !important;
+    }
+
+    /* CONF-28544 cannot print multiple pages in IE */
+    #splitter-content {
+        position: relative !important;
+    }
+
+    .comment .date::before {
+        content: none !important; /* remove middot for print view */
+    }
+
+    h1.pagetitle img {
+        height: auto;
+        width: auto;
+    }
+
+    .print-only {
+        display: block;
+    }
+
+    #footer {
+        position: relative !important; /* CONF-17506 Place the footer at en=
+d of the content */
+        margin: 0;
+        padding: 0;
+        background: none;
+        clear: both;
+    }
+
+    #poweredby {
+        border-top: none;
+        background: none;
+    }
+
+    #poweredby li.print-only {
+        display: list-item;
+        font-style: italic;
+    }
+
+    #poweredby li.noprint {
+        display: none;
+    }
+
+    /* no width controls in print */
+    .wiki-content .table-wrap,
+    .wiki-content p,
+    .panel .codeContent,
+    .panel .codeContent pre,
+    .image-wrap {
+        overflow: visible !important;
+    }
+
+    /* TODO - should this work? */
+    #children-section,
+    #comments-section .comment,
+    #comments-section .comment .comment-body,
+    #comments-section .comment .comment-content,
+    #comments-section .comment p {
+        page-break-inside: avoid;
+    }
+
+    #page-children a {
+        text-decoration: none;
+    }
+
+    /**
+     hide twixies
+
+     the specificity here is a hack because print styles
+     are getting loaded before the base styles. */
+    #comments-section.pageSection .section-header,
+    #comments-section.pageSection .section-title,
+    #children-section.pageSection .section-header,
+    #children-section.pageSection .section-title,
+    .children-show-hide {
+        padding-left: 0;
+        margin-left: 0;
+    }
+
+    .children-show-hide.icon {
+        display: none;
+    }
+
+    /* personal sidebar */
+    .has-personal-sidebar #content {
+        margin-right: 0px;
+    }
+
+    .has-personal-sidebar #content .pageSection {
+        margin-right: 0px;
+    }
+
+    .no-print, .no-print * {
+        display: none !important;
+    }
+}
+-->
+    </style>
+</head>
+<body>
+    <h1>USAV Business Process Documentation</h1>
+    <div class=3D"Section1">
+        <h3 local-id=3D"53975cd5bfdd" id=3D"USAVBusinessProcessDocumentatio=
+n-1.DocumentPurpose">1. Document Purpose</h3>
+<p local-id=3D"4adf5527f609">This Business Requirements Document (BRD) spec=
+ifies the high-level business needs and operational workflows of USAV Solut=
+ions. It defines <em>what</em> the system must accomplish before translatin=
+g these needs into technical specifications (SRS).</p>
+<h2 local-id=3D"42f51614a16f" id=3D"USAVBusinessProcessDocumentation-2.Busi=
+nessObjectives">2. Business Objectives</h2>
+<ul local-id=3D"512693ad-0d29-4926-9477-0e3ea5cf5c9b">
+<li local-id=3D"c00843de-58c3-4d56-9d4d-27fec2369e94">
+<p local-id=3D"afc3ee609cea"><strong>Minimize Shipping Errors</strong>: Ach=
+ieve &gt;99.9% order packing accuracy using barcode double-scan &amp; Photo=
+ verification.</p></li>
+<li local-id=3D"64b8fbb2-9508-4c0c-8a11-85cbf58721b3">
+<p local-id=3D"3dd0a7a41278"><strong>Reduce Diagnostic Bottlenecks</strong>=
+: Standardize cosmetic and acoustic grading criteria for used Bose equipmen=
+t.</p></li>
+<li local-id=3D"0d897cc1-8089-4795-8045-ca9e3d6460c2">
+<p local-id=3D"f16781210163"><strong>Optimize Purchasing Margins</strong>: =
+Track bidding bids vs. historical sales prices to maximize ROI on liquidati=
+on pallets.</p></li>
+<li local-id=3D"1669e923-8d22-464a-93fb-62ea4e12ca0e">
+<p local-id=3D"7c9b1b9eb63f"><strong>Consolidate Customer Support</strong>:=
+ Access customer chats and order histories across all 5 sales channels in a=
+ single screen.</p></li>
+<li local-id=3D"32a176d8-faf6-4d0d-a922-e01c5c2ec8bc">
+<p local-id=3D"d02981c15e64"><strong>Protect Against Fraud Claims</strong>:=
+ Map specific CCTV recording timestamps directly to packer logs for high-va=
+lue shipping dispute resolution.</p></li>
+<li local-id=3D"fd8c6743-36be-448a-9aa4-fea0f6f4086a">
+<p local-id=3D"671593994f33"><strong>Unify Multi-Account &amp; Listing Mana=
+gement</strong>: Centrally manage multiple Amazon (e.g., FBA vs. Merchant) =
+and eBay accounts. Monitor Listing Health (suppressed listings, policy viol=
+ations) and compare Sales Channel Performance in real-time.</p></li>
+</ul>
+<h2 local-id=3D"42dfc621cbb9" id=3D"USAVBusinessProcessDocumentation-3.Stak=
+eholders&amp;UserRoles">3. Stakeholders &amp; User Roles</h2>
+<div class=3D"table-wrap">
+<table data-table-width=3D"760" data-layout=3D"default" data-local-id=3D"af=
+7a9ac8-f5fe-4445-ae83-7c08704d9c92" class=3D"confluenceTable">
+<tbody>
+<tr data-local-id=3D"01ab270f-f22e-4439-9db0-8daaf9bc90ac">
+<th data-highlight-colour=3D"color(srgb 0.877333 0.877333 0.877333)" data-l=
+ocal-id=3D"201d0dbc-8f9a-475e-989c-5db682065498" class=3D"confluenceTh">
+<p local-id=3D"2dfa6b6d2500">Role</p></th>
+<th data-highlight-colour=3D"color(srgb 0.877333 0.877333 0.877333)" data-l=
+ocal-id=3D"6c10a363-0376-4256-b345-c826d655009c" class=3D"confluenceTh">
+<p local-id=3D"1961f355961c">Business Responsibility</p></th>
+<th data-highlight-colour=3D"color(srgb 0.877333 0.877333 0.877333)" data-l=
+ocal-id=3D"14f46ab3-f4e1-4722-ad0b-3dcdd37154d0" class=3D"confluenceTh">
+<p local-id=3D"a0210c702bbf">Key ERP Interactions</p></th>
+</tr>
+<tr data-local-id=3D"5cfc34a8-c951-4d55-83b8-bb028c0f0a83">
+<td data-local-id=3D"2593d8ce-f675-4608-bc58-6b54c1641f5e" class=3D"conflue=
+nceTd">
+<p local-id=3D"718ed4720870"><strong>Purchasing Agent / Buyer</strong></p><=
+/td>
+<td data-local-id=3D"e7c783f6-7bc2-47cd-88f6-cd9ff2f9b176" class=3D"conflue=
+nceTd">
+<p local-id=3D"a3f7035fba23">Sources inventory from auctions/liquidators.</=
+p></td>
+<td data-local-id=3D"9a16f9da-7cdc-43b4-b0f6-13a1cd016239" class=3D"conflue=
+nceTd">
+<p local-id=3D"9073b5a8e7b5">Bid tracker, historical margin estimator, supp=
+lier PO manager.</p></td>
+</tr>
+<tr data-local-id=3D"445b37bb-c243-4e35-9636-52b438ffa752">
+<td data-local-id=3D"54680bf0-46e2-4cd9-b73f-d095593ed317" class=3D"conflue=
+nceTd">
+<p local-id=3D"e3f117cd6acf"><strong>Receiving Clerk</strong></p></td>
+<td data-local-id=3D"81d6fe08-c6d3-428a-8fb9-f6c9ba570ead" class=3D"conflue=
+nceTd">
+<p local-id=3D"aa939f97571e">Inspects inbound pallets and logs box count.</=
+p></td>
+<td data-local-id=3D"42d3ab74-da85-4b88-8f94-771e5e74902f" class=3D"conflue=
+nceTd">
+<p local-id=3D"cdb3a4d1e369">Intake manifest registry, carton barcode print=
+er.</p></td>
+</tr>
+<tr data-local-id=3D"d82b086b-e4e2-4b43-9fc6-58e07ed30215">
+<td data-local-id=3D"76fffe3f-644c-4d6f-abe0-c54121ff3463" class=3D"conflue=
+nceTd">
+<p local-id=3D"1c70083ba850"><strong>Refurbishment Technician</strong></p><=
+/td>
+<td data-local-id=3D"f9689805-6f07-46a4-84da-cdc55eb67a47" class=3D"conflue=
+nceTd">
+<p local-id=3D"809419cfff46">Tests acoustic quality and cosmetic condition.=
+</p></td>
+<td data-local-id=3D"fc28c995-8fd1-4282-a2e0-3d7870a5b0e2" class=3D"conflue=
+nceTd">
+<p local-id=3D"a479a4447b15">Serial number registrar, Bose parts compatibil=
+ity checklist, diagnostic logger.</p></td>
+</tr>
+<tr data-local-id=3D"a34a69b7-ffbb-4fc6-b41f-caa90e0481d9">
+<td data-local-id=3D"2bd8ca3e-b362-4640-8561-5956d163f63e" class=3D"conflue=
+nceTd">
+<p local-id=3D"c5d5cfe1676d"><strong>Warehouse Packer</strong></p></td>
+<td data-local-id=3D"9e53a7bf-01c4-4475-b9f8-f2e631f77793" class=3D"conflue=
+nceTd">
+<p local-id=3D"f741024ab80b">Packs products and prints shipping labels.</p>=
+</td>
+<td data-local-id=3D"2f5afb78-acf4-4373-9980-fdafe29e6bed" class=3D"conflue=
+nceTd">
+<p local-id=3D"2907a043e383">Packing scan verification screen, weight/dimen=
+sion logging.</p></td>
+</tr>
+<tr data-local-id=3D"5ee71480-3957-4944-ae91-560c915f82de">
+<td data-local-id=3D"dac513e4-3682-4e11-90fe-05593c30111c" class=3D"conflue=
+nceTd">
+<p local-id=3D"d93b9023b55d"><strong>Customer Support Agent</strong></p></t=
+d>
+<td data-local-id=3D"e317f7b8-4897-4ea3-9322-f187c8ae11ee" class=3D"conflue=
+nceTd">
+<p local-id=3D"90f85c71db59">Handles returns, warranty claims, and buyer ch=
+ats.</p></td>
+<td data-local-id=3D"229fb813-1c3a-4e56-a268-cd46169a0e90" class=3D"conflue=
+nceTd">
+<p local-id=3D"9397f3a57b8f">Multi-channel chat dashboard, RMA tracker, ref=
+und validator.</p></td>
+</tr>
+<tr data-local-id=3D"fb857b35-1f07-4bff-95ad-4b941faf05aa">
+<td data-local-id=3D"bcced018-377e-4cf7-91e6-393ea16aa2fb" class=3D"conflue=
+nceTd">
+<p local-id=3D"2b8d7e6c650c"><strong>Security Manager</strong></p></td>
+<td data-local-id=3D"5721753d-5d55-4ed6-b70f-d9e5d273af9b" class=3D"conflue=
+nceTd">
+<p local-id=3D"b96c374a138f">Audits theft, missing items, or customer dispu=
+tes.</p></td>
+<td data-local-id=3D"90db7bad-38f6-4b69-9e74-a7f7cb15c07b" class=3D"conflue=
+nceTd">
+<p local-id=3D"351a62386311">CCTV footage playback linked to packing statio=
+n logs.</p></td>
+</tr>
+<tr data-local-id=3D"76eceb90-205f-4579-a8ce-45b736fb6ad9">
+<td data-local-id=3D"53221da7-d309-4452-a05b-581fcbc602e9" class=3D"conflue=
+nceTd">
+<p local-id=3D"ab43d83ba94f"><strong>Marketing Coordinator</strong></p></td=
+>
+<td data-local-id=3D"acdac67d-c8fe-47ef-be36-cc09b1cea545" class=3D"conflue=
+nceTd">
+<p local-id=3D"c8a4d85c1c4c">Develops product demonstrations and video cont=
+ent.</p></td>
+<td data-local-id=3D"2dbb2b13-8dc6-454c-a816-7cff51b92252" class=3D"conflue=
+nceTd">
+<p local-id=3D"e18d6c052451">Video schedule tracker, asset manager linked t=
+o product SKUs.</p></td>
+</tr>
+<tr data-local-id=3D"943ec3af-b928-495c-aa18-9eee136b41cc">
+<td data-local-id=3D"44b29722-a756-4573-9602-9d7d856e9319" class=3D"conflue=
+nceTd">
+<p local-id=3D"bb3cfb8a7547"><strong>Data Administrator</strong></p></td>
+<td data-local-id=3D"71683233-605f-4691-a3f6-b34d307037c0" class=3D"conflue=
+nceTd">
+<p local-id=3D"de658c4cda39">Configures master data catalog and inventory r=
+ules.</p></td>
+<td data-local-id=3D"6c9ea89c-b938-4497-986a-63c04106bb1a" class=3D"conflue=
+nceTd">
+<p local-id=3D"189b1db18308">SKU mapping manager, platform listing synchron=
+izer.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<h2 local-id=3D"6280c668c5d0" id=3D"USAVBusinessProcessDocumentation-4.Func=
+tionalBusinessRequirements">4. Functional Business Requirements</h2>
+<div class=3D"ap-container" id=3D"ap-tech.labs.app.mermaid__mermaidjs391475=
+5750280814531">
+<div class=3D"ap-content " id=3D"embedded-tech.labs.app.mermaid__mermaidjs3=
+914755750280814531"></div>
+<script nonce=3D"3e86b1524384441cbf45b6a6739d2a40" class=3D"ap-iframe-body-=
+script">
+  (function(){
+    var data =3D {
+    "addon_key":"tech.labs.app.mermaid",
+    "connectToForgeMigration": {
+        "defined": false,
+        "willMigrateToForgeBeforeEOS": "",
+        "migrationGuideUrl": ""
+    },
+    "uniqueKey":"tech.labs.app.mermaid__mermaidjs3914755750280814531",
+    "key":"mermaidjs",
+     "moduleType":"dynamicContentMacros",      "moduleLocation":"content", =
+        "cp":"/wiki",
+            "general":"",
+    "w":"",
+    "h":"",
+    "url":"https://mermaidtechlabs.herokuapp.com/mermaidjs?pageId=3D2149581=
+1&pageVersion=3D4&macroId=3Dfa34e004-b766-4171-8611-57e30dbb8bf8&outputType=
+=3Dword&theme=3Dforest&width=3D&height=3D&xdm_e=3Dhttps%3A%2F%2Fusavsolutio=
+ns.atlassian.net&xdm_c=3Dchannel-tech.labs.app.mermaid__mermaidjs3914755750=
+280814531&cp=3D%2Fwiki&xdm_deprecated_addon_key_do_not_use=3Dtech.labs.app.=
+mermaid&lic=3Dactive&userAccess=3Dtrue&cv=3D1000.0.0-0f6083a7ebda&traceId=
+=3D3e86b1524384441cbf45b6a6739d2a40&spanId=3D48428c8e8747bc86&traceSampled=
+=3D0&jwt=3DeyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI3MTIwMjA6ZTFjNjQ=
+0NTctN2RiYS00MjI5LWFhZDUtYmYwNThhMTVlZGRhIiwicXNoIjoiZjIyOTBhM2FkZTc0ZjJiNT=
+czODVkNGNiNmNiZTViYjE4NDI1ZWFlZGZlN2VkMjg1NGM3MGQ2YWFiOTE2NDk1ZSIsImlzcyI6I=
+jRmZmRmZWYxLTRlMWYtM2VlMi1hNjg2LWY2N2E1MjYyYjRhYiIsImNvbnRleHQiOnt9LCJleHAi=
+OjE3ODUyMjU4MDUsImlhdCI6MTc4NTIyNTYyNX0.ScgVEFP83OeC4N01HEU7MVx8nG9TsxIGQXq=
+grHBxKwc",
+     "contextJwt": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI3MTIwMj=
+A6ZTFjNjQ0NTctN2RiYS00MjI5LWFhZDUtYmYwNThhMTVlZGRhIiwicXNoIjoiY29udGV4dC1xc=
+2giLCJpc3MiOiI0ZmZkZmVmMS00ZTFmLTNlZTItYTY4Ni1mNjdhNTI2MmI0YWIiLCJjb250ZXh0=
+Ijp7ImxpY2Vuc2UiOnsiYWN0aXZlIjp0cnVlfSwidXJsIjp7ImRpc3BsYXlVcmwiOiJodHRwczp=
+cL1wvdXNhdnNvbHV0aW9ucy5hdGxhc3NpYW4ubmV0XC93aWtpIn0sImNvbmZsdWVuY2UiOnsiZW=
+RpdG9yIjp7InZlcnNpb24iOiJ2MiJ9LCJtYWNybyI6eyJvdXRwdXRUeXBlIjoid29yZCIsImhhc=
+2giOiJmYTM0ZTAwNC1iNzY2LTQxNzEtODYxMS01N2UzMGRiYjhiZjgiLCJpZCI6ImZhMzRlMDA0=
+LWI3NjYtNDE3MS04NjExLTU3ZTMwZGJiOGJmOCJ9LCJ0cmFjaW5nIjp7InRyYWNlSWQiOiIzZTg=
+2YjE1MjQzODQ0NDFjYmY0NWI2YTY3MzlkMmE0MCIsInNwYW5JZCI6IjQ4NDI4YzhlODc0N2JjOD=
+YiLCJzYW1wbGVkIjoiMCJ9LCJjb250ZW50Ijp7InR5cGUiOiJwYWdlIiwidmVyc2lvbiI6IjQiL=
+CJpZCI6IjIxNDk1ODExIn0sInNwYWNlIjp7ImtleSI6In43MTIwMjBlMWM2NDQ1NzdkYmE0MjI5=
+YWFkNWJmMDU4YTE1ZWRkYSIsImlkIjoiMzMyNTEifX19LCJleHAiOjE3ODUyMjY1MjUsImlhdCI=
+6MTc4NTIyNTYyNX0.4NW7FLbnx7Ix4AzVkrNU3t1CzxEQd6Q1yNwYRkyMaBI",    "structur=
+edContext": "{\"license\":{\"active\":true},\"confluence\":{\"editor\":{\"v=
+ersion\":\"v2\"},\"macro\":{\"outputType\":\"word\",\"hash\":\"fa34e004-b76=
+6-4171-8611-57e30dbb8bf8\",\"id\":\"fa34e004-b766-4171-8611-57e30dbb8bf8\"}=
+,\"tracing\":{\"traceId\":\"3e86b1524384441cbf45b6a6739d2a40\",\"spanId\":\=
+"48428c8e8747bc86\",\"sampled\":\"0\"},\"content\":{\"type\":\"page\",\"ver=
+sion\":\"4\",\"id\":\"21495811\"},\"space\":{\"key\":\"~712020e1c644577dba4=
+229aad5bf058a15edda\",\"id\":\"33251\"}},\"url\":{\"displayUrl\":\"https://=
+usavsolutions.atlassian.net/wiki\"}}",
+    "contentClassifier":"content",
+    "productCtx":"{\"page.id\":\"21495811\",\"macro.hash\":\"fa34e004-b766-=
+4171-8611-57e30dbb8bf8\",\"fileName\":\"mermaid_1785225254120\",\"tracing.s=
+ampled\":\"0\",\"page.type\":\"page\",\"macro.localId\":\"4332bd66-c2a5-406=
+2-8fd3-ebf7459e86f5\",\": =3D | RAW | =3D :\":\"fileName=3Dmermaid_17852252=
+54120|theme=3Dforest|version=3D2\",\"space.id\":\"33251\",\"tracing.traceId=
+\":\"3e86b1524384441cbf45b6a6739d2a40\",\"theme\":\"forest\",\"tracing.span=
+Id\":\"48428c8e8747bc86\",\"user.isExternalCollaborator\":\"false\",\"space=
+.key\":\"~712020e1c644577dba4229aad5bf058a15edda\",\"content.version\":\"4\=
+",\"page.title\":\"USAV Business Process Documentation\",\"macro.body\":\"{=
+\\\"diagramDefinition\\\":\\\"graph TD\\\\n  root(\\\\\\\"USAV Solutions ER=
+P\\\\\\\") --\u003e WO(\\\\\\\"Warehouse Operations\\\\\\\")\\\\n  root --\=
+u003e PB(\\\\\\\"Purchasing & Bi\",\"macro.truncated\":\"true\",\"version\"=
+:\"2\",\"content.type\":\"page\",\"output.type\":\"word\",\"page.version\":=
+\"4\",\"macro.fragmentLocalId\":\"\",\"content.id\":\"21495811\",\"macro.id=
+\":\"fa34e004-b766-4171-8611-57e30dbb8bf8\",\"editor.version\":\"v2\"}",
+    "timeZone":"Asia/Saigon",
+    "origin":"https://mermaidtechlabs.herokuapp.com",
+    "hostOrigin":"https://usavsolutions.atlassian.net",
+    "sandbox":"allow-downloads allow-forms allow-modals allow-popups allow-=
+popups-to-escape-sandbox allow-scripts allow-same-origin allow-top-navigati=
+on-by-user-activation allow-storage-access-by-user-activation",            =
+"apiMigrations": {
+        "gdpr": true
+    }
+}
+;
+    if(window.AP && window.AP.subCreate) {
+      window._AP.appendConnectAddon(data);
+    } else {
+      require(['ac/create'], function(create){
+        create.appendConnectAddon(data);
+      });
+    }
+
+    // For Confluence App Analytics. This code works in conjunction with CF=
+E's ConnectSupport.js.
+    // Here, we add a listener to the initial HTML page that stores events =
+if the ConnectSupport component
+    // has not mounted yet. In CFE, we process the missed event data and di=
+sable this initial listener.
+    const __MAX_EVENT_ARRAY_SIZE__ =3D 20;
+    const connectAppAnalytics =3D "ecosystem.confluence.connect.analytics";
+    window.connectHost && window.connectHost.onIframeEstablished((eventData=
+) =3D> {
+      if (!window.__CONFLUENCE_CONNECT_SUPPORT_LOADED__) {
+        let events =3D JSON.parse(window.localStorage.getItem(connectAppAna=
+lytics)) || [];
+        if (events.length >=3D __MAX_EVENT_ARRAY_SIZE__) {
+          events.shift();
+        }
+        events.push(eventData);
+        window.localStorage.setItem(connectAppAnalytics, JSON.stringify(eve=
+nts));
+      }
+    });
+
+  }());
+</script>
+</div>
+<div class=3D"code panel pdl" style=3D"border-width: 1px;">
+<div class=3D"codeContent panelContent pdl">
+<pre class=3D"syntaxhighlighter-pre" data-syntaxhighlighter-params=3D"brush=
+: java; gutter: false; theme: Confluence" data-theme=3D"Confluence">graph T=
+D
+  root("USAV Solutions ERP") --&gt; WO("Warehouse Operations")
+  root --&gt; PB("Purchasing &amp; Bidding")
+  root --&gt; CS("Customer Support")
+  root --&gt; SC("Security &amp; CCTV")
+  root --&gt; DO("Data Operations")
+  root --&gt; MO("Marketing Operations")
+  root --&gt; LM("Listing &amp; Channel Management")
+
+  WO --&gt; WO1("Receiving")
+  WO --&gt; WO2("Diagnostic Testing")
+  WO --&gt; WO3("Packing Verification")
+
+  PB --&gt; PB1("Pallet Bid Tracking")
+  PB --&gt; PB2("Cost Basis Valuation")
+
+  CS --&gt; CS1("Unified Chat Inbox")
+  CS --&gt; CS2("RMA &amp; Warranty Claims")
+
+  SC --&gt; SC1("Packer Station Video Sync")
+  SC --&gt; SC2("Timestamp Auditing")
+
+  DO --&gt; DO1("SKU Normalizer")
+  DO --&gt; DO2("Multi-Channel Price Sync")
+
+  MO --&gt; MO1("YouTube Content Pipeline")
+  MO --&gt; MO2("Media Asset Manager")
+
+  LM --&gt; LM1("Multi-Account Support")
+  LM --&gt; LM2("Listing Health &amp; Alerts")
+  LM --&gt; LM3("Sales Analytics")</pre>
+</div>
+</div>
+<h3 local-id=3D"712c2031e80d" id=3D"USAVBusinessProcessDocumentation-4.1War=
+ehouseOperations(Inbound$\rightarrow$Diagnostics$\rightarrow$Outbound)">4.1=
+ Warehouse Operations (Inbound $\rightarrow$ Diagnostics $\rightarrow$ Outb=
+ound)</h3>
+<h4 local-id=3D"58c71abd7809" id=3D"USAVBusinessProcessDocumentation-Inboun=
+dReceiving(CLERK)">Inbound Receiving (CLERK)</h4>
+<ul local-id=3D"a415a248c1df">
+<li local-id=3D"2e3e7af8fce5">
+<p local-id=3D"18268df319d9"><strong>Manifest Ingestion</strong>: The syste=
+m must log bulk arrivals (pallets or boxes) from suppliers, liquidators, or=
+ customer returns.</p></li>
+<li local-id=3D"5a26704dd238">
+<p local-id=3D"e6e892236baf"><strong>Carton Barcoding</strong>: Automatical=
+ly generate and print tracking barcodes for incoming uninspected lots.</p><=
+/li>
+</ul>
+<h4 local-id=3D"d0de1e3a5a41" id=3D"USAVBusinessProcessDocumentation-Testin=
+g&amp;DiagnosticGrading(TECHNICIAN)">Testing &amp; Diagnostic Grading (TECH=
+NICIAN)</h4>
+<ul local-id=3D"53fcfa33004d">
+<li local-id=3D"64eaeb51f16f">
+<p local-id=3D"7fb2d7ec2d67"><strong>Serial Number Tracking</strong>: Every=
+ used Bose item must be logged by its physical serial number (or an ERP-min=
+ted Unit UID if the serial number is missing/defaced).</p></li>
+<li local-id=3D"ca2b5b013ca5">
+<p local-id=3D"fa3d82260a57"><strong>Cosmetic &amp; Functional Grading Chec=
+klist</strong>: Standardize grading input (e.g., <em>Grade A: Like New</em>=
+, <em>Grade B: Minor Scratches</em>, <em>Grade C: Moderate Wear</em>).</p><=
+/li>
+<li local-id=3D"e9d96a37eb97">
+<p local-id=3D"f1e970e48963"><strong>Acoustic Diagnostic Checklist</strong>=
+: Standardize testing checklist templates for specific product classes (e.g=
+., Bose Wave Music Systems must pass CD player spin, Bluetooth pair, aux-in=
+, and speaker balance tests).</p></li>
+<li local-id=3D"e04f92b2a7b3">
+<p local-id=3D"a3bcdafc6f71"><strong>Parts Compatibility Engine</strong>: T=
+echnicians must be able to view which salvage parts (such as replacement Bo=
+se optical lasers or speaker drivers) are compatible with the model under r=
+epair.</p></li>
+</ul>
+<h4 local-id=3D"fff637030cfa" id=3D"USAVBusinessProcessDocumentation-Packin=
+g&amp;Verification(PACKER)">Packing &amp; Verification (PACKER)</h4>
+<ul local-id=3D"debecf2157f4">
+<li local-id=3D"aacaf6bf1f9e">
+<p local-id=3D"a919118e7bcd"><strong>Double-Scan Safety</strong>: Require p=
+ackers to scan the invoice barcode and then scan each item's barcode before=
+ completing the packaging run.</p></li>
+<li local-id=3D"e4b603893524">
+<p local-id=3D"e6b908f7a758"><strong>Scale &amp; Dimension Integration</str=
+ong>: Dynamically pull weights from connected scales to verify physical con=
+tents match catalog standards.</p></li>
+</ul>
+<hr local-id=3D"4ed7670d115d">
+<h3 local-id=3D"77f2084d8b2c" id=3D"USAVBusinessProcessDocumentation-4.2Sou=
+rcing&amp;PurchasingOperations(Bidding$\rightarrow$Buying)">4.2 Sourcing &a=
+mp; Purchasing Operations (Bidding $\rightarrow$ Buying)</h3>
+<ul local-id=3D"4e59a46fca36">
+<li local-id=3D"19b8de47d9d1">
+<p local-id=3D"7563eb4da260"><strong>Auction Bid Manager</strong>: Track op=
+en bids on liquidation lots (e.g., pallets of customer-returned Bose headse=
+ts from liquidators).</p></li>
+<li local-id=3D"3566df00428a">
+<p local-id=3D"3fa3fd38f385"><strong>Historical Margin Calculator</strong>:=
+ Before placing a bid, the system should reference historical sales data fo=
+r similar condition grades to calculate estimated repair costs and potentia=
+l ROI.</p></li>
+<li local-id=3D"091ccb5947cc">
+<p local-id=3D"4892eaa26c89"><strong>Purchase Order (PO) Tracker</strong>: =
+Create and track POs sent to audio equipment suppliers.</p></li>
+</ul>
+<hr local-id=3D"90e6a2dfa3b3">
+<h3 local-id=3D"7ba1057cd586" id=3D"USAVBusinessProcessDocumentation-4.3Cus=
+tomerSupport&amp;Ticketing">4.3 Customer Support &amp; Ticketing</h3>
+<ul local-id=3D"5ec6bfdab382">
+<li local-id=3D"bcf779dac0ed">
+<p local-id=3D"a04ebf82b12e"><strong>Unified Messaging Center</strong>: Agg=
+regate customer messages, questions, and order inquiries from Amazon, eBay,=
+ Shopify, Ecwid, and Walmart into a single support interface.</p></li>
+<li local-id=3D"7bab97a6db53">
+<p local-id=3D"1628fbb8ff01"><strong>RMA &amp; Return Processing</strong>: =
+Map return requests directly to the original serial number of the shipped p=
+roduct.</p></li>
+<li local-id=3D"8b976f35242c">
+<p local-id=3D"929f3d1328bc"><strong>Warranty Verification</strong>: Instan=
+tly check if a customer's product serial number is within USAV's warranty p=
+eriod (e.g., 90-day parts and labor).</p></li>
+</ul>
+<hr local-id=3D"3192028b181f">
+<h3 local-id=3D"d96e30eade60" id=3D"USAVBusinessProcessDocumentation-4.4Sec=
+urityOperations(CCTVMonitor)">4.4 Security Operations (CCTV Monitor)</h3>
+<ul local-id=3D"7ae1b0fa75fa">
+<li local-id=3D"7635b536c83e">
+<p local-id=3D"deade9a97f08"><strong>Packer Camera Mapping</strong>: Link p=
+hysical packing stations to specific high-definition CCTV camera feeds.</p>=
+</li>
+<li local-id=3D"9dfad623ed9e">
+<p local-id=3D"8289dcf0555d"><strong>Timestamp Audit Trail</strong>: When a=
+ packer completes a shipment, the ERP must stamp the exact video timestamp =
+(Start and End of packing process) to the package audit log.</p></li>
+<li local-id=3D"00746e8a4395">
+<p local-id=3D"5b6cae11c4ec"><strong>Instant Dispute Playback</strong>: If =
+a customer claims "an empty box arrived" or "parts were missing," support a=
+gents must be able to click a button in the order history and view the vide=
+o of that specific packing run.</p></li>
+</ul>
+<hr local-id=3D"18286d171947">
+<h3 local-id=3D"dfe2cd6430ca" id=3D"USAVBusinessProcessDocumentation-4.5Dat=
+aOperations(MasterDataManagement)">4.5 Data Operations (Master Data Managem=
+ent)</h3>
+<ul local-id=3D"e2f04d1f3e81">
+<li local-id=3D"6263f822b38f">
+<p local-id=3D"667598b2187f"><strong>SKU Normalization Mapping</strong>: Re=
+solve marketplace-specific listing IDs (e.g., eBay Item ID, Amazon ASIN) to=
+ the central USAV Master SKU.</p></li>
+<li local-id=3D"86fbb316b502">
+<p local-id=3D"59d434e3b123"><strong>Real-time Inventory Sync</strong>: Whe=
+n a serialized unit is marked "Sold" on one platform (e.g., eBay), the syst=
+em must update inventory availability across all other platforms (Shopify, =
+Ecwid, Walmart, Amazon) to prevent overselling.</p></li>
+</ul>
+<hr local-id=3D"5abc8038bd35">
+<h3 local-id=3D"3d4e1a0c1062" id=3D"USAVBusinessProcessDocumentation-4.6Mar=
+ketingOperations(YouTubePipeline)">4.6 Marketing Operations (YouTube Pipeli=
+ne)</h3>
+<ul local-id=3D"9eae1c8041c7">
+<li local-id=3D"25f8019fbd4a">
+<p local-id=3D"26d1bb231f02"><strong>Content Pipeline Tracker</strong>: Man=
+age the production schedule for YouTube video campaigns (product tutorials,=
+ reviews, Bose repair guides, and demos).</p></li>
+<li local-id=3D"da446693307f">
+<p local-id=3D"b79a6dd0140a"><strong>Media Asset Association</strong>: Link=
+ YouTube video URLs and tutorial guides directly to target SKUs in the cata=
+log to provide immediate help resources for customer service tickets.</p></=
+li>
+</ul>
+<hr local-id=3D"672d9261eeec">
+<h3 local-id=3D"023ee26a37b6" id=3D"USAVBusinessProcessDocumentation-4.7Lis=
+tingManagement&amp;ChannelPerformance">4.7 Listing Management &amp; Channel=
+ Performance</h3>
+<ul local-id=3D"c00fc9ab1c2d">
+<li local-id=3D"5ebaf94bac42">
+<p local-id=3D"e291591f40b4"><strong>Multi-Account Marketplace Operations</=
+strong>: Support connecting and syncing with multiple independent store acc=
+ounts on the same marketplace (e.g., separate eBay accounts for retail vs. =
+parts sourcing, and multiple Amazon store tags).</p></li>
+<li local-id=3D"2e368ea95e03">
+<p local-id=3D"18961aa7c30b"><strong>Listing Health &amp; Violation Monitor=
+</strong>:</p>
+<ul local-id=3D"6fcfde0b8d80">
+<li local-id=3D"ad8d66db6bdb">
+<p local-id=3D"7dd9f84220a4">Periodically scan and flag listings with criti=
+cal health alerts (e.g., Amazon suppressed buy boxes, search-suppressed ite=
+ms, or inactive statuses).</p></li>
+<li local-id=3D"37b4de0e0c83">
+<p local-id=3D"12600ecee19b">Centralize policy violation alerts, copyright/=
+IP flags, and warning messages from marketplaces.</p></li>
+</ul></li>
+<li local-id=3D"5e523ec9547a">
+<p local-id=3D"c5cd677ded76"><strong>Unified Sales Channel Performance Dash=
+board</strong>:</p>
+<ul local-id=3D"99caa119f426">
+<li local-id=3D"527883c3250f">
+<p local-id=3D"a58d015e655c">Provide a dashboard comparing total sales volu=
+mes, average margins, refund rates, and orders turnaround times across Amaz=
+on, eBay, Shopify, Ecwid, and Walmart.</p></li>
+<li local-id=3D"7fe18bf64a17">
+<p local-id=3D"167181a77f7e">Break down performance by condition grade (New=
+, Grade A, Grade B, Grade C) to determine which marketplaces yield the high=
+est returns for specific conditions.</p></li>
+</ul></li>
+</ul>
+<hr local-id=3D"2d9cc1c838eb">
+<h2 local-id=3D"70e2a13f0500" id=3D"USAVBusinessProcessDocumentation-5.Non-=
+FunctionalRequirements(NFR)">5. Non-Functional Requirements (NFR)</h2>
+<h3 local-id=3D"6af9c36bf764" id=3D"USAVBusinessProcessDocumentation-5.1Arc=
+hitectureReference">5.1 Architecture Reference</h3>
+<p local-id=3D"fedc125035e6">As illustrated by the Frappe Bench and Frappe =
+Framework schemas, the system should adopt a modular architecture:</p>
+<ul local-id=3D"bbcca4b9b2fc">
+<li local-id=3D"f678b80103b6">
+<p local-id=3D"c328d539bb70"><strong>Multi-Site/Tenant Capabilities</strong=
+>: Ensure data segregation so separate warehouse locations or organizations=
+ can run isolated configurations on a single database stack (Multi-tenant s=
+ites).</p></li>
+<li local-id=3D"74396d259a4f">
+<p local-id=3D"df5fcc34883d"><strong>Worker Queue Reliability</strong>: Bac=
+kground synchronization tasks (fetching eBay orders, updating Shopify stock=
+ levels, scanning CCTV frames) must run as background jobs managed by robus=
+t Redis queue workers to prevent frontend lag.</p></li>
+<li local-id=3D"a75301d0bf5a">
+<p local-id=3D"68be3c9da455"><strong>REST API Gateway</strong>: Provide a s=
+tandard API so third-party shipping integrations (UPS, USPS) and local ware=
+house scanning computers can read/write data securely.</p></li>
+</ul>
+<h3 local-id=3D"95e5aa05d22b" id=3D"USAVBusinessProcessDocumentation-5.2Per=
+formance&amp;Reliability">5.2 Performance &amp; Reliability</h3>
+<ul local-id=3D"b71988bee62f">
+<li local-id=3D"18ba38d4e06c">
+<p local-id=3D"47f541e91d91"><strong>Inventory Update Latency</strong>: Cha=
+nnel inventory levels must update within $\le 5$ minutes of a unit's status=
+ change.</p></li>
+<li local-id=3D"7b4142009985">
+<p local-id=3D"0aacabe5857d"><strong>Offline Resilience</strong>: Warehouse=
+ scanners must support basic offline capabilities (caching scans in local m=
+emory) if the internet drops temporarily.</p></li>
+<li local-id=3D"5ed5a11c2fa5">
+<p local-id=3D"6dcd81a603fa"><strong>CCTV Video Integrity</strong>: Video p=
+layback links must be stored securely and remain accessible for up to 90 da=
+ys after delivery.</p></li>
+</ul>
+    </div>
+</body>
+</html>
+------=_Part_4_1249022900.1785225626009--
