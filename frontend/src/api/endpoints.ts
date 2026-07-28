@@ -94,6 +94,7 @@ export const ZOHO = {
 export const SYNC = {
   ITEM: (variantId: number) => `/sync/items/${variantId}`,
   ORDER: (orderId: number) => `/sync/orders/${orderId}`,
+  ORDER_STATUSES: '/sync/orders/status',
   PURCHASE: (poId: number) => `/sync/purchases/${poId}`,
   PURCHASES: '/sync/purchases',
   CUSTOMER: (customerId: number) => `/sync/customers/${customerId}`,

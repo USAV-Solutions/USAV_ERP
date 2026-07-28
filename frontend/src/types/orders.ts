@@ -64,7 +64,7 @@ export type ShippingStatus =
   | 'REFUNDED'
 
 export type IntegrationSyncStatus = 'IDLE' | 'SYNCING' | 'ERROR'
-export type ZohoSyncStatus = 'PENDING' | 'SYNCED' | 'ERROR' | 'DIRTY'
+export type ZohoSyncStatus = 'PENDING' | 'QUEUED' | 'SYNCING' | 'SYNCED' | 'ERROR' | 'DIRTY'
 
 // ── Order Item Schemas ───────────────────────────────────────────────
 
