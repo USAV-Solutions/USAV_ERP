@@ -1248,7 +1248,7 @@ async def import_orders_from_file(
             shipping_status = ShippingStatus.PENDING
             if scraped_status == "DELIVERED":
                 shipping_status = ShippingStatus.DELIVERED
-            elif scraped_status == "SHIPPED":
+            elif scraped_status in {"SHIPPED", "SHIPPING"}:
                 shipping_status = ShippingStatus.SHIPPING
             elif scraped_status == "RETURNED":
                 shipping_status = ShippingStatus.RETURNED
