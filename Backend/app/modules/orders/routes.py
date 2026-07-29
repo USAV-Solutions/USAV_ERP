@@ -1269,11 +1269,13 @@ async def import_orders_from_file(
                 continue
                 
             for order in orders:
+                if order.shipping_status == shipping_status:
+                    continue
                 order.shipping_status = shipping_status
                 db.add(order)
+                updated_count += 1
             
             processed_orders.add(order_number)
-            updated_count += len(orders)
             
         await db.commit()
 
