@@ -16,7 +16,7 @@ Sales orders domain: ingestion/import, listing-centric matching, filtering, cust
 - Forgetting to align platform/source enums across model, schema, migration, and frontend types.
 - Adding filters in route layer but not implementing repository query logic.
 - Bypassing OrderSyncService ingestion path and breaking dedupe/matching consistency.
-- Order ingestion is now true upsert by `(platform, external_order_id)`: existing headers/line items are refreshed from inbound payloads (new items inserted), so duplicates are no longer pure no-op skips.
+- API/platform ingestion is true upsert by `(platform, external_order_id)`: existing headers/line items are refreshed from inbound payloads (new items inserted). `CSV_GENERIC` sales-order file imports instead skip existing orders so a new file cannot alter prior sales orders or their Zoho status.
 - Customer upsert during ingestion is merge-based (fills missing phone/company/address fields) and source is overwrite-based (latest channel replaces prior `Customer.source`).
 - Platforms that failed with credential/auth bootstrap errors (for example token acquisition failures) are auto-reset from `ERROR` to `IDLE` on the next sync attempt; this avoids permanent lockout but still records the current attempt's real failure if credentials remain invalid.
 - `SHIPSTATION_CUSTOMER_CSV` is intentionally customer-only (no order rows created); keep frontend messaging aligned with `customers_created/customers_updated` counters.
@@ -38,15 +38,15 @@ Sales orders domain: ingestion/import, listing-centric matching, filtering, cust
 - Admin can bulk re-check unmatched line items via `POST /orders/sync/refresh-matching`; it tries `external_item_id` → `platform_listing.external_ref_id` first, then normalized name matching (`lowercase` + punctuation/spacing removed) between `item_name` and `platform_listing.listed_name`, and auto-sets `order_item.variant_id/status` when a mapped active listing is found.
 - Tracking number uniqueness and validation: Tracking numbers are unique across all orders in the database. Manual updates assigning duplicate tracking numbers fail with 400.
 - Order and shipping status constraints: Changing order status to `SHIPPED`/`DELIVERED` or shipping status to `SHIPPING`/`DELIVERED` requires a tracking number.
-- `TRACKING_CSV` file import source: Allows bulk updating order tracking details. Matches auto-detect carrier, and mark Zoho `DIRTY`.
+- `TRACKING_CSV` file import source: Allows bulk updating order tracking details. Matches auto-detect carrier, and marks only orders whose tracking number or carrier changed as Zoho `DIRTY`.
 - Orders persist `fulfillment_channel` separately from `source`.
 - `GET /orders` and `GET /orders/sync/status` filter by `fulfillment_channel`.
 - `AMAZON_FBA_CSV` imports Amazon orders and maps customers using `Customer.amazon_buyer_id`.
 - FBA orders cannot be downgraded back to `SELF_FULFILLED` by regular API syncs.
 - Tracking number uniqueness and validation: Tracking numbers are unique across all orders in the database. Manual updates attempting to assign duplicate tracking numbers will fail with 400 Bad Request. Background syncs and tracking CSV imports will log a warning and skip duplicates.
 - Order and shipping status constraints: Changing order status to `SHIPPED` or `DELIVERED`, or shipping status to `SHIPPING` or `DELIVERED`, requires a tracking number.
-- `TRACKING_CSV` file import source: Allows bulk updating order tracking details using daily Google Sheet summary files (Platform in Col A, Order Number in Col B, Tracking in Col I). Successful matches auto-detect carrier, and mark Zoho sync status `DIRTY`. Missing orders, empty tracking numbers, and Google Sheets scientific-notation tracking values are ignored.
-- `SHIPPING_STATUS_CSV` file import source: Allows bulk updating order shipping status via a CSV (matching by `order_number` column and applying `scraped_status`). Both `SHIPPED` and `SHIPPING` map to `SHIPPING`; unrecognised/empty statuses default to `PENDING`.
+- `TRACKING_CSV` file import source: Allows bulk updating order tracking details using daily Google Sheet summary files (Platform in Col A, Order Number in Col B, Tracking in Col I). Successful changed matches auto-detect carrier and mark Zoho sync status `DIRTY`; unchanged tracking rows are ignored. Missing orders, empty tracking numbers, and Google Sheets scientific-notation tracking values are ignored.
+- `SHIPPING_STATUS_CSV` file import source: Allows bulk updating order shipping status via a CSV (matching by `order_number` column and applying `scraped_status`). Both `SHIPPED` and `SHIPPING` map to `SHIPPING`; unchanged shipping statuses are skipped, while unrecognised/empty statuses default to `PENDING`.
 - Zoho sales-order status lifecycle is `DIRTY` → `QUEUED` → `SYNCING` → `SYNCED` or `ERROR`; date-range force sync must report queueing separately from final Zoho outcomes.
 - Orders now persist `fulfillment_channel` separately from `source`: use `source` for provenance (`*_API`, `SHIPSTATION_CSV`, `AMAZON_FBA_CSV`) and `fulfillment_channel` for the UI/business split (`SELF_FULFILLED`, `AMAZON_FBA`). Do not overload `source` when adding new views or sync rules.
 - `GET /orders` and `GET /orders/sync/status` accept `fulfillment_channel`; repository filtering is applied before search/count/pagination so search results only include the active view.
