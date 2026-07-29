@@ -4,6 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy.engine.result import ScalarResult
 
 import app.models  # Pre-import to resolve circular dependencies
+from app.models.entities import ZohoSyncStatus
 from app.modules.orders.models import Order, OrderPlatform, OrderStatus, ShippingStatus
 from app.modules.orders.schemas.orders import OrderStatusUpdate, ShippingStatusUpdate
 from app.modules.orders.routes import (
@@ -12,6 +13,7 @@ from app.modules.orders.routes import (
     _detect_carrier,
     _parse_tracking_csv,
     _parse_tracking_csv_excluding_fba,
+    _process_tracking_import_rows,
 )
 
 
@@ -81,6 +83,33 @@ eBay,21-14736-94321,Randas Computer,Bose Radio,,,6/12/2026,,94001081062452537473
     assert skipped_fba == 0
     assert len(rows) == 1
     assert rows[0]["tracking"] == "9400108106245253747367"
+
+
+@pytest.mark.asyncio
+async def test_tracking_import_skips_unchanged_tracking():
+    order = MagicMock(spec=Order)
+    order.id = 1
+    order.tracking_number = "1Z9999999999999999"
+    order.carrier = "UPS"
+    order.zoho_sync_status = ZohoSyncStatus.SYNCED
+
+    orders_result = MagicMock()
+    orders_result.scalars.return_value.all.return_value = [order]
+    duplicate_result = MagicMock()
+    duplicate_result.scalars.return_value.first.return_value = None
+    db = AsyncMock()
+    db.execute.side_effect = [orders_result, duplicate_result]
+
+    updated, skipped_duplicates, errors = await _process_tracking_import_rows(
+        db,
+        [{"order_number": "SO-1", "tracking": "1Z9999999999999999", "platform": "Amazon"}],
+    )
+
+    assert updated == 0
+    assert skipped_duplicates == 0
+    assert errors == []
+    assert order.zoho_sync_status == ZohoSyncStatus.SYNCED
+    db.add.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -340,5 +369,4 @@ async def test_create_physical_scan_unmatched():
     assert res.platform is None
     mock_db.add.assert_called_once()  # logs unmatched scan log
     mock_db.commit.assert_called_once()
-
 

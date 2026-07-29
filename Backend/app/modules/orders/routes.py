@@ -896,8 +896,11 @@ async def _process_tracking_import_rows(
             skipped_duplicates += 1
             continue
 
-        # Detect carrier and update order status flags to SHIPPED and SHIPPING respectively
+        # Leave already-imported tracking untouched unless its outbound payload changes.
         carrier = _detect_carrier(tracking)
+        if order.tracking_number == tracking and order.carrier == carrier:
+            continue
+
         order.tracking_number = tracking
         order.carrier = carrier
         # order.status = OrderStatus.SHIPPED
@@ -1458,6 +1461,7 @@ async def import_orders_from_file(
                 if source == SalesImportFileSource.AMAZON_FBA_CSV
                 else None
             ),
+            skip_existing=source == SalesImportFileSource.CSV_GENERIC,
         )
         aggregate["new_orders"] += result.new_orders
         aggregate["new_items"] += result.new_items
