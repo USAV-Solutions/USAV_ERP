@@ -9,6 +9,7 @@ from datetime import date
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -28,6 +29,16 @@ from app.modules.orders.models import Order
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sync", tags=["Zoho Sync"])
+
+
+class OrderSyncStatusesRequest(BaseModel):
+    order_ids: list[int] = Field(min_length=1, max_length=2000)
+
+
+class OrderSyncStatusResponse(BaseModel):
+    id: int
+    status: ZohoSyncStatus
+    error: str | None
 
 
 def _queue_purchase_orders_for_sync(
@@ -96,6 +107,29 @@ async def force_sync_item(
 # ------------------------------------------------------------------
 
 @router.post(
+    "/orders/status",
+    response_model=list[OrderSyncStatusResponse],
+    summary="Read queued order Zoho sync statuses",
+)
+async def get_order_sync_statuses(
+    body: OrderSyncStatusesRequest,
+    _admin: AdminUser,
+    db: AsyncSession = Depends(get_db),
+):
+    orders = (
+        await db.execute(select(Order).where(Order.id.in_(set(body.order_ids))))
+    ).scalars().all()
+    return [
+        OrderSyncStatusResponse(
+            id=order.id,
+            status=order.zoho_sync_status,
+            error=order.zoho_sync_error,
+        )
+        for order in orders
+    ]
+
+
+@router.post(
     "/orders/{order_id}",
     status_code=status.HTTP_202_ACCEPTED,
     summary="Force-sync an order to Zoho",
@@ -124,6 +158,11 @@ async def force_sync_order(
             detail=f"Order {order_id} not found.",
         )
 
+    order.zoho_sync_status = ZohoSyncStatus.QUEUED
+    order.zoho_sync_error = None
+    order._updated_by_sync = True
+    await db.commit()
+    order._updated_by_sync = False
     background_tasks.add_task(sync_order_outbound, order_id)
 
     logger.info("Force-sync queued | entity=order id=%s user=%s", order_id, _admin.id)

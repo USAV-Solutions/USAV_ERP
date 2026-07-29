@@ -61,7 +61,7 @@ import {
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 
 import { listOrders, getSyncStatus, refreshUnmatchedItemMatching, syncOrders, syncOrdersRange, updateOrderStatus, updateShippingStatus, deleteOrder, importOrdersFromFile, importTrackingFromLink } from '../api/orders'
-import { forceSyncOrder } from '../api/sync'
+import { forceSyncOrder, getOrderSyncStatuses } from '../api/sync'
 import type {
   OrderBrief,
   OrderListResponse,
@@ -150,6 +150,8 @@ const SYNC_PLATFORM_OPTIONS = [
 
 const ZOHO_SYNC_COLOR: Record<ZohoSyncStatus, 'default' | 'success' | 'error' | 'warning'> = {
   PENDING: 'warning',
+  QUEUED: 'warning',
+  SYNCING: 'warning',
   DIRTY: 'warning',
   SYNCED: 'success',
   ERROR: 'error',
@@ -219,7 +221,7 @@ export default function OrdersManagement() {
   const [rangeSyncError, setRangeSyncError] = useState<string | null>(null)
   const [rangeSyncSince, setRangeSyncSince] = useState('')
   const [rangeSyncUntil, setRangeSyncUntil] = useState('')
-  const [rangeSyncProgress, setRangeSyncProgress] = useState({ queued: 0, success: 0, failed: 0 })
+  const [rangeSyncProgress, setRangeSyncProgress] = useState({ queued: 0, syncing: 0, success: 0, failed: 0 })
   const [rangeSyncTotal, setRangeSyncTotal] = useState(0)
   const [rangeSyncDone, setRangeSyncDone] = useState(false)
   const [rangeSyncFailureDetails, setRangeSyncFailureDetails] = useState<string[]>([])
@@ -555,7 +557,7 @@ export default function OrdersManagement() {
     setRangeSyncError(null)
     setRangeSyncDone(false)
     setRangeSyncTotal(0)
-    setRangeSyncProgress({ queued: 0, success: 0, failed: 0 })
+    setRangeSyncProgress({ queued: 0, syncing: 0, success: 0, failed: 0 })
     setRangeSyncFailureDetails([])
 
     try {
@@ -598,19 +600,22 @@ export default function OrdersManagement() {
       let queued = 0
       let success = 0
       let failed = 0
+      const queuedIds: number[] = []
+      const queueFailureDetails: string[] = []
 
       for (const id of eligibleIds) {
         try {
           await forceSyncOrder(id)
           queued += 1
-          success += 1
-          setRangeSyncProgress({ queued, success, failed })
+          queuedIds.push(id)
+          setRangeSyncProgress({ queued, syncing: 0, success, failed })
         } catch (err: unknown) {
           queued += 1
           failed += 1
-          setRangeSyncProgress({ queued, success, failed })
+          setRangeSyncProgress({ queued, syncing: 0, success, failed })
 
           const detail = getErrorMessage(err)
+          queueFailureDetails.push(`Order #${id}: ${detail}`)
           setRangeSyncFailureDetails((prev) => {
             if (prev.length >= 100) {
               return prev
@@ -620,7 +625,60 @@ export default function OrdersManagement() {
         }
       }
 
-      if (failed > 0) {
+      let completed = false
+
+      if (!queuedIds.length) {
+        setRangeSyncError(`${failed} order(s) failed to queue for Zoho sync.`)
+        setRangeSyncDone(true)
+        return
+      }
+
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        const statuses = await getOrderSyncStatuses(queuedIds)
+        const statusesById = new Map(statuses.map((item) => [item.id, item]))
+        let currentlyQueued = 0
+        let syncing = 0
+        let synced = 0
+        let syncErrors = failed
+        const failureDetails: string[] = []
+
+        for (const id of queuedIds) {
+          const syncStatus = statusesById.get(id)
+          if (!syncStatus) {
+            syncErrors += 1
+            failureDetails.push(`Order #${id}: status record not found.`)
+            continue
+          }
+
+          if (syncStatus.status === 'SYNCED') {
+            synced += 1
+          } else if (syncStatus.status === 'ERROR') {
+            syncErrors += 1
+            failureDetails.push(`Order #${id}: ${syncStatus.error || 'Zoho sync failed.'}`)
+          } else if (syncStatus.status === 'QUEUED') {
+            currentlyQueued += 1
+          } else {
+            syncing += 1
+          }
+        }
+
+        success = synced
+        failed = syncErrors
+        setRangeSyncProgress({ queued: currentlyQueued, syncing, success, failed })
+        setRangeSyncFailureDetails([...queueFailureDetails, ...failureDetails].slice(0, 100))
+        await queryClient.invalidateQueries({ queryKey: ['orders'] })
+
+        if (currentlyQueued === 0 && syncing === 0) {
+          completed = true
+          break
+        }
+
+        await new Promise((resolve) => window.setTimeout(resolve, 1000))
+      }
+
+      if (!completed) {
+        setRangeSyncError('Some orders are still queued or syncing. Their current status remains visible in the Zoho Sync column.')
+      } else if (failed > 0) {
         setRangeSyncError(`${failed} order(s) failed to sync to Zoho.`)
       }
       setRangeSyncDone(true)
@@ -891,7 +949,7 @@ export default function OrdersManagement() {
                   setRangeSyncError(null)
                   setRangeSyncDone(false)
                   setRangeSyncTotal(0)
-                  setRangeSyncProgress({ queued: 0, success: 0, failed: 0 })
+                  setRangeSyncProgress({ queued: 0, syncing: 0, success: 0, failed: 0 })
                   setRangeSyncSince('')
                   setRangeSyncUntil('')
                   setRangeSyncFailureDetails([])
@@ -1214,11 +1272,11 @@ export default function OrdersManagement() {
             {rangeSyncLoading && rangeSyncTotal > 0 && (
               <Box>
                 <Typography variant="body2" gutterBottom>
-                  Progress: {rangeSyncProgress.queued} / {rangeSyncTotal}
+                  Queued: {rangeSyncProgress.queued} · Syncing: {rangeSyncProgress.syncing} · Synced: {rangeSyncProgress.success} · Error: {rangeSyncProgress.failed}
                 </Typography>
                 <LinearProgress
                   variant="determinate"
-                  value={Math.round((rangeSyncProgress.queued / rangeSyncTotal) * 100)}
+                  value={Math.round(((rangeSyncProgress.success + rangeSyncProgress.failed) / rangeSyncTotal) * 100)}
                   sx={{ height: 10, borderRadius: 1 }}
                 />
               </Box>
@@ -1230,7 +1288,7 @@ export default function OrdersManagement() {
                   <Alert severity="info">No DIRTY orders found in the given date range.</Alert>
                 ) : (
                   <Alert severity={rangeSyncError ? 'warning' : 'success'}>
-                    Completed. {rangeSyncProgress.success} succeeded, {rangeSyncProgress.failed} failed.
+                    Synced: {rangeSyncProgress.success} · Error: {rangeSyncProgress.failed} · Queued: {rangeSyncProgress.queued} · Syncing: {rangeSyncProgress.syncing}
                   </Alert>
                 )}
               </Box>
@@ -1520,6 +1578,8 @@ export default function OrdersManagement() {
                 <MenuItem value="">All</MenuItem>
                 <MenuItem value="PENDING">PENDING</MenuItem>
                 <MenuItem value="DIRTY">DIRTY</MenuItem>
+                <MenuItem value="QUEUED">QUEUED</MenuItem>
+                <MenuItem value="SYNCING">SYNCING</MenuItem>
                 <MenuItem value="SYNCED">SYNCED</MenuItem>
                 <MenuItem value="ERROR">ERROR</MenuItem>
               </Select>

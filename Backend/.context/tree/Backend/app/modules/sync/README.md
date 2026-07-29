@@ -10,6 +10,7 @@ Cross-domain sync endpoints and orchestration hooks (especially Zoho force-sync)
 ## Common Pitfalls
 - Editing this folder without checking sibling tests and schema/type contracts.
 - Making cross-layer changes here but forgetting migration/frontend alignment.
+- Sales-order force sync returns `202` only after persisting `zoho_sync_status=QUEUED`; it is not a Zoho success result. Poll `POST /sync/orders/status` for final `SYNCED` or `ERROR` status.
 
 ## Child Folders
 - (No child folders)

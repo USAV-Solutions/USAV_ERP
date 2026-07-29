@@ -66,6 +66,8 @@ class ConditionCode(str, enum.Enum):
 class ZohoSyncStatus(str, enum.Enum):
     """Synchronization status with Zoho."""
     PENDING = "PENDING"
+    QUEUED = "QUEUED"
+    SYNCING = "SYNCING"
     SYNCED = "SYNCED"
     ERROR = "ERROR"
     DIRTY = "DIRTY"

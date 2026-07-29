@@ -2143,8 +2143,8 @@ async def sync_order_outbound(order_id: int) -> None:
             logger.warning("sync_order_outbound: order %s not found", order_id)
             return
 
-        # Mark as actively syncing
-        order.zoho_sync_status = ZohoSyncStatus.PENDING
+        # Mark queued work as actively syncing.
+        order.zoho_sync_status = ZohoSyncStatus.SYNCING
         order._updated_by_sync = True
         await db.commit()
         order._updated_by_sync = False
