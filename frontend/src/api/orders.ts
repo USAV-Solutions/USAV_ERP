@@ -230,3 +230,23 @@ export async function searchVariants(
   })
   return data
 }
+
+// ── Physical Barcode Scanning ───────────────────────────────────────
+
+export interface BarcodeScanRequest {
+  tracking_number: string
+  scanned_by?: string
+}
+
+export interface BarcodeScanResponse {
+  matched: boolean
+  message: string
+  order_id?: number
+  platform?: string
+}
+
+export async function scanBarcode(body: BarcodeScanRequest): Promise<BarcodeScanResponse> {
+  const { data } = await axiosClient.post<BarcodeScanResponse>(ORDERS.SCANS, body)
+  return data
+}
+
