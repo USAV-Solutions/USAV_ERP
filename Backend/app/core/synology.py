@@ -5,19 +5,45 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+def get_synology_base_url() -> str:
+    """
+    Build base URL for Synology NAS supporting IP addresses, QuickConnect domains, or synology.me DDNS.
+    """
+    nas_host = os.getenv("SYNOLOGY_NAS_IP", "").strip()
+    nas_port = os.getenv("SYNOLOGY_NAS_PORT", "").strip()
+
+    if not nas_host:
+        raise ValueError("SYNOLOGY_NAS_IP is missing in environment.")
+
+    # Remove trailing slashes
+    nas_host = nas_host.rstrip("/")
+
+    # Handle direct QuickConnect domain formatting (e.g. usav.quickconnect.to -> usav.direct.quickconnect.to)
+    if ".quickconnect.to" in nas_host and ".direct." not in nas_host and not nas_host.startswith("http"):
+        nas_host = f"{nas_host.split('.')[0]}.direct.quickconnect.to"
+
+    if nas_host.startswith("http://") or nas_host.startswith("https://"):
+        return nas_host
+
+    # Default port formatting
+    port = nas_port or "5000"
+    scheme = "https" if port == "5001" or "quickconnect.to" in nas_host else "http"
+    return f"{scheme}://{nas_host}:{port}"
+
+
 def get_synology_sid() -> str:
     """
     Authenticate with Synology DSM WebAPI and return the session ID (sid).
     """
-    nas_ip = os.getenv("SYNOLOGY_NAS_IP")
-    nas_port = os.getenv("SYNOLOGY_NAS_PORT", "5000")
+    nas_host = os.getenv("SYNOLOGY_NAS_IP")
     nas_user = os.getenv("SYNOLOGY_NAS_USER")
     nas_pass = os.getenv("SYNOLOGY_NAS_PASSWORD")
     
-    if not all([nas_ip, nas_user, nas_pass]):
+    if not all([nas_host, nas_user, nas_pass]):
         raise ValueError("Synology NAS credentials are not complete in environment variables.")
         
-    url = f"http://{nas_ip}:{nas_port}/webapi/auth.cgi"
+    base_url = get_synology_base_url()
+    url = f"{base_url}/webapi/auth.cgi"
     params = {
         "api": "SYNO.API.Auth",
         "version": "3",
@@ -47,10 +73,9 @@ def upload_to_synology(file_bytes: bytes, filename: str) -> str:
     today_str = datetime.now().strftime("%Y-%m-%d")
     target_dir = f"/volume1/photo/packed_orders/{today_str}"
     
-    nas_ip = os.getenv("SYNOLOGY_NAS_IP")
-    nas_port = os.getenv("SYNOLOGY_NAS_PORT", "5000")
+    nas_host = os.getenv("SYNOLOGY_NAS_IP")
     
-    if not nas_ip:
+    if not nas_host:
         # Fallback to local static folder
         logger.warning("SYNOLOGY_NAS_IP is not set. Saving photo to local static files.")
         local_dir = os.path.join("static", "photos", today_str)
@@ -58,14 +83,12 @@ def upload_to_synology(file_bytes: bytes, filename: str) -> str:
         local_path = os.path.join(local_dir, filename)
         with open(local_path, "wb") as f:
             f.write(file_bytes)
-        # Return a relative URL path that our server can serve
         return f"/static/photos/{today_str}/{filename}"
         
     try:
         sid = get_synology_sid()
-        
-        # Upload endpoint
-        url = f"http://{nas_ip}:{nas_port}/webapi/entry.cgi"
+        base_url = get_synology_base_url()
+        url = f"{base_url}/webapi/entry.cgi"
         
         form_data = {
             "api": "SYNO.FileStation.Upload",
@@ -105,13 +128,9 @@ def list_synology_files(folder_path: str) -> list[str]:
     """
     List files in a Synology NAS directory via FileStation WebAPI.
     """
-    nas_ip = os.getenv("SYNOLOGY_NAS_IP")
-    nas_port = os.getenv("SYNOLOGY_NAS_PORT", "5000")
-    if not nas_ip:
-        raise ValueError("SYNOLOGY_NAS_IP is not set in environment.")
-
     sid = get_synology_sid()
-    url = f"http://{nas_ip}:{nas_port}/webapi/entry.cgi"
+    base_url = get_synology_base_url()
+    url = f"{base_url}/webapi/entry.cgi"
     params = {
         "api": "SYNO.FileStation.List",
         "version": "2",
@@ -134,13 +153,9 @@ def download_synology_file(file_path: str) -> bytes:
     """
     Download file bytes from Synology NAS via FileStation WebAPI.
     """
-    nas_ip = os.getenv("SYNOLOGY_NAS_IP")
-    nas_port = os.getenv("SYNOLOGY_NAS_PORT", "5000")
-    if not nas_ip:
-        raise ValueError("SYNOLOGY_NAS_IP is not set in environment.")
-
     sid = get_synology_sid()
-    url = f"http://{nas_ip}:{nas_port}/webapi/entry.cgi"
+    base_url = get_synology_base_url()
+    url = f"{base_url}/webapi/entry.cgi"
     params = {
         "api": "SYNO.FileStation.Download",
         "version": "2",
