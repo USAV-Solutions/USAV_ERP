@@ -2585,6 +2585,59 @@ class NASDiagnoseRequest(BaseModel):
     limit: int = 5
 
 
+class NASSingleFileRequest(BaseModel):
+    file_path: str
+
+
+@router.get("/photo-station/nas-files")
+async def list_nas_folder_files(
+    folder_path: str = "/USAV Media/Packing Shipping/Packing Photos/Packing Station 2/2026/Q2 26",
+    limit: int = 10,
+):
+    """
+    List files available in a Synology NAS folder.
+    """
+    from app.core.synology import list_synology_files
+    try:
+        nas_files = list_synology_files(folder_path)
+        filtered = [f for f in nas_files if f.lower().endswith((".jpg", ".jpeg", ".png"))][:limit]
+        return {"folder_path": folder_path, "total": len(filtered), "files": filtered}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to list Synology NAS folder: {str(e)}"
+        )
+
+
+@router.post("/photo-station/diagnose-nas-file")
+async def diagnose_single_nas_file(
+    req: NASSingleFileRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Diagnose a single file from Synology NAS and return result with base64 thumbnail URL.
+    """
+    import os
+    from app.core.synology import download_synology_file
+    from app.modules.orders.diagnose import diagnose_packaging_photo_bytes
+
+    try:
+        image_bytes = download_synology_file(req.file_path)
+        res = await diagnose_packaging_photo_bytes(
+            image_bytes=image_bytes,
+            filename=os.path.basename(req.file_path),
+            mime_type="image/jpeg",
+            db=db,
+            include_image_data_url=True,
+        )
+        return res
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to diagnose NAS file {req.file_path}: {str(e)}"
+        )
+
+
 @router.post("/photo-station/diagnose-nas")
 async def diagnose_nas_folder(
     req: NASDiagnoseRequest,
@@ -2594,6 +2647,7 @@ async def diagnose_nas_folder(
     Bulk diagnose historical sample photos from Synology NAS folder over QuickConnect WebAPI.
     Returns results with embedded image previews for live rendering in the UI.
     """
+    import os
     from app.core.synology import list_synology_files, download_synology_file
     from app.modules.orders.diagnose import diagnose_packaging_photo_bytes
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   Box,
   Typography,
@@ -12,11 +12,11 @@ import {
   Divider,
   Alert,
   Breadcrumbs,
-  TextField,
   MenuItem,
   Select,
   FormControl,
   InputLabel,
+  LinearProgress,
 } from '@mui/material'
 import {
   CloudUpload,
@@ -29,6 +29,7 @@ import {
   Inventory,
   Dns,
   Refresh,
+  PlayArrow,
 } from '@mui/icons-material'
 import axiosClient from '../api/axiosClient'
 
@@ -55,13 +56,68 @@ export default function PhotoStationDiagnostics() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [isDiagnosing, setIsDiagnosing] = useState(false)
-  const [isNasLoading, setIsNasLoading] = useState(false)
+  const [isStreaming, setIsStreaming] = useState(false)
+  const [streamProgress, setStreamProgress] = useState<{ current: number; total: number; filename: string }>({ current: 0, total: 0, filename: '' })
   const [nasLimit, setNasLimit] = useState<number>(5)
   const [resultsHistory, setResultsHistory] = useState<DiagnosticResult[]>([])
   const [nasError, setNasError] = useState<string | null>(null)
 
-  // Default target path on Synology NAS
   const nasFolderPath = '/USAV Media/Packing Shipping/Packing Photos/Packing Station 2/2026/Q2 26'
+
+  // Auto-stream NAS photos on page load
+  useEffect(() => {
+    startNasAutoStream(5)
+  }, [])
+
+  const startNasAutoStream = async (limit: number = nasLimit) => {
+    setIsStreaming(true)
+    setNasError(null)
+    setResultsHistory([])
+
+    try {
+      // 1. Fetch NAS file list
+      const listRes = await axiosClient.get('/orders/photo-station/nas-files', {
+        params: { folder_path: nasFolderPath, limit: limit }
+      })
+
+      const filePaths: string[] = listRes.data.files || []
+      if (filePaths.length === 0) {
+        setNasError('No image files found in NAS folder.')
+        setIsStreaming(false)
+        return
+      }
+
+      setStreamProgress({ current: 0, total: filePaths.length, filename: 'Initializing stream...' })
+
+      // 2. Stream each NAS file one-by-one in real-time
+      for (let i = 0; i < filePaths.length; i++) {
+        const filePath = filePaths[i]
+        const filename = filePath.split('/').pop() || filePath
+        setStreamProgress({ current: i + 1, total: filePaths.length, filename: filename })
+
+        try {
+          const diagRes = await axiosClient.post('/orders/photo-station/diagnose-nas-file', {
+            file_path: filePath
+          })
+
+          const data: DiagnosticResult = {
+            ...diagRes.data,
+            previewUrl: diagRes.data.image_data_url || undefined
+          }
+
+          // Instantly pop the result card onto the screen!
+          setResultsHistory((prev) => [data, ...prev])
+        } catch (err: any) {
+          console.error(`Failed to diagnose ${filename}:`, err)
+        }
+      }
+    } catch (err: any) {
+      console.error('Failed to list NAS files:', err)
+      setNasError(err?.response?.data?.detail || 'Failed to connect to Synology NAS over QuickConnect.')
+    } finally {
+      setIsStreaming(false)
+    }
+  }
 
   const handleFileSelect = (file: File) => {
     setSelectedFile(file)
@@ -76,7 +132,7 @@ export default function PhotoStationDiagnostics() {
     }
   }
 
-  const runDiagnosis = async () => {
+  const runSingleDiagnosis = async () => {
     if (!selectedFile) return
 
     setIsDiagnosing(true)
@@ -117,30 +173,6 @@ export default function PhotoStationDiagnostics() {
     }
   }
 
-  const runNasBatchDiagnosis = async () => {
-    setIsNasLoading(true)
-    setNasError(null)
-
-    try {
-      const res = await axiosClient.post('/orders/photo-station/diagnose-nas', {
-        folder_path: nasFolderPath,
-        limit: nasLimit,
-      })
-
-      const batchResults: DiagnosticResult[] = res.data.map((item: any) => ({
-        ...item,
-        previewUrl: item.image_data_url || undefined,
-      }))
-
-      setResultsHistory((prev) => [...batchResults, ...prev])
-    } catch (err: any) {
-      console.error('NAS Batch diagnosis failed:', err)
-      setNasError(err?.response?.data?.detail || 'Failed to fetch photos from Synology NAS via QuickConnect.')
-    } finally {
-      setIsNasLoading(false)
-    }
-  }
-
   const getStatusChip = (status: string) => {
     switch (status) {
       case 'CORRECT':
@@ -158,83 +190,89 @@ export default function PhotoStationDiagnostics() {
 
   return (
     <Box sx={{ p: { xs: 2, md: 3 } }}>
-      {/* Breadcrumb Header */}
-      <Paper elevation={0} sx={{ p: 2, mb: 3, bgcolor: 'background.paper', borderRadius: 2 }}>
-        <Typography variant="caption" color="text.secondary" fontWeight="bold">
-          SYNOLOGY NAS QUICKCONNECT TARGET
-        </Typography>
-        <Breadcrumbs separator="›" aria-label="breadcrumb" sx={{ mt: 0.5 }}>
-          <Typography variant="body2" color="primary.main" fontWeight="bold">
-            USAV Media
-          </Typography>
-          <Typography variant="body2">Packing Shipping</Typography>
-          <Typography variant="body2">Packing Photos</Typography>
-          <Typography variant="body2">Packing Station 2</Typography>
-          <Typography variant="body2">2026</Typography>
-          <Typography variant="body2" color="primary.main" fontWeight="bold">
-            Q2 26
-          </Typography>
-        </Breadcrumbs>
+      {/* Top Banner & Path */}
+      <Paper elevation={0} sx={{ p: 2.5, mb: 3, bgcolor: 'background.paper', borderRadius: 2, border: '1px solid #e0e0e0' }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
+          <Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Dns color="primary" />
+              <Typography variant="h6" fontWeight="bold">
+                Synology NAS Live AI Streaming Sandbox
+              </Typography>
+              {isStreaming ? (
+                <Chip icon={<CircularProgress size={14} color="inherit" />} label="STREAMING LIVE" color="primary" size="small" sx={{ fontWeight: 'bold' }} />
+              ) : (
+                <Chip label="QUICKCONNECT CONNECTED" color="success" size="small" variant="outlined" sx={{ fontWeight: 'bold' }} />
+              )}
+            </Box>
+            <Breadcrumbs separator="›" aria-label="breadcrumb" sx={{ mt: 0.5 }}>
+              <Typography variant="body2" color="primary.main" fontWeight="bold">USAV Media</Typography>
+              <Typography variant="body2">Packing Shipping</Typography>
+              <Typography variant="body2">Packing Photos</Typography>
+              <Typography variant="body2">Packing Station 2</Typography>
+              <Typography variant="body2">2026</Typography>
+              <Typography variant="body2" color="primary.main" fontWeight="bold">Q2 26</Typography>
+            </Breadcrumbs>
+          </Box>
+
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <FormControl size="small" sx={{ minWidth: 140 }}>
+              <InputLabel>Batch Limit</InputLabel>
+              <Select
+                value={nasLimit}
+                label="Batch Limit"
+                onChange={(e) => {
+                  const val = Number(e.target.value)
+                  setNasLimit(val)
+                  startNasAutoStream(val)
+                }}
+              >
+                <MenuItem value={3}>3 Sample Photos</MenuItem>
+                <MenuItem value={5}>5 Sample Photos</MenuItem>
+                <MenuItem value={10}>10 Sample Photos</MenuItem>
+                <MenuItem value={20}>20 Sample Photos</MenuItem>
+              </Select>
+            </FormControl>
+
+            <Button
+              variant="contained"
+              color="primary"
+              disabled={isStreaming}
+              startIcon={isStreaming ? <CircularProgress size={18} color="inherit" /> : <PlayArrow />}
+              onClick={() => startNasAutoStream(nasLimit)}
+              sx={{ fontWeight: 'bold', py: 1 }}
+            >
+              {isStreaming ? 'STREAMING...' : 'RE-STREAM NAS PHOTOS'}
+            </Button>
+          </Box>
+        </Box>
+
+        {/* Live Streaming Progress Bar */}
+        {isStreaming && (
+          <Box sx={{ mt: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+              <Typography variant="caption" color="primary.main" fontWeight="bold">
+                Streaming & Diagnosing Photo {streamProgress.current} of {streamProgress.total}: {streamProgress.filename}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {Math.round((streamProgress.current / (streamProgress.total || 1)) * 100)}%
+              </Typography>
+            </Box>
+            <LinearProgress variant="determinate" value={(streamProgress.current / (streamProgress.total || 1)) * 100} sx={{ height: 6, borderRadius: 3 }} />
+          </Box>
+        )}
       </Paper>
 
       {/* Main Grid */}
       <Grid container spacing={3}>
-        <Grid item xs={12} md={5}>
-          {/* NAS Direct Fetch Card */}
-          <Card elevation={3} sx={{ borderRadius: 2, mb: 3, border: '1px solid #e0e0e0' }}>
-            <CardContent>
-              <Typography variant="h6" fontWeight="bold" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Dns color="primary" /> Stream NAS Batch (QuickConnect)
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Stream sample photos directly from Synology NAS over QuickConnect WebAPI and analyze with Gemini 3.5 Flash.
-              </Typography>
-
-              <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-                <FormControl fullWidth size="small">
-                  <InputLabel>Max Photos Limit</InputLabel>
-                  <Select
-                    value={nasLimit}
-                    label="Max Photos Limit"
-                    onChange={(e) => setNasLimit(Number(e.target.value))}
-                  >
-                    <MenuItem value={3}>3 Sample Photos</MenuItem>
-                    <MenuItem value={5}>5 Sample Photos</MenuItem>
-                    <MenuItem value={10}>10 Sample Photos</MenuItem>
-                    <MenuItem value={20}>20 Sample Photos</MenuItem>
-                  </Select>
-                </FormControl>
-              </Box>
-
-              <Button
-                fullWidth
-                variant="contained"
-                color="secondary"
-                size="large"
-                disabled={isNasLoading}
-                onClick={runNasBatchDiagnosis}
-                startIcon={isNasLoading ? <CircularProgress size={20} color="inherit" /> : <Dns />}
-                sx={{ py: 1.4, fontWeight: 'bold' }}
-              >
-                {isNasLoading ? 'STREAMING NAS PHOTOS & DIAGNOSING...' : 'RUN NAS BATCH TEST VIA QUICKCONNECT'}
-              </Button>
-
-              {nasError && (
-                <Alert severity="error" sx={{ mt: 2 }}>
-                  {nasError}
-                </Alert>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Local File Upload Card */}
+        {/* Left Side: Drag & Drop Sandbox */}
+        <Grid item xs={12} md={4}>
           <Card elevation={2} sx={{ borderRadius: 2 }}>
             <CardContent>
               <Typography variant="h6" fontWeight="bold" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-                <AutoAwesome color="primary" /> Single Photo Sandbox
+                <AutoAwesome color="primary" /> Single Photo Upload
               </Typography>
 
-              {/* Drag and Drop Zone */}
               <Box
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={handleDrop}
@@ -242,7 +280,7 @@ export default function PhotoStationDiagnostics() {
                   border: '2px dashed',
                   borderColor: selectedFile ? 'primary.main' : 'grey.400',
                   borderRadius: 2,
-                  p: 3,
+                  p: 2.5,
                   textAlign: 'center',
                   bgcolor: selectedFile ? 'action.hover' : 'background.default',
                   cursor: 'pointer',
@@ -258,80 +296,81 @@ export default function PhotoStationDiagnostics() {
                   onChange={(e) => e.target.files?.[0] && handleFileSelect(e.target.files[0])}
                 />
                 <label htmlFor="sample-file-input" style={{ cursor: 'pointer', width: '100%', display: 'block' }}>
-                  <CloudUpload color="primary" sx={{ fontSize: 44, mb: 1 }} />
-                  <Typography variant="subtitle1" fontWeight="bold">
+                  <CloudUpload color="primary" sx={{ fontSize: 40, mb: 0.5 }} />
+                  <Typography variant="subtitle2" fontWeight="bold">
                     {selectedFile ? selectedFile.name : 'Choose Local Photo or Drag & Drop'}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Supports JPG, PNG, WEBP
                   </Typography>
                 </label>
               </Box>
 
-              {/* Selected Image Preview */}
               {previewUrl && (
                 <Box sx={{ mt: 2, textAlign: 'center' }}>
                   <img
                     src={previewUrl}
                     alt="Preview"
-                    style={{ width: '100%', maxHeight: 200, objectFit: 'contain', borderRadius: 8, border: '1px solid #e0e0e0' }}
+                    style={{ width: '100%', maxHeight: 180, objectFit: 'contain', borderRadius: 8, border: '1px solid #e0e0e0' }}
                   />
                 </Box>
               )}
 
               <Button
                 fullWidth
-                variant="contained"
+                variant="outlined"
                 color="primary"
                 size="large"
                 disabled={!selectedFile || isDiagnosing}
-                onClick={runDiagnosis}
+                onClick={runSingleDiagnosis}
                 startIcon={<AutoAwesome />}
-                sx={{ mt: 2.5, py: 1.4, fontWeight: 'bold' }}
+                sx={{ mt: 2, py: 1.2, fontWeight: 'bold' }}
               >
-                {isDiagnosing ? <CircularProgress size={24} color="inherit" /> : 'DIAGNOSE SELECTED PHOTO'}
+                {isDiagnosing ? <CircularProgress size={20} color="inherit" /> : 'DIAGNOSE UPLOADED PHOTO'}
               </Button>
             </CardContent>
           </Card>
         </Grid>
 
-        {/* Diagnostic Results History Panel */}
-        <Grid item xs={12} md={7}>
+        {/* Right Side: Streaming Results Cards */}
+        <Grid item xs={12} md={8}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Typography variant="h6" fontWeight="bold" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <FindInPage color="primary" /> Diagnostic Inspection Results ({resultsHistory.length})
+              <FindInPage color="primary" /> Live Streaming Results ({resultsHistory.length})
             </Typography>
             {resultsHistory.length > 0 && (
               <Button size="small" variant="outlined" startIcon={<Refresh />} onClick={() => setResultsHistory([])}>
-                Clear Results
+                Clear
               </Button>
             )}
           </Box>
 
-          {resultsHistory.length === 0 ? (
+          {nasError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {nasError}
+            </Alert>
+          )}
+
+          {resultsHistory.length === 0 && !isStreaming ? (
             <Paper elevation={1} sx={{ p: 5, textAlign: 'center', borderRadius: 2, bgcolor: 'background.paper' }}>
               <Inventory sx={{ fontSize: 56, color: 'text.secondary', mb: 1.5 }} />
               <Typography variant="h6" fontWeight="bold" color="text.primary" sx={{ mb: 1 }}>
-                No diagnostic runs yet
+                No diagnostic results visible
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 460, mx: 'auto', mb: 3 }}>
-                Click <strong>"RUN NAS BATCH TEST VIA QUICKCONNECT"</strong> to stream historical packing photos directly from your Synology NAS, or upload a photo to analyze.
+                Click <strong>"RE-STREAM NAS PHOTOS"</strong> to connect to your Synology NAS over QuickConnect and stream Gemini 3.5 Flash diagnostic results live onto your screen.
               </Typography>
               <Button
                 variant="contained"
-                color="secondary"
-                startIcon={<Dns />}
-                onClick={runNasBatchDiagnosis}
-                disabled={isNasLoading}
+                color="primary"
+                startIcon={<PlayArrow />}
+                onClick={() => startNasAutoStream(nasLimit)}
                 sx={{ fontWeight: 'bold' }}
               >
-                STREAM & DIAGNOSE NAS PHOTOS NOW
+                START LIVE STREAM NOW
               </Button>
             </Paper>
           ) : (
             resultsHistory.map((res, index) => (
-              <Card key={index} elevation={2} sx={{ mb: 2.5, borderRadius: 2, overflow: 'hidden' }}>
-                <CardContent>
+              <Card key={index} elevation={2} sx={{ mb: 2.5, borderRadius: 2, overflow: 'hidden', transition: 'all 0.3s' }}>
+                <CardContent sx={{ p: 2.5 }}>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <Typography variant="subtitle1" fontWeight="bold">
@@ -355,47 +394,43 @@ export default function PhotoStationDiagnostics() {
                       {res.previewUrl || res.image_data_url ? (
                         <img
                           src={res.previewUrl || res.image_data_url}
-                          alt="Packaging Photo"
-                          style={{ width: '100%', height: 130, objectFit: 'cover', borderRadius: 6, border: '1px solid #e0e0e0' }}
+                          alt="Packaging Photo Thumbnail"
+                          style={{ width: '100%', height: 140, objectFit: 'cover', borderRadius: 6, border: '1px solid #e0e0e0' }}
                         />
                       ) : (
-                        <Box sx={{ height: 130, bgcolor: 'action.hover', borderRadius: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Box sx={{ height: 140, bgcolor: 'action.hover', borderRadius: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                           <Inventory color="disabled" />
                         </Box>
                       )}
                     </Grid>
-                    <Grid item xs={12} sm={8}>
-                      <Typography variant="body2" color="text.secondary">
-                        Platform: <strong>{res.platform}</strong> | Order ID: <strong>{res.order_id || 'N/A'}</strong>
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Tracking Number: <strong>{res.tracking_number || 'N/A'}</strong>
-                      </Typography>
-                      {res.sku_on_slip && (
-                        <Typography variant="body2" color="text.secondary">
-                          SKU on Slip: <strong>{res.sku_on_slip}</strong>
-                        </Typography>
-                      )}
 
-                      <Box sx={{ mt: 1.5, p: 1.2, bgcolor: 'background.default', borderRadius: 1.5, border: '1px solid #e0e0e0' }}>
+                    <Grid item xs={12} sm={8}>
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1 }}>
+                        <Chip label={`Platform: ${res.platform}`} size="small" variant="outlined" />
+                        {res.order_id && <Chip label={`Order: ${res.order_id}`} size="small" color="primary" variant="outlined" sx={{ fontWeight: 'bold' }} />}
+                        {res.tracking_number && <Chip label={`Tracking: ${res.tracking_number}`} size="small" color="secondary" variant="outlined" />}
+                        {res.sku_on_slip && <Chip label={`SKU: ${res.sku_on_slip}`} size="small" variant="outlined" />}
+                      </Box>
+
+                      <Box sx={{ p: 1.5, bgcolor: 'background.default', borderRadius: 1.5, border: '1px solid #e0e0e0' }}>
                         <Typography variant="caption" color="primary.main" fontWeight="bold" display="block">
-                          AI DETECTED PHYSICAL ITEM:
+                          AI VISUAL PHYSICAL ITEM IDENTIFICATION:
                         </Typography>
                         <Typography variant="body2" fontWeight="medium">
                           {res.detected_physical_item}
                         </Typography>
                         {res.expected_erp_item && (
                           <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
-                            ERP Expected Item: <strong>{res.expected_erp_item}</strong>
+                            ERP Database Item: <strong>{res.expected_erp_item}</strong>
                           </Typography>
                         )}
                       </Box>
+
+                      <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                        {res.message} (Confidence: {(res.confidence_score * 100).toFixed(0)}%)
+                      </Typography>
                     </Grid>
                   </Grid>
-
-                  <Typography variant="caption" color="text.secondary" sx={{ mt: 1.5, display: 'block' }}>
-                    {res.message} (Confidence: {(res.confidence_score * 100).toFixed(0)}%)
-                  </Typography>
                 </CardContent>
               </Card>
             ))
