@@ -2592,16 +2592,24 @@ class NASSingleFileRequest(BaseModel):
 @router.get("/photo-station/nas-files")
 async def list_nas_folder_files(
     folder_path: str = "/USAV Media/Packing Shipping/Packing Photos/Packing Station 2/2026/Q2 26",
+    offset: int = 0,
     limit: int = 10,
 ):
     """
-    List files available in a Synology NAS folder.
+    List files available in a Synology NAS folder with offset pagination.
     """
     from app.core.synology import list_synology_files
     try:
         nas_files = list_synology_files(folder_path)
-        filtered = [f for f in nas_files if f.lower().endswith((".jpg", ".jpeg", ".png"))][:limit]
-        return {"folder_path": folder_path, "total": len(filtered), "files": filtered}
+        filtered = [f for f in nas_files if f.lower().endswith((".jpg", ".jpeg", ".png"))]
+        sliced = filtered[offset:offset + limit]
+        return {
+            "folder_path": folder_path,
+            "total_in_folder": len(filtered),
+            "offset": offset,
+            "limit": limit,
+            "files": sliced,
+        }
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

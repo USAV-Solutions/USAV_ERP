@@ -30,6 +30,7 @@ import {
   Dns,
   Refresh,
   PlayArrow,
+  SkipNext,
 } from '@mui/icons-material'
 import axiosClient from '../api/axiosClient'
 
@@ -59,6 +60,8 @@ export default function PhotoStationDiagnostics() {
   const [isStreaming, setIsStreaming] = useState(false)
   const [streamProgress, setStreamProgress] = useState<{ current: number; total: number; filename: string }>({ current: 0, total: 0, filename: '' })
   const [nasLimit, setNasLimit] = useState<number>(5)
+  const [currentOffset, setCurrentOffset] = useState<number>(0)
+  const [totalInFolder, setTotalInFolder] = useState<number>(0)
   const [resultsHistory, setResultsHistory] = useState<DiagnosticResult[]>([])
   const [nasError, setNasError] = useState<string | null>(null)
 
@@ -66,23 +69,29 @@ export default function PhotoStationDiagnostics() {
 
   // Auto-stream NAS photos on page load
   useEffect(() => {
-    startNasAutoStream(5)
+    startNasStream(0, 5, true)
   }, [])
 
-  const startNasAutoStream = async (limit: number = nasLimit) => {
+  const startNasStream = async (offset: number = 0, limit: number = nasLimit, resetHistory: boolean = false) => {
     setIsStreaming(true)
     setNasError(null)
-    setResultsHistory([])
+
+    if (resetHistory) {
+      setResultsHistory([])
+      setCurrentOffset(0)
+    }
 
     try {
-      // 1. Fetch NAS file list
+      // 1. Fetch NAS file list with offset pagination
       const listRes = await axiosClient.get('/orders/photo-station/nas-files', {
-        params: { folder_path: nasFolderPath, limit: limit }
+        params: { folder_path: nasFolderPath, offset: offset, limit: limit }
       })
 
       const filePaths: string[] = listRes.data.files || []
+      setTotalInFolder(listRes.data.total_in_folder || 0)
+
       if (filePaths.length === 0) {
-        setNasError('No image files found in NAS folder.')
+        setNasError(`No more images found in NAS folder beyond offset ${offset}.`)
         setIsStreaming(false)
         return
       }
@@ -114,6 +123,9 @@ export default function PhotoStationDiagnostics() {
           console.error(`Failed to diagnose ${filename}:`, err)
         }
       }
+
+      // Update current offset for next batch
+      setCurrentOffset(offset + filePaths.length)
     } catch (err: any) {
       console.error('Failed to list NAS files:', err)
       setNasError(err?.response?.data?.detail || 'Failed to connect to Synology NAS over QuickConnect.')
@@ -208,7 +220,7 @@ export default function PhotoStationDiagnostics() {
               {isStreaming ? (
                 <Chip icon={<CircularProgress size={14} color="inherit" />} label="STREAMING LIVE" color="primary" size="small" sx={{ fontWeight: 'bold' }} />
               ) : (
-                <Chip label="QUICKCONNECT CONNECTED" color="success" size="small" variant="outlined" sx={{ fontWeight: 'bold' }} />
+                <Chip label={`PROCESSED ${resultsHistory.length} / ${totalInFolder || '?'} NAS PHOTOS`} color="success" size="small" variant="outlined" sx={{ fontWeight: 'bold' }} />
               )}
             </Box>
             <Breadcrumbs separator="›" aria-label="breadcrumb" sx={{ mt: 0.5 }}>
@@ -222,33 +234,40 @@ export default function PhotoStationDiagnostics() {
           </Box>
 
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <FormControl size="small" sx={{ minWidth: 140 }}>
-              <InputLabel>Batch Limit</InputLabel>
+            <FormControl size="small" sx={{ minWidth: 130 }}>
+              <InputLabel>Batch Size</InputLabel>
               <Select
                 value={nasLimit}
-                label="Batch Limit"
-                onChange={(e) => {
-                  const val = Number(e.target.value)
-                  setNasLimit(val)
-                  startNasAutoStream(val)
-                }}
+                label="Batch Size"
+                onChange={(e) => setNasLimit(Number(e.target.value))}
               >
-                <MenuItem value={3}>3 Sample Photos</MenuItem>
-                <MenuItem value={5}>5 Sample Photos</MenuItem>
-                <MenuItem value={10}>10 Sample Photos</MenuItem>
-                <MenuItem value={20}>20 Sample Photos</MenuItem>
+                <MenuItem value={3}>3 Photos</MenuItem>
+                <MenuItem value={5}>5 Photos</MenuItem>
+                <MenuItem value={10}>10 Photos</MenuItem>
+                <MenuItem value={20}>20 Photos</MenuItem>
               </Select>
             </FormControl>
+
+            <Button
+              variant="outlined"
+              color="primary"
+              disabled={isStreaming}
+              startIcon={<Refresh />}
+              onClick={() => startNasStream(0, nasLimit, true)}
+              sx={{ fontWeight: 'bold', py: 1 }}
+            >
+              RESTART FROM START
+            </Button>
 
             <Button
               variant="contained"
               color="primary"
               disabled={isStreaming}
-              startIcon={isStreaming ? <CircularProgress size={18} color="inherit" /> : <PlayArrow />}
-              onClick={() => startNasAutoStream(nasLimit)}
+              startIcon={isStreaming ? <CircularProgress size={18} color="inherit" /> : <SkipNext />}
+              onClick={() => startNasStream(currentOffset, nasLimit, false)}
               sx={{ fontWeight: 'bold', py: 1 }}
             >
-              {isStreaming ? 'STREAMING...' : 'RE-STREAM NAS PHOTOS'}
+              {isStreaming ? 'STREAMING...' : `STREAM NEXT ${nasLimit} PHOTOS`}
             </Button>
           </Box>
         </Box>
@@ -258,7 +277,7 @@ export default function PhotoStationDiagnostics() {
           <Box sx={{ mt: 2 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
               <Typography variant="caption" color="primary.main" fontWeight="bold">
-                Streaming & Diagnosing Photo {streamProgress.current} of {streamProgress.total}: {streamProgress.filename}
+                Streaming Photo {streamProgress.current} of {streamProgress.total}: {streamProgress.filename} (Offset: {currentOffset})
               </Typography>
               <Typography variant="caption" color="text.secondary">
                 {Math.round((streamProgress.current / (streamProgress.total || 1)) * 100)}%
@@ -339,7 +358,7 @@ export default function PhotoStationDiagnostics() {
         <Grid item xs={12} md={8}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Typography variant="h6" fontWeight="bold" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <FindInPage color="primary" /> Live Streaming Results ({resultsHistory.length})
+              <FindInPage color="primary" /> Live Diagnostic Cards ({resultsHistory.length})
             </Typography>
             {resultsHistory.length > 0 && (
               <Button size="small" variant="outlined" startIcon={<Refresh />} onClick={() => setResultsHistory([])}>
@@ -361,16 +380,16 @@ export default function PhotoStationDiagnostics() {
                 No diagnostic results visible
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 460, mx: 'auto', mb: 3 }}>
-                Click <strong>"RE-STREAM NAS PHOTOS"</strong> to connect to your Synology NAS over QuickConnect and stream Gemini 3.5 Flash diagnostic results live onto your screen.
+                Click <strong>"STREAM NEXT {nasLimit} PHOTOS"</strong> to stream the next set of packaging photos from your Synology NAS over QuickConnect.
               </Typography>
               <Button
                 variant="contained"
                 color="primary"
                 startIcon={<PlayArrow />}
-                onClick={() => startNasAutoStream(nasLimit)}
+                onClick={() => startNasStream(0, nasLimit, true)}
                 sx={{ fontWeight: 'bold' }}
               >
-                START LIVE STREAM NOW
+                START STREAM NOW
               </Button>
             </Paper>
           ) : (
