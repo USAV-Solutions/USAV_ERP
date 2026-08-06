@@ -179,7 +179,7 @@ async def diagnose_packaging_photo_bytes(
                 item_stmt = select(OrderItem).where(OrderItem.order_id == order_record.id)
                 items = (await db.execute(item_stmt)).scalars().all()
                 if items:
-                    item_names = [it.title or it.sku or "Item" for it in items if it]
+                    item_names = [getattr(it, 'item_name', None) or getattr(it, 'title', None) or getattr(it, 'sku', None) or "Item" for it in items if it]
                     expected_erp_item = ", ".join(item_names)
 
                 if not order_record.tracking_number and not extracted_tracking:

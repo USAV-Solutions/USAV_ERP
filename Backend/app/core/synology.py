@@ -15,19 +15,12 @@ def get_synology_base_url() -> str:
     if not nas_host:
         raise ValueError("SYNOLOGY_NAS_IP is missing in environment.")
 
-    # Remove trailing slashes
     nas_host = nas_host.rstrip("/")
-
-    # Handle direct QuickConnect domain formatting (e.g. usav.quickconnect.to -> usav.direct.quickconnect.to)
-    if ".quickconnect.to" in nas_host and ".direct." not in nas_host and not nas_host.startswith("http"):
-        nas_host = f"{nas_host.split('.')[0]}.direct.quickconnect.to"
-
     if nas_host.startswith("http://") or nas_host.startswith("https://"):
         return nas_host
 
-    # Default port formatting
-    port = nas_port or "5000"
-    scheme = "https" if port == "5001" or "quickconnect.to" in nas_host else "http"
+    port = nas_port if nas_port else ("5001" if "quickconnect" in nas_host.lower() else "5000")
+    scheme = "https" if port == "5001" or port == "443" else "http"
     return f"{scheme}://{nas_host}:{port}"
 
 
@@ -124,6 +117,30 @@ def upload_to_synology(file_bytes: bytes, filename: str) -> str:
         return f"/static/photos/{today_str}/{filename}"
 
 
+def list_synology_shares() -> list[str]:
+    """
+    List root shared folders on Synology NAS via FileStation WebAPI (method=list_share).
+    """
+    sid = get_synology_sid()
+    base_url = get_synology_base_url()
+    url = f"{base_url}/webapi/entry.cgi"
+    params = {
+        "api": "SYNO.FileStation.List",
+        "version": "2",
+        "method": "list_share",
+        "_sid": sid
+    }
+    response = requests.get(url, params=params, timeout=15)
+    response.raise_for_status()
+    data = response.json()
+    if not data.get("success"):
+        error_code = data.get("error", {}).get("code", "unknown")
+        raise RuntimeError(f"Synology list_share failed with error code: {error_code}")
+
+    shares = data.get("data", {}).get("shares", [])
+    return [s["path"] for s in shares]
+
+
 def list_synology_files(folder_path: str) -> list[str]:
     """
     List files in a Synology NAS directory via FileStation WebAPI.
@@ -143,6 +160,13 @@ def list_synology_files(folder_path: str) -> list[str]:
     data = response.json()
     if not data.get("success"):
         error_code = data.get("error", {}).get("code", "unknown")
+        # Print helpful available shares if error 408 occurs
+        if error_code == 408:
+            try:
+                available = list_synology_shares()
+                raise RuntimeError(f"Path '{folder_path}' not found on Synology NAS (error 408). Root shared folders available: {available}")
+            except Exception:
+                pass
         raise RuntimeError(f"Synology List failed with error code: {error_code}")
 
     files = data.get("data", {}).get("files", [])

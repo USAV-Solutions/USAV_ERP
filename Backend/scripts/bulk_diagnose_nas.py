@@ -32,7 +32,7 @@ from app.core.synology import list_synology_files, download_synology_file
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("bulk_diagnose")
 
-DEFAULT_NAS_FOLDER = "/volume1/USAV Media/Packing Shipping/Packing Photos/Packing Station 2/2026/Q2 26"
+DEFAULT_NAS_FOLDER = "/USAV Media/Packing Shipping/Packing Photos/Packing Station 2/2026/Q2 26"
 
 
 async def process_image_file(
