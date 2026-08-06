@@ -126,6 +126,7 @@ class OrderRepository(BaseRepository[Order]):
             pattern = f"%{search}%"
             stmt = stmt.where(
                 Order.external_order_id.ilike(pattern)
+                | Order.tracking_number.ilike(pattern)
                 | Order.customer.has(Customer.name.ilike(pattern))
                 | Order.items.any(OrderItem.external_sku.ilike(pattern))
                 | Order.items.any(OrderItem.item_name.ilike(pattern))

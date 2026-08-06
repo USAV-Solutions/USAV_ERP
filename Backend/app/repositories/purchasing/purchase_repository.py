@@ -97,6 +97,7 @@ class PurchaseOrderRepository(BaseRepository[PurchaseOrder]):
                 or_(
                     func.lower(PurchaseOrder.po_number).like(like_term),
                     func.lower(Vendor.name).like(like_term),
+                    func.lower(PurchaseOrder.tracking_number).like(like_term),
                     sku_match_exists,
                     item_name_match_exists,
                 )
