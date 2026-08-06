@@ -105,8 +105,11 @@ export default function PhotoStationDiagnostics() {
             previewUrl: diagRes.data.image_data_url || undefined
           }
 
-          // Instantly pop the result card onto the screen!
-          setResultsHistory((prev) => [data, ...prev])
+          // Instantly pop the result card onto the screen (deduplicating by filename)
+          setResultsHistory((prev) => {
+            const filtered = prev.filter((item) => item.filename !== data.filename)
+            return [data, ...filtered]
+          })
         } catch (err: any) {
           console.error(`Failed to diagnose ${filename}:`, err)
         }
@@ -149,7 +152,10 @@ export default function PhotoStationDiagnostics() {
         previewUrl: previewUrl || res.data.image_data_url || undefined,
       }
 
-      setResultsHistory((prev) => [data, ...prev])
+      setResultsHistory((prev) => {
+        const filtered = prev.filter((item) => item.filename !== data.filename)
+        return [data, ...filtered]
+      })
     } catch (err: any) {
       console.error('Diagnosis failed:', err)
       const errorResult: DiagnosticResult = {
