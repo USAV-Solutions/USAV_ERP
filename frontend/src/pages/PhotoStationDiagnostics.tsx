@@ -64,6 +64,8 @@ export default function PhotoStationDiagnostics() {
   const [totalInFolder, setTotalInFolder] = useState<number>(0)
   const [resultsHistory, setResultsHistory] = useState<DiagnosticResult[]>([])
   const [nasError, setNasError] = useState<string | null>(null)
+  const isStreamingRef = useRef(false)
+  const processedFilesSet = useRef<Set<string>>(new Set())
   const hasAutoStreamStarted = useRef(false)
 
   const nasFolderPath = '/USAV Media/Packing Shipping/Packing Photos/Packing Station 2/2026/Q2 26'
@@ -77,12 +79,19 @@ export default function PhotoStationDiagnostics() {
   }, [])
 
   const startNasStream = async (offset: number = 0, limit: number = nasLimit, resetHistory: boolean = false) => {
+    if (isStreamingRef.current) {
+      console.warn('Stream loop already in progress, skipping concurrent execution.')
+      return
+    }
+
+    isStreamingRef.current = true
     setIsStreaming(true)
     setNasError(null)
 
     if (resetHistory) {
       setResultsHistory([])
       setCurrentOffset(0)
+      processedFilesSet.current.clear()
     }
 
     try {
@@ -97,6 +106,7 @@ export default function PhotoStationDiagnostics() {
       if (filePaths.length === 0) {
         setNasError(`No more images found in NAS folder beyond offset ${offset}.`)
         setIsStreaming(false)
+        isStreamingRef.current = false
         return
       }
 
@@ -106,6 +116,14 @@ export default function PhotoStationDiagnostics() {
       for (let i = 0; i < filePaths.length; i++) {
         const filePath = filePaths[i]
         const filename = filePath.split('/').pop() || filePath
+
+        // Guard against duplicate file requests
+        if (processedFilesSet.current.has(filePath)) {
+          console.warn(`File ${filePath} already requested, skipping duplicate call.`)
+          continue
+        }
+        processedFilesSet.current.add(filePath)
+
         setStreamProgress({ current: i + 1, total: filePaths.length, filename: filename })
 
         try {
@@ -142,6 +160,7 @@ export default function PhotoStationDiagnostics() {
       setNasError(err?.response?.data?.detail || 'Failed to connect to Synology NAS over QuickConnect.')
     } finally {
       setIsStreaming(false)
+      isStreamingRef.current = false
     }
   }
 

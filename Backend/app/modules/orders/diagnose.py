@@ -122,19 +122,35 @@ async def diagnose_packaging_photo_bytes(
             "Do not wrap in markdown code blocks."
         )
 
-        # Try gemini-3.5-flash, fallback to gemini-2.5-flash if needed
-        model_name = os.getenv("GEMINI_DIAGNOSTIC_MODEL", "gemini-2.5-flash")
+        # Use gemini-3.5-flash as primary model
+        model_name = os.getenv("GEMINI_DIAGNOSTIC_MODEL", "gemini-3.5-flash")
 
-        response = client.models.generate_content(
-            model=model_name,
-            contents=[
-                types.Part.from_bytes(
-                    data=image_bytes,
-                    mime_type=mime_type,
-                ),
-                prompt
-            ]
-        )
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[
+                    types.Part.from_bytes(
+                        data=image_bytes,
+                        mime_type=mime_type,
+                    ),
+                    prompt
+                ]
+            )
+        except Exception as model_err:
+            if "gemini-3.5-flash" in model_name:
+                logger.warning(f"[Diagnostic] Model '{model_name}' fallback to 'gemini-2.5-flash': {model_err}")
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=[
+                        types.Part.from_bytes(
+                            data=image_bytes,
+                            mime_type=mime_type,
+                        ),
+                        prompt
+                    ]
+                )
+            else:
+                raise model_err
 
         elapsed_ms = round((time.time() - start_time) * 1000, 2)
         text_resp = response.text.strip()
