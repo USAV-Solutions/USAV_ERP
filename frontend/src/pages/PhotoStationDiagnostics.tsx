@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import {
   Box,
   Typography,
@@ -64,12 +64,16 @@ export default function PhotoStationDiagnostics() {
   const [totalInFolder, setTotalInFolder] = useState<number>(0)
   const [resultsHistory, setResultsHistory] = useState<DiagnosticResult[]>([])
   const [nasError, setNasError] = useState<string | null>(null)
+  const hasAutoStreamStarted = useRef(false)
 
   const nasFolderPath = '/USAV Media/Packing Shipping/Packing Photos/Packing Station 2/2026/Q2 26'
 
-  // Auto-stream NAS photos on page load
+  // Auto-stream NAS photos on page load (guarded against React StrictMode double invocation)
   useEffect(() => {
-    startNasStream(0, 5, true)
+    if (!hasAutoStreamStarted.current) {
+      hasAutoStreamStarted.current = true
+      startNasStream(0, 5, true)
+    }
   }, [])
 
   const startNasStream = async (offset: number = 0, limit: number = nasLimit, resetHistory: boolean = false) => {
@@ -114,10 +118,17 @@ export default function PhotoStationDiagnostics() {
             previewUrl: diagRes.data.image_data_url || undefined
           }
 
-          // Instantly pop the result card onto the screen (deduplicating by filename)
+          // Instantly pop the result card onto the screen (strict Map deduplication by filename)
           setResultsHistory((prev) => {
-            const filtered = prev.filter((item) => item.filename !== data.filename)
-            return [data, ...filtered]
+            const map = new Map<string, DiagnosticResult>()
+            // Preserve order: newest item at top, deduplicated by filename
+            map.set(data.filename, data)
+            prev.forEach((item) => {
+              if (!map.has(item.filename)) {
+                map.set(item.filename, item)
+              }
+            })
+            return Array.from(map.values())
           })
         } catch (err: any) {
           console.error(`Failed to diagnose ${filename}:`, err)

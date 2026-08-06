@@ -97,8 +97,12 @@ async def diagnose_packaging_photo_bytes(
             "and a physical product placed at the top.\n\n"
             "Perform the following dual analysis:\n"
             "1. Document OCR Extraction:\n"
-            "   - platform: Marketplace platform (AMAZON, EBAY, WALMART, SHOPIFY, ECWID, etc.)\n"
-            "   - order_id: Full Order ID / Order Number (e.g. 113-0602625-1537021 or 27-14648-44047)\n"
+            "   - platform: Marketplace platform (AMAZON, EBAY, WALMART, SHOPIFY, ECWID, USAV SOLUTIONS, etc.)\n"
+            "   - order_id: Full Order ID / Order Number. Follow strict marketplace formats:\n"
+            "     * AMAZON: MUST be 17 characters in XXX-XXXXXXX-XXXXXXX format (3-7-7 digits, e.g. '113-0639021-1082656'). Read all digits carefully without truncating the last 5 digits.\n"
+            "     * EBAY: MUST be 14 characters in XX-XXXXX-XXXXX format (2-5-5 digits, e.g. '12-14440-44218' or '27-14648-44047').\n"
+            "     * WALMART: 13-15 numeric digits.\n"
+            "     * ECWID / SHOPIFY / ZOHO: 4-8 numeric digits (e.g. '4608').\n"
             "   - tracking_number: Carrier tracking number on shipping label (UPS: 1Z..., USPS: 20-22 digits starting with 9, FedEx: 12-15 digits)\n"
             "   - sku_on_slip: Product SKU or Item ID printed on packing slip if visible\n"
             "2. Physical Item Analysis:\n"
@@ -109,7 +113,7 @@ async def diagnose_packaging_photo_bytes(
             "{\n"
             "  \"is_valid_packing_photo\": true,\n"
             "  \"platform\": \"AMAZON\",\n"
-            "  \"order_id\": \"113-0602625-1537021\",\n"
+            "  \"order_id\": \"113-0639021-1082656\",\n"
             "  \"tracking_number\": \"9300110990513442589502\",\n"
             "  \"sku_on_slip\": \"AH-PL9M-F32Y\",\n"
             "  \"detected_physical_item\": \"Coiled black 2-wire audio speaker cable\",\n"
@@ -168,18 +172,39 @@ async def diagnose_packaging_photo_bytes(
                 image_data_url=data_url,
             )
 
-        # DB Cross-Check if database session is provided
+        # DB Cross-Check & Smart Fallback Lookup
         expected_erp_item = None
         item_match = True
         status = "CORRECT"
         msg = "Photo parsed successfully and order verified."
 
-        if db and extracted_order_id:
-            stmt = select(Order).where(
-                (func.lower(Order.external_order_id) == func.lower(extracted_order_id)) |
-                (func.lower(Order.external_order_number) == func.lower(extracted_order_id))
-            )
-            order_record = (await db.execute(stmt)).scalars().first()
+        if db:
+            order_record = None
+
+            # 1. Primary lookup by exact extracted Order ID
+            if extracted_order_id:
+                stmt = select(Order).where(
+                    (func.lower(Order.external_order_id) == func.lower(extracted_order_id)) |
+                    (func.lower(Order.external_order_number) == func.lower(extracted_order_id))
+                )
+                order_record = (await db.execute(stmt)).scalars().first()
+
+            # 2. Fallback lookup by tracking_number if primary lookup failed
+            if not order_record and extracted_tracking:
+                stmt_track = select(Order).where(Order.tracking_number == extracted_tracking)
+                order_record = (await db.execute(stmt_track)).scalars().first()
+                if order_record:
+                    logger.info(f"[Diagnostic] Matched order by tracking {extracted_tracking} -> Order {order_record.external_order_id}")
+                    # Auto-correct extracted order_id to full canonical Order ID in DB
+                    extracted_order_id = order_record.external_order_id
+
+            # 3. Fallback lookup by prefix match if order_id was partially truncated
+            if not order_record and extracted_order_id and len(extracted_order_id) >= 6:
+                stmt_prefix = select(Order).where(Order.external_order_id.like(f"{extracted_order_id}%"))
+                order_record = (await db.execute(stmt_prefix)).scalars().first()
+                if order_record:
+                    logger.info(f"[Diagnostic] Matched order by prefix '{extracted_order_id}' -> Order {order_record.external_order_id}")
+                    extracted_order_id = order_record.external_order_id
 
             if order_record:
                 # Fetch order item names
