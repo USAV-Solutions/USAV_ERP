@@ -3,6 +3,7 @@ from app.modules.returns.schemas.returns import (
     ReturnListResponse,
     ReturnRecordBrief,
     ReturnRecordDetail,
+    ReturnRecordUpdate,
 )
 from app.modules.returns.schemas.sync import (
     ReturnSyncRangeRequest,
@@ -22,6 +23,7 @@ __all__ = [
     "ReturnListResponse",
     "ReturnRecordBrief",
     "ReturnRecordDetail",
+    "ReturnRecordUpdate",
     "ReturnSyncRangeRequest",
     "ReturnZohoLineValidationResponse",
     "ReturnZohoSyncRangeRequest",

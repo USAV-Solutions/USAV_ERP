@@ -1,21 +1,25 @@
-import React, { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import {
   Box,
-  Typography,
-  Paper,
   Button,
-  TextField,
-  Alert,
-  CircularProgress,
   Card,
   CardContent,
+  CircularProgress,
+  Grid,
+  Typography,
+  TextField,
+  Alert,
+  AlertTitle,
+  Divider,
 } from '@mui/material'
-import { LocalShipping, CheckCircle, Error as ErrorIcon, CameraAlt } from '@mui/icons-material'
+import { CameraAlt, CloudUpload, CheckCircle, Warning, Cached, LocalShipping } from '@mui/icons-material'
 import axiosClient from '../api/axiosClient'
 
 export default function EndOfDayVerification() {
+  const [shelfPhoto, setShelfPhoto] = useState<string | null>(null)
   const [manualCount, setManualCount] = useState<string>('')
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false)
   const [result, setResult] = useState<{
     success: boolean
     box_count: number
@@ -24,13 +28,66 @@ export default function EndOfDayVerification() {
     message: string
   } | null>(null)
 
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+
+  useEffect(() => {
+    startCamera()
+    return () => {
+      stopCamera()
+    }
+  }, [])
+
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true })
+      streamRef.current = stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+      }
+    } catch (err) {
+      console.warn("Could not access camera for shelf verification:", err)
+    }
+  }
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop())
+    }
+  }
+
+  const capturePhoto = () => {
+    if (videoRef.current && canvasRef.current) {
+      const context = canvasRef.current.getContext('2d')
+      if (context) {
+        canvasRef.current.width = videoRef.current.videoWidth
+        canvasRef.current.height = videoRef.current.videoHeight
+        context.drawImage(videoRef.current, 0, 0)
+        const dataUrl = canvasRef.current.toDataURL('image/jpeg')
+        setShelfPhoto(dataUrl)
+      }
+    }
+  }
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file) {
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        setShelfPhoto(reader.result as string)
+      }
+      reader.readAsDataURL(file)
+    }
+  }
+
   const handleSubmit = async () => {
     setIsSubmitting(true)
     setResult(null)
 
     try {
       const payload = {
-        photo_path: '/volume1/photo/shelf_end_of_day.jpg',
+        photo_path: shelfPhoto || '/volume1/photo/shelf_end_of_day.jpg',
         manual_box_count: manualCount.trim() ? parseInt(manualCount.trim(), 10) : undefined,
       }
 
@@ -50,91 +107,90 @@ export default function EndOfDayVerification() {
   }
 
   return (
-    <Box sx={{ p: { xs: 1, md: 3 }, maxWidth: 800, mx: 'auto' }}>
-      <Paper
-        elevation={0}
-        sx={{
-          p: 2.5,
-          mb: 3,
-          bgcolor: 'primary.main',
-          color: 'white',
-          borderRadius: 2,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 1.5,
-        }}
-      >
-        <LocalShipping sx={{ fontSize: 32 }} />
-        <Box>
-          <Typography variant="h5" fontWeight="bold">
-            End-of-Day Shelf Verification
-          </Typography>
-          <Typography variant="body2" sx={{ opacity: 0.9 }}>
-            Cross-check physical shelf box count against verified ERP orders before carrier dispatch.
-          </Typography>
-        </Box>
-      </Paper>
+    <Box sx={{ p: { xs: 2, md: 4 }, maxWidth: 1000, margin: '0 auto' }}>
+      <Typography variant="h4" gutterBottom sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}>
+        <LocalShipping color="primary" fontSize="large" /> End-of-Day Shelf Verification
+      </Typography>
+      <Typography variant="body1" color="text.secondary" paragraph>
+        Audit physical shelf box count against verified orders before dispatch.
+      </Typography>
 
       {result && (
-        <Paper
-          elevation={3}
-          sx={{
-            p: 3,
-            mb: 3,
-            borderRadius: 2,
-            bgcolor: result.success ? '#2e7d32' : '#d32f2f',
-            color: 'white',
-          }}
+        <Alert
+          severity={result.success ? "success" : "error"}
+          icon={result.success ? <CheckCircle fontSize="inherit" /> : <Warning fontSize="inherit" />}
+          sx={{ mb: 3 }}
         >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
-            {result.success ? <CheckCircle sx={{ fontSize: 40 }} /> : <ErrorIcon sx={{ fontSize: 40 }} />}
-            <Typography variant="h5" fontWeight="bold">
-              {result.success ? 'SHELF COUNT MATCHED - READY TO SHIP' : 'COUNT MISMATCH WARNING'}
-            </Typography>
-          </Box>
-          <Typography variant="body1" sx={{ mt: 1 }}>
-            {result.message}
-          </Typography>
-          <Box sx={{ mt: 2, display: 'flex', gap: 3 }}>
-            <Typography variant="subtitle2">
-              Physical Box Count: <strong>{result.box_count}</strong>
-            </Typography>
-            <Typography variant="subtitle2">
-              Verified Orders: <strong>{result.verified_orders_count}</strong>
-            </Typography>
-          </Box>
-        </Paper>
+          <AlertTitle sx={{ fontWeight: 'bold' }}>
+            {result.success ? "SHELF COUNT MATCHED — READY TO SHIP" : "COUNT MISMATCH WARNING"}
+          </AlertTitle>
+          {result.message} — Verified Orders: <strong>{result.verified_orders_count}</strong> | Shelf Count: <strong>{result.box_count}</strong>
+        </Alert>
       )}
 
-      <Card elevation={2} sx={{ borderRadius: 2 }}>
-        <CardContent sx={{ p: 3 }}>
-          <Typography variant="h6" fontWeight="bold" sx={{ mb: 2 }}>
-            Run Shelf Audit
-          </Typography>
+      <Grid container spacing={3}>
+        <Grid item xs={12} md={6}>
+          <Card elevation={3}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Shelf Photo Stream
+              </Typography>
+              <Box sx={{ position: 'relative', width: '100%', height: 260, bgcolor: 'black', borderRadius: 1, overflow: 'hidden', mb: 2 }}>
+                <video ref={videoRef} autoPlay playsInline muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                <canvas ref={canvasRef} style={{ display: 'none' }} />
+              </Box>
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button fullWidth variant="contained" startIcon={<CameraAlt />} onClick={capturePhoto}>
+                  Snap Shelf
+                </Button>
+                <Button component="label" variant="outlined" startIcon={<CloudUpload />}>
+                  Upload
+                  <input type="file" accept="image/*" hidden onChange={handleFileUpload} />
+                </Button>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
 
-          <TextField
-            fullWidth
-            type="number"
-            label="Manual Shelf Box Count (Optional)"
-            placeholder="Enter physical box count on shelf..."
-            value={manualCount}
-            onChange={(e) => setManualCount(e.target.value)}
-            sx={{ mb: 3 }}
-          />
+        <Grid item xs={12} md={6}>
+          <Card elevation={3}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Manual Audit & Run
+              </Typography>
 
-          <Button
-            fullWidth
-            variant="contained"
-            color="primary"
-            size="large"
-            disabled={isSubmitting}
-            onClick={handleSubmit}
-            sx={{ py: 1.5, fontSize: '1.1rem', fontWeight: 'bold' }}
-          >
-            {isSubmitting ? <CircularProgress size={24} color="inherit" /> : 'RUN END-OF-DAY SHELF VERIFICATION'}
-          </Button>
-        </CardContent>
-      </Card>
+              {shelfPhoto && (
+                <Box sx={{ mb: 2, textAlign: 'center' }}>
+                  <Typography variant="caption" display="block">Captured Shelf Image</Typography>
+                  <img src={shelfPhoto} alt="Shelf Preview" style={{ width: '100%', maxHeight: 120, objectFit: 'cover', borderRadius: 4 }} />
+                </Box>
+              )}
+
+              <TextField
+                fullWidth
+                type="number"
+                label="Manual Shelf Box Count (Optional)"
+                placeholder="Enter box count on shelf..."
+                value={manualCount}
+                onChange={(e) => setManualCount(e.target.value)}
+                sx={{ mb: 3 }}
+              />
+
+              <Button
+                fullWidth
+                variant="contained"
+                color="primary"
+                size="large"
+                disabled={isSubmitting}
+                onClick={handleSubmit}
+                sx={{ py: 1.5, fontWeight: 'bold' }}
+              >
+                {isSubmitting ? <CircularProgress size={24} color="inherit" /> : 'RUN SHELF VERIFICATION'}
+              </Button>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
     </Box>
   )
 }

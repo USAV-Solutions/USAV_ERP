@@ -12,6 +12,7 @@ export type OrderPlatform =
   | 'EBAY_MEKONG'
   | 'EBAY_USAV'
   | 'EBAY_DRAGON'
+  | 'EBAY_PURCHASING'
   | 'ECWID'
   | 'SHOPIFY'
   | 'WALMART'
@@ -23,6 +24,7 @@ export type SalesImportApiSource =
   | 'EBAY_MEKONG'
   | 'EBAY_USAV'
   | 'EBAY_DRAGON'
+  | 'EBAY_PURCHASING'
   | 'WALMART'
 
 export type SalesImportFileSource =
@@ -30,6 +32,7 @@ export type SalesImportFileSource =
   | 'AMAZON_FBA_CSV'
   | 'SHIPSTATION_CUSTOMER_CSV'
   | 'TRACKING_CSV'
+  | 'SHIPPING_STATUS_CSV'
 export type OrderFulfillmentChannel = 'SELF_FULFILLED' | 'AMAZON_FBA'
 
 export type OrderStatus =
@@ -57,9 +60,11 @@ export type ShippingStatus =
   | 'PACKED'
   | 'SHIPPING'
   | 'DELIVERED'
+  | 'RETURNED'
+  | 'REFUNDED'
 
 export type IntegrationSyncStatus = 'IDLE' | 'SYNCING' | 'ERROR'
-export type ZohoSyncStatus = 'PENDING' | 'SYNCED' | 'ERROR' | 'DIRTY'
+export type ZohoSyncStatus = 'PENDING' | 'QUEUED' | 'SYNCING' | 'SYNCED' | 'ERROR' | 'DIRTY'
 
 // ── Order Item Schemas ───────────────────────────────────────────────
 

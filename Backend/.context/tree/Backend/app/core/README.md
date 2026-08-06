@@ -1,13 +1,16 @@
-﻿# Backend\app\core
+# Backend\app\core
 
 ## What This Folder Does
-Core infrastructure configuration: environment settings, DB setup, and security helpers.
+Core infrastructure configuration: environment settings, DB setup, security helpers, and external utility integrations (e.g., Synology NAS WebAPI client and NVIDIA Locate Anything object counting).
 
 ## Typical Contents
+- `synology.py`: Handles connection, authentication, and file upload via the Synology DSM FileStation WebAPI (with safe local disk fallback).
+- `locate_anything.py`: Interfaces with the NVIDIA Locate Anything visual grounding NIM API for packaging box count checks (with offline mock fallback).
 - Python modules, schemas, or support assets scoped to this domain.
-- Folder-specific logic that should remain cohesive inside this boundary.
 
 ## Common Pitfalls
+- Synology upload: Requires `SYNOLOGY_NAS_IP`, `SYNOLOGY_NAS_PORT`, `SYNOLOGY_NAS_USER`, and `SYNOLOGY_NAS_PASSWORD` to upload scanned photos. If any are unset, it falls back to local disk storage (`static/photos/`) to avoid breaking local setups.
+- NVIDIA Locate Anything: Requires `NVIDIA_API_KEY` to run box count validation. If unset, it falls back to a simulated mock object count.
 - Editing this folder without checking sibling tests and schema/type contracts.
 - Making cross-layer changes here but forgetting migration/frontend alignment.
 - Zoho PO source sync can use optional `zoho_po_cf_source_id`; if unset, payload falls back to `api_name=cf_source`.

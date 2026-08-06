@@ -23,7 +23,14 @@ class _TestZohoReturnSyncService(ZohoReturnSyncService):
         return self.already_synced_qty
 
 
-def _record(*, zoho_salesreturn_id=None, quantity=2, returned_qty=1):
+def _record(
+    *,
+    zoho_salesreturn_id=None,
+    quantity=2,
+    returned_qty=1,
+    cancelled_qty=0,
+    normalized_status=ReturnNormalizedStatus.RETURNED,
+):
     order_item = SimpleNamespace(
         id=20,
         external_item_id="ITEM-1",
@@ -40,7 +47,7 @@ def _record(*, zoho_salesreturn_id=None, quantity=2, returned_qty=1):
         external_sku="SKU-1",
         item_name="Item 1",
         returned_qty=returned_qty,
-        cancelled_qty=0,
+        cancelled_qty=cancelled_qty,
     )
     order = SimpleNamespace(
         id=10,
@@ -59,7 +66,7 @@ def _record(*, zoho_salesreturn_id=None, quantity=2, returned_qty=1):
         items=[return_item],
         event_at=datetime(2026, 6, 13, tzinfo=timezone.utc),
         reason="buyer_returned",
-        normalized_status=ReturnNormalizedStatus.RETURNED,
+        normalized_status=normalized_status,
         zoho_salesreturn_id=zoho_salesreturn_id,
         zoho_salesreturn_number=None,
         zoho_sync_status=ReturnZohoSyncStatus.PENDING,
@@ -79,7 +86,10 @@ def _zoho_client():
                     "item_id": "ZITEM-1",
                     "sku": "SKU-1",
                     "name": "Item 1",
+                    "quantity": 2,
+                    "quantity_packed": 0,
                     "quantity_shipped": 1,
+                    "quantity_invoiced": 0,
                     "quantity_returned": 0,
                 }
             ],
@@ -89,6 +99,8 @@ def _zoho_client():
     client.create_sales_return = AsyncMock(
         return_value={"salesreturn_id": "SR-1", "salesreturn_number": "SR-0001"}
     )
+    client.update_salesorder = AsyncMock(return_value={"salesorder_id": "SO-1"})
+    client.void_salesorder = AsyncMock(return_value={"salesorder_id": "SO-1", "status": "void"})
     client.get_item = AsyncMock(return_value={"item_id": "ZITEM-1", "is_returnable": True})
     client.update_item = AsyncMock(return_value={"item_id": "ZITEM-1", "is_returnable": True})
     return client
@@ -191,6 +203,74 @@ async def test_sync_creates_sales_return_and_stores_result():
     assert payload["line_items"] == [{"item_id": "ZITEM-1", "salesorder_item_id": "SOL-1", "quantity": 1}]
     client.get_item.assert_awaited_once_with("ZITEM-1")
     client.update_item.assert_not_called()
+    client.update_salesorder.assert_not_called()
+    client.void_salesorder.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sync_cancelled_record_updates_salesorder_lines_without_sales_return():
+    record = _record(
+        quantity=2,
+        returned_qty=0,
+        cancelled_qty=1,
+        normalized_status=ReturnNormalizedStatus.PARTIALLY_CANCELLED,
+    )
+    client = _zoho_client()
+    service = _TestZohoReturnSyncService(record=record, zoho_client=client)
+
+    result = await service.sync_return_to_zoho(record.id)
+
+    assert result.status == ReturnZohoSyncStatus.SYNCED
+    assert record.zoho_sync_status == ReturnZohoSyncStatus.SYNCED
+    assert record.zoho_salesreturn_id is None
+    client.create_sales_return.assert_not_called()
+    client.get_item.assert_not_called()
+    client.update_salesorder.assert_awaited_once_with(
+        "SO-1",
+        {"line_items": [{"line_item_id": "SOL-1", "item_id": "ZITEM-1", "quantity": 1}]},
+    )
+    client.void_salesorder.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sync_cancelled_record_voids_full_salesorder():
+    record = _record(
+        quantity=2,
+        returned_qty=0,
+        cancelled_qty=2,
+        normalized_status=ReturnNormalizedStatus.CANCELLED,
+    )
+    client = _zoho_client()
+    client.get_salesorder.return_value["line_items"][0]["quantity_shipped"] = 0
+    service = _TestZohoReturnSyncService(record=record, zoho_client=client)
+
+    result = await service.sync_return_to_zoho(record.id)
+
+    assert result.status == ReturnZohoSyncStatus.SYNCED
+    client.void_salesorder.assert_awaited_once_with("SO-1")
+    client.update_salesorder.assert_not_called()
+    client.create_sales_return.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_validate_cancel_blocks_fulfilled_quantity():
+    record = _record(
+        quantity=2,
+        returned_qty=0,
+        cancelled_qty=2,
+        normalized_status=ReturnNormalizedStatus.CANCELLED,
+    )
+    client = _zoho_client()
+    client.get_salesorder.return_value["line_items"][0]["quantity_shipped"] = 1
+    service = _TestZohoReturnSyncService(record=record, zoho_client=client)
+
+    result = await service.validate_return_for_zoho(record.id)
+
+    assert result.status == ReturnZohoSyncStatus.QUANTITY_CONFLICT
+    assert "exceeds Zoho unfulfilled quantity" in result.blockers[0]
+    client.create_sales_return.assert_not_called()
+    client.update_salesorder.assert_not_called()
+    client.void_salesorder.assert_not_called()
 
 
 @pytest.mark.asyncio

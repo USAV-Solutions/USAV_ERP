@@ -43,15 +43,6 @@ export const LOOKUPS = {
 // Listing endpoints
 export const LISTINGS = {
   LIST: '/listings',
-  CREATE_SCAFFOLD: '/listings/create/scaffold',
-  CREATE_EBAY_START: '/listings/create/ebay/start',
-  EBAY_DRAFT: '/listings/ebay/draft',
-  EBAY_CATEGORY_SUGGESTIONS: '/listings/ebay/category-suggestions',
-  EBAY_AI_ENRICH: '/listings/ebay/ai-enrich',
-  EBAY_IMAGES_AVAILABLE: (variantId: number) => `/listings/ebay/images/available/${variantId}`,
-  EBAY_IMAGES_UPLOAD: '/listings/ebay/images/upload',
-  EBAY_IMAGES_SEND: '/listings/ebay/images/send',
-  EBAY_PUBLISH: '/listings/ebay/publish',
   IMPORT_CSV: '/listings/import/csv',
   LISTING: (id: number) => `/listings/${id}`,
   BY_PLATFORM_REF: (platform: string, refId: string) => `/listings/platform/${platform}/ref/${refId}`,
@@ -62,6 +53,18 @@ export const LISTINGS = {
   SYNC: (id: number) => `/listings/${id}/sync`,
   MATCH: (id: number) => `/listings/${id}/match`,
   UNMATCH: (id: number) => `/listings/${id}/unmatch`,
+}
+
+export const EBAY_LISTING = {
+  ACCOUNTS: '/listings/ebay/accounts',
+  CATEGORY_SUGGESTIONS: '/listings/ebay/categories',
+  CATEGORY_ASPECTS: (categoryId: string) => `/listings/ebay/categories/${categoryId}/aspects`,
+  VALID_CONDITIONS: (categoryId: string) => `/listings/ebay/categories/${categoryId}/conditions`,
+  PUBLISH: '/listings/ebay/publish',
+  VERIFY: '/listings/ebay/verify',
+  AI_SHORTEN_TITLE: '/listings/ebay/ai/shorten-title',
+  AI_GENERATE_DESC: '/listings/ebay/ai/generate-description',
+  AI_SUGGEST_DETAILS: '/listings/ebay/ai/suggest-details',
 }
 
 // Product Image endpoints
@@ -91,6 +94,7 @@ export const ZOHO = {
 export const SYNC = {
   ITEM: (variantId: number) => `/sync/items/${variantId}`,
   ORDER: (orderId: number) => `/sync/orders/${orderId}`,
+  ORDER_STATUSES: '/sync/orders/status',
   PURCHASE: (poId: number) => `/sync/purchases/${poId}`,
   PURCHASES: '/sync/purchases',
   CUSTOMER: (customerId: number) => `/sync/customers/${customerId}`,
@@ -129,10 +133,12 @@ export const ORDERS = {
 export const RETURNS = {
   LIST: '/returns',
   RECORD: (id: number) => `/returns/${id}`,
+  REMATCH_RECORD: (id: number) => `/returns/${id}/rematch`,
   ZOHO_SYNC_RECORD: (id: number) => `/returns/${id}/zoho/sync`,
   SYNC: '/returns/sync',
   SYNC_RANGE: '/returns/sync/range',
   SYNC_STATUS: '/returns/sync/status',
+  IMPORT_AMAZON_CSV: '/returns/import-amazon-csv',
 }
 
 // Purchasing endpoints

@@ -5,7 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.models import OrderPlatform, ReturnNormalizedStatus
+from app.models import OrderPlatform, ReturnNormalizedStatus, ReturnZohoSyncStatus
+from app.modules.orders.models import OrderFulfillmentChannel
 from app.modules.returns.schemas.sync import ReturnSyncResponse
 from app.modules.returns.service import (
     NormalizedReturnItem,
@@ -57,13 +58,36 @@ def _build_record() -> NormalizedReturnRecord:
 
 
 @pytest.mark.asyncio
+async def test_find_linked_order_uses_external_reference_lookup_when_available():
+    class Repo:
+        def __init__(self):
+            self.reference_calls = []
+
+        async def get_by_external_reference(self, platform, external_order_id):
+            self.reference_calls.append((platform, external_order_id))
+            return SimpleNamespace(id=11)
+
+        async def get_with_items(self, order_id):
+            return SimpleNamespace(id=order_id, items=[])
+
+    service = _build_service()
+    repo = Repo()
+    service.order_repo = repo
+
+    order = await service._find_linked_order(OrderPlatform.AMAZON, "112-123")
+
+    assert order.id == 11
+    assert repo.reference_calls == [(OrderPlatform.AMAZON, "112-123")]
+
+
+@pytest.mark.asyncio
 async def test_upsert_record_links_existing_order_and_item():
     service = _build_service()
     service.order_repo.get_by_external_id = AsyncMock(return_value=SimpleNamespace(id=11))
     service.order_repo.get_with_items = AsyncMock(
         return_value=SimpleNamespace(
             id=11,
-            items=[SimpleNamespace(id=22, external_item_id="ITEM-1", external_sku="SKU-1", item_name="Item 1")],
+            items=[SimpleNamespace(id=22, external_item_id="ITEM-1", external_sku="SKU-1", item_name="Item 1", unit_price=Decimal("0"))],
         )
     )
     service.record_repo.get_by_external_key = AsyncMock(return_value=None)
@@ -87,7 +111,7 @@ async def test_upsert_record_returns_unchanged_for_identical_snapshot():
     service.order_repo.get_with_items = AsyncMock(
         return_value=SimpleNamespace(
             id=11,
-            items=[SimpleNamespace(id=22, external_item_id="ITEM-1", external_sku="SKU-1", item_name="Item 1")],
+            items=[SimpleNamespace(id=22, external_item_id="ITEM-1", external_sku="SKU-1", item_name="Item 1", unit_price=Decimal("0"))],
         )
     )
     existing = SimpleNamespace(
@@ -107,9 +131,11 @@ async def test_upsert_record_returns_unchanged_for_identical_snapshot():
         source_status="CANCELED",
         source_substatus=None,
         reason=None,
+        fulfillment_channel=OrderFulfillmentChannel.SELF_FULFILLED,
         order_total_amount=Decimal("20.00"),
         refunded_amount=Decimal("0"),
         currency="USD",
+        zoho_sync_status=ReturnZohoSyncStatus.PENDING,
         raw_payload={"orderId": "EB-1"},
         items=[
             SimpleNamespace(

@@ -676,6 +676,14 @@ class ZohoClient:
         """Mark a sales order as *confirmed* in Zoho."""
         return await self._request("POST", f"/salesorders/{salesorder_id}/status/confirmed")
 
+    async def mark_salesorder_fulfilled(self, salesorder_id: str) -> dict:
+        """Mark a sales order as *fulfilled* in Zoho."""
+        return await self._request("POST", f"/salesorders/{salesorder_id}/status/fulfilled")
+
+    async def void_salesorder(self, salesorder_id: str) -> dict:
+        """Mark a sales order as *void* in Zoho."""
+        return await self._request("POST", f"/salesorders/{salesorder_id}/status/void")
+
     async def search_salesorder_by_reference(self, reference: str) -> Optional[dict]:
         """Find a sales order by salesorder_number or legacy reference_number."""
         target = str(reference or "").strip()

@@ -86,6 +86,25 @@ async def test_ingest_order_creates_fba_channel_for_amazon_fba_csv():
 
 
 @pytest.mark.asyncio
+async def test_ingest_order_skips_existing_csv_order_without_update():
+    service = _build_service()
+    existing = SimpleNamespace(id=1)
+    service.order_repo.get_by_external_id = AsyncMock(return_value=existing)
+    service._update_existing_order = AsyncMock()
+
+    result = await service._ingest_order(
+        _build_external_order(),
+        OrderPlatform.AMAZON,
+        SyncResponse(platform="AMAZON"),
+        source="SHIPSTATION_CSV",
+        skip_existing=True,
+    )
+
+    assert result == "unchanged"
+    service._update_existing_order.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_update_existing_order_upgrades_to_fba_and_later_api_sync_does_not_downgrade():
     service = _build_service()
     service._get_or_create_customer = AsyncMock(return_value=None)

@@ -44,3 +44,19 @@ async def test_create_sales_return_requires_salesorder_id_before_api_call():
         await client.create_sales_return({"line_items": []})
 
     client._request.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_void_salesorder_calls_status_void_endpoint():
+    client = ZohoClient(
+        client_id="client",
+        client_secret="secret",
+        refresh_token="refresh",
+        organization_id="org",
+    )
+    client._request = AsyncMock(return_value={"code": 0})
+
+    result = await client.void_salesorder("SO-1")
+
+    assert result == {"code": 0}
+    client._request.assert_awaited_once_with("POST", "/salesorders/SO-1/status/void")

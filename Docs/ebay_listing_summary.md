@@ -1,64 +1,41 @@
-# eBay Listing Tools Summary (Product Listing)
+# Create eBay Listing Walkthrough
 
-This summary reflects the current eBay listing tooling implemented under product listings routes.
+We've successfully adapted the eBay listing flow from `ebay-listing-helper` into the main `USAV_Inventory` application.
 
-## Scope and Base Path
+## What Was Done
 
-- API base prefix: `/api/v1`
-- Listing router prefix: `/listings`
-- eBay-specific tools are currently limited to platforms:
-  - `EBAY_MEKONG`
-  - `EBAY_USAV`
-  - `EBAY_DRAGON`
+### 1. Backend API Layer (`Backend/app/modules/inventory/routes/listings.py`)
+- **eBay Accounts Configuration:** Added `GET /listings/ebay/accounts` to fetch store configuration details directly from `ebay-accounts.json` so you can choose which store to list on.
+- **Category Taxonomy:** Added endpoints to query eBay categories (`GET /listings/ebay/categories`), category aspects (`GET /listings/ebay/categories/{category_id}/aspects`), and conditions (`GET /listings/ebay/categories/{category_id}/conditions`) through the USAV eBay API client.
+- **AI Integrations:** Created endpoints using `google-genai` for:
+  - `POST /listings/ebay/ai/shorten-title`: Condenses the title to under 80 characters.
+  - `POST /listings/ebay/ai/generate-description`: Generates professional HTML descriptions from item specifics and titles.
+  - `POST /listings/ebay/ai/suggest-details`: Uses eBay's Draft/Preview APIs and Gemini to suggest categories, specs, and estimated dimensions.
+- **Publish Endpoint:** Added `POST /listings/ebay/publish` which takes the payload, creates an Inventory Item and Offer via eBay's Inventory API, publishes the offer, and records the listing reference and metadata to the database via `PlatformListingRepository`.
 
-## Current eBay Listing Endpoints
+### 2. Frontend React Application (`frontend/src/`)
+- **API and Types:** Created `ebayListing.ts` in both `api` and `types` folders to provide strong typing and clean HTTP calls.
+- **UI Stepper Component:** Created `CreateEbayListing.tsx` which houses a 3-step listing process:
+  - **Step 1: SKU Selection (`SkuSelectionStep.tsx`).** You search your database for a `ProductVariant`. It pulls up the image, condition, name, and checks if it already has eBay listings.
+  - **Step 2: Listing Details (`ListingDetailsStep.tsx`).** Auto-fills weight and dimensions if available. Includes "AI Shorten", "AI Generate", and "AI Suggest All" buttons. A dynamic `ItemSpecificsEditor` allows full customization of aspects.
+  - **Step 3: Preview & Images (`PreviewPublishStep.tsx`).** Summarizes the data, auto-pulls images associated with the SKU, lets you upload new ones, select the ones you want to push, and then "Publish to eBay".
+- **Navigation:** Integrated into `App.tsx` and the left sidebar under `Catalog -> Product Listings -> Create New Listing`.
 
-1. `GET /api/v1/listings/create/scaffold`
-- Returns current create-flow capability flags.
-- eBay platforms are marked enabled with scaffold status; Amazon/Ecwid/Walmart are placeholders.
+### 3. Documentation
+- Updated `Backend/.context/tree/Backend/app/modules/inventory/routes/README.md` to reflect the new eBay listing endpoints and functionality in compliance with `AGENTS.md`.
 
-2. `POST /api/v1/listings/create/ebay/start`
-- Scaffold bootstrap endpoint for create-listing flow.
-- Returns scaffold status message (full flow still pending).
+## How to Verify
 
-3. `POST /api/v1/listings/ebay/draft`
-- Builds a prefilled draft from variant + existing listing + store defaults.
-- Includes title/description/price/quantity/condition, marketplace defaults, dimensions, shipping package details, category (if already known), picture URLs, and seller policy profile IDs.
+1. **Start the applications:** Ensure both the `Backend` and `frontend` are running.
+2. **Configure API Keys:** Make sure the `Backend/.env` has `GEMINI_API_KEY` set so the AI features will work.
+3. **Navigate to the UI:** Go to the application and open **Catalog > Product Listings**. You will see a new **Create New Listing** option.
+4. **Test the Flow:**
+   - **Step 1:** Search for an existing SKU.
+   - **Step 2:** Click **AI Suggest All** to auto-assign a category and aspects. Try clicking **AI Shorten** and **AI Generate** to create the title and description.
+   - **Step 3:** Select some images, review the summary, and click **Publish to eBay**. (Note: Depending on whether you're using sandbox or production eBay credentials, this will actually create a listing.)
 
-4. `POST /api/v1/listings/ebay/category-suggestions`
-- Builds or accepts a search query and calls eBay Taxonomy APIs.
-- Returns `marketplace_id`, `category_tree_id`, resolved query, and parsed category suggestions.
+## Outstanding Items
+- **Saving Drafts:** The "Save Draft" button on the final step currently shows a success message but is a placeholder. If you need draft listings saved to the DB without publishing to eBay, we can implement a `DraftListing` model in the future.
+- **AI Failures:** The system degrades gracefully; if you lack an API key, the AI buttons will surface a toast error, but you can still manually fill out the category, title, and description.
 
-5. `GET /api/v1/listings/ebay/images/available/{variant_id}`
-- Scans SKU image directory and returns available image candidates for listing.
-- Supports both flat files and `listing-*` subfolders.
-
-6. `POST /api/v1/listings/ebay/images/upload`
-- Uploads images into SKU listing folders (`listing-{index}`).
-- Auto-increments `img-{n}` filenames.
-- Allowed extensions: `.jpg`, `.jpeg`, `.png`, `.webp`, `.gif`, `.bmp`, `.tiff`, `.avif`, `.heic`.
-
-7. `POST /api/v1/listings/ebay/images/send`
-- Sends selected local images to eBay Media API (`create_image_from_file`).
-- Returns per-image success/error and uploaded EPS image URLs.
-- Enforces eBay max image count (24).
-
-8. `POST /api/v1/listings/ebay/publish`
-- Validates payload and publishes via eBay Trading API `AddFixedPriceItem`.
-- Persists/updates internal `platform_listing` record with returned eBay `item_id`.
-- Stores eBay metadata (category, pictures, specifics, shipping package details, profiles).
-
-## Key Validation/Behavior Rules in Current Implementation
-
-- eBay-only guard: eBay listing endpoints reject non-eBay platforms.
-- Business policy IDs must be either all present (`payment`, `return`, `shipping`) or all omitted.
-- Publish requires at least one picture URL.
-- Publish requires a supported condition mapping (`N/NEW`, `U/USED`, `R/REFURBISHED`, `FOR_PARTS` variants).
-- Publish requires dimensions + weight to construct `ShippingPackageDetails`.
-- Publish requires at least one item specific (brand/mpn/color/upc or extra specifics).
-- Publish blocks duplicate active listing publish when variant already has an `external_ref_id` on same platform.
-- Image IDs are sanitized and path traversal is rejected.
-
-## Supporting Generic Listing APIs
-
-The same router also includes generic listing CRUD and sync-status endpoints (create, update, delete, mark-synced, mark-error, match/unmatch, queue sync). These are platform-agnostic and support eBay records once created.
+If you encounter any issues with the UI flow or eBay API configurations, let me know and we can refine them!

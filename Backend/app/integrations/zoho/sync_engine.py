@@ -1626,6 +1626,17 @@ async def sync_po_outbound(
         try:
             zoho = ZohoClient()
 
+            # Ensure all line item variants are synced to Zoho first so they have zoho_item_id
+            for item in po.items or []:
+                variant = getattr(item, "variant", None)
+                if variant and not variant.zoho_item_id:
+                    logger.info(
+                        "sync_po_outbound: variant %s has no zoho_item_id, syncing to Zoho first",
+                        variant.id,
+                    )
+                    await sync_variant_outbound(variant.id)
+                    await db.refresh(variant)
+
             unmatched_item_id: Optional[str] = None
             if any(getattr(item, "variant", None) is None for item in (po.items or [])):
                 unmatched_item_id = await _ensure_unmatched_placeholder_item(zoho)
@@ -2063,8 +2074,6 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
         inferred_handling = stored_platform_total - (line_total + shipping_amount)
     else:
         inferred_handling = stored_platform_total - (line_total + tax_amount + shipping_amount)
-    if inferred_handling < Decimal("0"):
-        inferred_handling = Decimal("0")
 
     payload["shipping_charge"] = float(shipping_amount)
 
@@ -2134,8 +2143,8 @@ async def sync_order_outbound(order_id: int) -> None:
             logger.warning("sync_order_outbound: order %s not found", order_id)
             return
 
-        # Mark as actively syncing
-        order.zoho_sync_status = ZohoSyncStatus.PENDING
+        # Mark queued work as actively syncing.
+        order.zoho_sync_status = ZohoSyncStatus.SYNCING
         order._updated_by_sync = True
         await db.commit()
         order._updated_by_sync = False
@@ -2215,6 +2224,24 @@ async def sync_order_outbound(order_id: int) -> None:
             order._updated_by_sync = True
             await db.commit()
             order._updated_by_sync = False
+
+            from app.modules.orders.models import ShippingStatus, OrderStatus
+            if (
+                order.shipping_status in (ShippingStatus.SHIPPING, ShippingStatus.DELIVERED)
+                or order.status == OrderStatus.SHIPPED
+            ) and not order.zoho_marked_as_fulfilled:
+                try:
+                    await ZohoClient().mark_salesorder_fulfilled(order.zoho_id)
+                    order.zoho_marked_as_fulfilled = True
+                    order._updated_by_sync = True
+                    await db.commit()
+                    order._updated_by_sync = False
+                    logger.info("sync_order_outbound: order %s marked as fulfilled in Zoho", order_id)
+                except Exception as fulfill_exc:
+                    logger.warning(
+                        "sync_order_outbound: mark as fulfilled failed for order %s: %s",
+                        order_id, fulfill_exc,
+                    )
             return
 
         try:
@@ -2286,6 +2313,13 @@ async def sync_order_outbound(order_id: int) -> None:
                         so = await zoho.create_sales_order(payload_retry)
                     payload = payload_retry
                     new_hash = generate_payload_hash(payload)
+                elif "Sales Order does not exist" in msg or "1002" in msg:
+                    logger.warning(
+                        "sync_order_outbound: Sales Order does not exist for order %s (zoho_id=%s). Clearing zoho_id and retrying as create.",
+                        order_id, order.zoho_id,
+                    )
+                    order.zoho_id = None
+                    so = await zoho.create_sales_order(payload)
                 else:
                     raise
 
@@ -2320,7 +2354,7 @@ async def sync_order_outbound(order_id: int) -> None:
             )
 
             # After the sales order is synced, apply shipping-specific actions
-            from app.modules.orders.models import ShippingStatus
+            from app.modules.orders.models import ShippingStatus, OrderStatus
             if order.shipping_status in (
                 ShippingStatus.PACKED,
                 ShippingStatus.SHIPPING,
@@ -2332,6 +2366,23 @@ async def sync_order_outbound(order_id: int) -> None:
                     logger.warning(
                         "sync_order_outbound: shipping status sync failed for order %s: %s",
                         order_id, ship_exc,
+                    )
+
+            if (
+                order.shipping_status in (ShippingStatus.SHIPPING, ShippingStatus.DELIVERED)
+                or order.status == OrderStatus.SHIPPED
+            ) and not order.zoho_marked_as_fulfilled:
+                try:
+                    await zoho.mark_salesorder_fulfilled(order.zoho_id)
+                    order.zoho_marked_as_fulfilled = True
+                    order._updated_by_sync = True
+                    await db.commit()
+                    order._updated_by_sync = False
+                    logger.info("sync_order_outbound: order %s marked as fulfilled in Zoho", order_id)
+                except Exception as fulfill_exc:
+                    logger.warning(
+                        "sync_order_outbound: mark as fulfilled failed for order %s: %s",
+                        order_id, fulfill_exc,
                     )
         except RateLimitError as exc:
             order.zoho_sync_error = (

@@ -63,17 +63,8 @@ class PlatformListingResponse(PlatformListingBase):
     model_config = ConfigDict(from_attributes=True)
 
 
-class EbayPolicyProfiles(BaseModel):
-    payment_profile_id: str
-    return_profile_id: str
-    shipping_profile_id: str
 
 
-class EbayCategorySuggestion(BaseModel):
-    category_id: str
-    category_name: str
-    category_tree_node_level: int | None = None
-    category_tree_tokens: list[str] = Field(default_factory=list)
 
 
 class EbaySpecificInput(BaseModel):
@@ -81,163 +72,40 @@ class EbaySpecificInput(BaseModel):
     value: str = Field(..., min_length=1, max_length=255)
 
 
-class EbayListingDraftRequest(BaseModel):
-    platform: Platform
-    variant_id: int
 
 
-class EbayListingDraftResponse(BaseModel):
-    platform: Platform
-    variant_id: int
-    title: str
-    description: str
-    sku: str
-    quantity: int
-    price: float
-    condition_text: str | None = None
-    condition_id: int | None = None
-    upc: str | None = None
-    brand: str | None = None
-    color: str | None = None
-    marketplace_id: str
-    country: str
-    currency: str
-    location: str
-    postal_code: str
-    dispatch_time_max: int
-    category_id: str | None = None
-    picture_urls: list[str] = Field(default_factory=list)
-    dimensions: dict[str, float | None]
-    shipping_package_details: dict[str, str] | None = None
-    seller_profiles: EbayPolicyProfiles
 
 
-class EbayCategorySuggestionsRequest(BaseModel):
-    platform: Platform
-    variant_id: int
-    query_override: str | None = None
-    title: str | None = None
-    brand: str | None = None
-    color: str | None = None
-    condition_text: str | None = None
 
 
-class EbayCategorySuggestionsResponse(BaseModel):
-    marketplace_id: str
-    category_tree_id: str
-    query: str
-    suggestions: list[EbayCategorySuggestion] = Field(default_factory=list)
 
 
-class EbayPublishRequest(BaseModel):
-    platform: Platform
-    variant_id: int
-    title: str = Field(..., min_length=1, max_length=255)
-    description: str = Field(..., min_length=1)
-    category_id: str = Field(..., min_length=1, max_length=64)
-    price: float = Field(..., gt=0)
-    quantity: int = Field(..., ge=1)
-    picture_urls: list[str] = Field(..., min_length=1)
-    condition_text: str = Field(..., min_length=1, max_length=100)
-    upc: str | None = Field(None, max_length=64)
-    brand: str | None = Field(None, max_length=255)
-    mpn: str | None = Field(None, max_length=255)
-    color: str | None = Field(None, max_length=100)
-    is_free_shipping: bool = False
-    use_no_returns_policy: bool = False
-    dimensions: dict[str, float | None] = Field(default_factory=dict)
-    extra_specifics: list[EbaySpecificInput] = Field(default_factory=list)
 
 
-class EbayPublishResponse(BaseModel):
-    listing_id: int
-    platform: Platform
-    variant_id: int
-    external_ref_id: str
-    offer_id: str
-    sync_status: PlatformSyncStatus
 
 
-class EbayAvailableImage(BaseModel):
-    image_id: str
-    filename: str
-    listing: str
-    relative_path: str
-    preview_url: str
 
 
-class EbayAvailableImagesResponse(BaseModel):
-    variant_id: int
-    sku: str
-    available_images: list[EbayAvailableImage] = Field(default_factory=list)
 
 
-class EbaySendImagesRequest(BaseModel):
-    platform: Platform
-    variant_id: int
-    image_ids: list[str] = Field(..., min_length=1, max_length=24)
 
 
-class EbaySendImageResult(BaseModel):
-    image_id: str
-    success: bool
-    image_url: str | None = None
-    error: str | None = None
 
 
-class EbaySendImagesResponse(BaseModel):
-    platform: Platform
-    variant_id: int
-    eps_image_urls: list[str] = Field(default_factory=list)
-    results: list[EbaySendImageResult] = Field(default_factory=list)
 
 
-class EbayAspectSuggestion(BaseModel):
-    name: str
-    values: list[str] = Field(default_factory=list)
-    required: bool = False
 
 
-class EbayValidCondition(BaseModel):
-    condition_id: str
-    condition_description: str
 
 
-class EbayAiEnrichRequest(BaseModel):
-    platform: Platform
-    variant_id: int
-    title: str | None = None
-    description: str | None = None
-    image_url: str | None = None
 
 
-class EbayAiEnrichResponse(BaseModel):
-    platform: Platform
-    variant_id: int
-    category_id: str | None = None
-    title: str | None = None
-    description: str | None = None
-    aspects: list[EbayAspectSuggestion] = Field(default_factory=list)
-    dimensions: dict[str, float | None] = Field(default_factory=dict)
-    valid_conditions: list[EbayValidCondition] = Field(default_factory=list)
-    warnings: list[str] = Field(default_factory=list)
 
 
-class ListingCreatePlatformCapability(BaseModel):
-    platform: Platform
-    enabled: bool
-    status: str
-    notes: str
 
 
-class ListingCreateScaffoldResponse(BaseModel):
-    message: str
-    supported_platforms: list[ListingCreatePlatformCapability] = Field(default_factory=list)
 
 
-class EbayCreateStartResponse(BaseModel):
-    message: str
-    status: str
 
 
 class PlatformListingMatchRequest(BaseModel):

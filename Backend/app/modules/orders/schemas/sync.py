@@ -81,6 +81,7 @@ class SalesImportApiSource(str, Enum):
     EBAY_MEKONG = "EBAY_MEKONG"
     EBAY_USAV = "EBAY_USAV"
     EBAY_DRAGON = "EBAY_DRAGON"
+    EBAY_PURCHASING = "EBAY_PURCHASING"
     WALMART = "WALMART"
 
 
@@ -89,6 +90,7 @@ class SalesImportFileSource(str, Enum):
     AMAZON_FBA_CSV = "AMAZON_FBA_CSV"
     SHIPSTATION_CUSTOMER_CSV = "SHIPSTATION_CUSTOMER_CSV"
     TRACKING_CSV = "TRACKING_CSV"
+    SHIPPING_STATUS_CSV = "SHIPPING_STATUS_CSV"
 
 
 class SalesImportApiRequest(BaseModel):

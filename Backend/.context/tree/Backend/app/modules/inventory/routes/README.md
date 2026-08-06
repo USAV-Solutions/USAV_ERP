@@ -1,4 +1,4 @@
-﻿# Backend\app\modules\inventory\routes
+# Backend\app\modules\inventory\routes
 
 ## What This Folder Does
 Inventory route handlers split by feature surface (variants, listings, images, etc.).
@@ -17,17 +17,10 @@ Inventory route handlers split by feature surface (variants, listings, images, e
 - Zoho composite sync resolves bundle/kit child dependencies from active child variants only; inactive child variants are ignored to avoid sending stale Zoho `item_id` values in composite mapped items.
 - Variants export endpoint `GET /variants/export/zoho-import.csv` now treats Kits like Bundles for `exclude_bundles=true` (both `B` and `K` are excluded).
 - Identity creation flow now auto-generates the base variant for `K` identities (same as Product/Part/Bundle), so downstream variant/search screens see newly created Kits immediately.
-- eBay publish route now uses Inventory API sequence (`PUT inventory_item` -> create/update `offer` -> `publish`) and stores `platform_metadata.publish_engine=inventory_api_v1`, `platform_metadata.offer_id`, and `external_ref_id=listingId`.
-- eBay draft defaults now set title from variant naming chain (`variant_name` first, then identity/family/SKU) and base price from the highest ECWID listing price for the same variant when ECWID rows exist.
-- eBay publish policy selection is now config-driven: payment policy + return policy (standard vs no-returns hook) + fulfillment policy (light/heavy/free via configured threshold and shipping mode flags), plus per-store `merchant_location_key`.
-- Publish accepts public image URLs directly; relative `/product-images/...` entries are normalized via `LISTING_PUBLIC_BASE_URL`, and invalid/non-public URLs return `400`.
-- eBay listing wizard image-send endpoint remains available as optional Media API flow, but publish validation no longer depends on EPS upload/signature gates.
-- New optional `POST /listings/ebay/ai-enrich` endpoint returns best-effort category/aspect/title/description/dimension suggestions with warning list; GraphQL/Gemini failures must not block manual publish path.
-- `ai-enrich` Gemini prompts intentionally mirror the prompt patterns used in `misc/Ebay_Listing/useAppLogic.ts` (HTML description template + package JSON estimate), and AI package values only fill missing dimensions/weight fields.
-- Listing creation UI scaffolding now has dedicated routes under `/listings/create/*`; these are intentional placeholders and return scaffold status until full creation flows are implemented.
 - Active Listings UI actions now rely on listing routes for `POST /listings/{id}/sync`, `POST /listings/{id}/match`, and `POST /listings/{id}/unmatch`; these currently update listing sync/match state in DB and do not call remote platform APIs directly.
 - Active Listings now supports bulk CSV import via `POST /listings/import/csv` (Admin/Sales): expected columns are `item_id` (external ref), `platform`, `inventory_db_sku_primary` (variant full SKU), and `item_name`/`listing_name`; platform values may come as list-like strings (for example `['amazon']`) and are normalized to internal platform enums.
 - CSV import response now includes per-row `created_logs`, `updated_logs`, and `errors` summaries (first 200 lines each), and server logs emit row-level create/update/skip messages for troubleshooting.
+- eBay Listing flow is handled under `/listings/ebay/*` (e.g., `/accounts`, `/categories`, `/ai/*`, `/publish`). It uses the Inventory API (`put_inventory_item`, `create_offer`, `publish_offer`) and Gemini for AI suggestions. The store-specific configurations (policy IDs) are read from `ebay-accounts.json` external file.
 
 ## Child Folders
 - (No child folders)

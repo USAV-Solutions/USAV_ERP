@@ -205,6 +205,61 @@ def test_normalize_ecwid_single_line_return_allocates_header_refund():
     assert record.items[0].refunded_amount == Decimal("52")
 
 
+def test_normalize_amazon_return_report_tsv_sets_return_quantities():
+    service = _build_service()
+    content = "\n".join(
+        [
+            "Order ID\tOrder date\tReturn request date\tReturn request status\tAmazon RMA ID\tMerchant SKU\tItem Name\tReturn quantity\tReturn Reason\tResolution\tOrder Amount\tOrder quantity\tRefunded Amount\tOrder Item ID",
+            "112-3068222-6171425\t15-Jun-2026\t21-Jun-2026\tApproved\tDHz4DwlHRRMA\tXT-4F5Q-ILMH\tBose Speaker\t1\tCR-MISSING_PARTS\tStandardRefund\t158.26\t2\t79.13\t162421756890761",
+        ]
+    )
+
+    records = service._normalize_amazon_csv_records(content)
+
+    assert len(records) == 1
+    record = records[0]
+    assert record.external_order_id == "112-3068222-6171425"
+    assert record.external_return_id == "DHz4DwlHRRMA"
+    assert record.source == "AMAZON_RETURN_REPORT"
+    assert record.fulfillment_channel.value == "SELF_FULFILLED"
+    assert record.normalized_status == ReturnNormalizedStatus.PARTIALLY_RETURNED
+    assert record.ordered_at is not None
+    assert record.items[0].external_item_id == "162421756890761"
+    assert record.items[0].external_sku == "XT-4F5Q-ILMH"
+    assert record.items[0].ordered_qty == 2
+    assert record.items[0].returned_qty == 1
+    assert record.items[0].cancelled_qty == 0
+    assert record.items[0].refunded_amount == Decimal("79.13")
+
+
+def test_normalize_amazon_fba_return_report_csv_sets_fba_return_quantity():
+    service = _build_service()
+    content = "\n".join(
+        [
+            '"return-date","order-id","sku","asin","fnsku","product-name","quantity","fulfillment-center-id","detailed-disposition","reason","status","license-plate-number","customer-comments"',
+            '"2026-06-20T07:32:45+00:00","113-2359450-5503402","QU-0W1L-CCVB","B0BDTJKS7R","X003GTWO9N","Wall Bracket","1","IND8","SELLABLE","DEFECTIVE","Unit returned to inventory","LPNGSAH5709183","Defective"',
+        ]
+    )
+
+    records = service._normalize_amazon_csv_records(content)
+
+    assert len(records) == 1
+    record = records[0]
+    assert record.external_order_id == "113-2359450-5503402"
+    assert record.external_return_id == "LPNGSAH5709183"
+    assert record.source == "AMAZON_FBA_RETURN_REPORT"
+    assert record.fulfillment_channel.value == "AMAZON_FBA"
+    assert record.normalized_status == ReturnNormalizedStatus.RETURNED
+    assert record.event_at is not None
+    assert record.source_status == "Unit returned to inventory"
+    assert record.source_substatus == "SELLABLE"
+    assert record.reason == "DEFECTIVE"
+    assert record.items[0].external_sku == "QU-0W1L-CCVB"
+    assert record.items[0].external_item_id == "X003GTWO9N"
+    assert record.items[0].returned_qty == 1
+    assert record.items[0].cancelled_qty == 0
+
+
 def test_normalize_walmart_partial_cancellation():
     service = _build_service()
     record = service._normalize_walmart_order_record(

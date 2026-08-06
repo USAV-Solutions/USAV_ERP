@@ -1,4 +1,6 @@
-import { ChangeEvent, Fragment, useRef, useState } from 'react'
+import { ChangeEvent, Fragment, useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+
 import {
   Alert,
   Autocomplete,
@@ -82,11 +84,14 @@ import TablePaginationWithPageJump from '../components/common/TablePaginationWit
 import OrderSummaryCards from '../components/common/OrderSummaryCards'
 import type { VariantSearchResult } from '../types/orders'
 
-const statusColor = {
+const statusColor: Record<PurchaseDeliverStatus, 'default' | 'success' | 'warning' | 'error' | 'info'> = {
   CREATED: 'default',
   BILLED: 'warning',
   DELIVERED: 'success',
-} as const
+  CANCELLED: 'error',
+  RETURNED: 'warning',
+  REFUNDED: 'info',
+}
 
 const itemStatusColor = {
   UNMATCHED: 'error',
@@ -581,14 +586,24 @@ function PurchaseOrderItemRow({ item, onChanged, onNotify }: PurchaseOrderItemRo
   )
 }
 
+function dateDaysAgo(days: number): string {
+  const value = new Date()
+  value.setDate(value.getDate() - days)
+  return value.toISOString().slice(0, 10)
+}
+
 export default function PurchasingManagement() {
   const queryClient = useQueryClient()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const isDelayedFilterApplied = searchParams.get('filter') === 'delayed'
 
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(50)
   const [sortBy, setSortBy] = useState<'order_date' | 'po_number' | 'total_amount' | 'created_at'>('order_date')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
-  const [deliverStatusFilter, setDeliverStatusFilter] = useState<PurchaseDeliverStatus | 'ALL'>('ALL')
+  const [deliverStatusFilter, setDeliverStatusFilter] = useState<PurchaseDeliverStatus | 'ALL'>(
+    isDelayedFilterApplied ? 'CREATED' : 'ALL'
+  )
   const [itemMatchFilter, setItemMatchFilter] = useState<'ALL' | 'MATCHED' | 'UNMATCHED'>('ALL')
   const [zohoSyncFilter, setZohoSyncFilter] = useState<ZohoSyncStatus | 'ALL'>('ALL')
   const [sourceFilter, setSourceFilter] = useState<string>('ALL')
@@ -596,7 +611,7 @@ export default function PurchasingManagement() {
   const [totalAmountSearch, setTotalAmountSearch] = useState('')
   const [totalAmountRange, setTotalAmountRange] = useState('0')
   const [orderDateFrom, setOrderDateFrom] = useState('')
-  const [orderDateTo, setOrderDateTo] = useState('')
+  const [orderDateTo, setOrderDateTo] = useState(isDelayedFilterApplied ? dateDaysAgo(6) : '')
   const [filtersDialogOpen, setFiltersDialogOpen] = useState(false)
   const [selectedPoId, setSelectedPoId] = useState<number | null>(null)
   const [createPoOpen, setCreatePoOpen] = useState(false)
@@ -660,6 +675,33 @@ export default function PurchasingManagement() {
     source: 'MANUAL',
     is_stationery: false,
     notes: '',
+  })
+
+  useEffect(() => {
+    if (searchParams.get('filter') === 'delayed') {
+      setDeliverStatusFilter('CREATED')
+      setOrderDateTo(dateDaysAgo(6))
+      setOrderDateFrom('')
+      setItemMatchFilter('ALL')
+      setZohoSyncFilter('ALL')
+      setSourceFilter('ALL')
+      setPoNumberSearch('')
+      setTotalAmountSearch('')
+      setTotalAmountRange('0')
+      setSortBy('order_date')
+      setSortDir('desc')
+      setPage(0)
+    }
+  }, [searchParams])
+
+  const delayedPurchasesQuery = useQuery({
+    queryKey: ['delayed-purchases-count'],
+    queryFn: () =>
+      listPurchaseOrdersPaged({
+        deliverStatus: 'CREATED',
+        orderDateTo: dateDaysAgo(6),
+        limit: 100,
+      }),
   })
 
   const { data: vendors = [] } = useQuery({ queryKey: ['vendors'], queryFn: listVendors })
@@ -1083,6 +1125,9 @@ export default function PurchasingManagement() {
     setSortBy('order_date')
     setSortDir('desc')
     setPage(0)
+    if (searchParams.get('filter')) {
+      setSearchParams({})
+    }
   }
 
   return (
@@ -1150,6 +1195,32 @@ export default function PurchasingManagement() {
         unmatchedOrders={purchaseSummary?.unmatchedOrders ?? 0}
         unmatchedItems={purchaseSummary?.unmatchedItems ?? 0}
       />
+
+      {delayedPurchasesQuery.data && delayedPurchasesQuery.data.length > 0 && (
+        <Alert
+          severity="warning"
+          sx={{ mb: 3 }}
+          action={
+            <Button
+              color="inherit"
+              size="small"
+              onClick={() => {
+                if (isDelayedFilterApplied) {
+                  clearAllFilters()
+                } else {
+                  setSearchParams({ filter: 'delayed' })
+                }
+              }}
+            >
+              {isDelayedFilterApplied ? 'Clear Filter' : 'Filter Delayed POs'}
+            </Button>
+          }
+        >
+          {delayedPurchasesQuery.data.length === 1
+            ? "1 purchase order has been in 'CREATED' status for over 6 days."
+            : `${delayedPurchasesQuery.data.length} purchase orders have been in 'CREATED' status for over 6 days.`}
+        </Alert>
+      )}
 
       <Grid container spacing={2}>
         <Grid item xs={12}>
@@ -1757,6 +1828,9 @@ export default function PurchasingManagement() {
                 <MenuItem value="CREATED">CREATED</MenuItem>
                 <MenuItem value="BILLED">BILLED</MenuItem>
                 <MenuItem value="DELIVERED">DELIVERED</MenuItem>
+                <MenuItem value="CANCELLED">CANCELLED</MenuItem>
+                <MenuItem value="RETURNED">RETURNED</MenuItem>
+                <MenuItem value="REFUNDED">REFUNDED</MenuItem>
               </Select>
             </FormControl>
             <TextField
@@ -1973,6 +2047,9 @@ export default function PurchasingManagement() {
                 <MenuItem value="CREATED">CREATED</MenuItem>
                 <MenuItem value="BILLED">BILLED</MenuItem>
                 <MenuItem value="DELIVERED">DELIVERED</MenuItem>
+                <MenuItem value="CANCELLED">CANCELLED</MenuItem>
+                <MenuItem value="RETURNED">RETURNED</MenuItem>
+                <MenuItem value="REFUNDED">REFUNDED</MenuItem>
               </Select>
             </FormControl>
 

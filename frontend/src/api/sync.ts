@@ -19,6 +19,12 @@ export interface ForceSyncPurchasePeriodResponse {
   ids: number[]
 }
 
+export interface OrderSyncStatusResponse {
+  id: number
+  status: 'PENDING' | 'QUEUED' | 'SYNCING' | 'SYNCED' | 'ERROR' | 'DIRTY'
+  error: string | null
+}
+
 export async function forceSyncItem(variantId: number): Promise<ForceSyncResponse> {
   const { data } = await axiosClient.post<ForceSyncResponse>(SYNC.ITEM(variantId))
   return data
@@ -26,6 +32,11 @@ export async function forceSyncItem(variantId: number): Promise<ForceSyncRespons
 
 export async function forceSyncOrder(orderId: number): Promise<ForceSyncResponse> {
   const { data } = await axiosClient.post<ForceSyncResponse>(SYNC.ORDER(orderId))
+  return data
+}
+
+export async function getOrderSyncStatuses(orderIds: number[]): Promise<OrderSyncStatusResponse[]> {
+  const { data } = await axiosClient.post<OrderSyncStatusResponse[]>(SYNC.ORDER_STATUSES, { order_ids: orderIds })
   return data
 }
 

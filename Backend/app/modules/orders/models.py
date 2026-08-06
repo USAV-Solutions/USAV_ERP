@@ -50,6 +50,7 @@ class OrderPlatform(str, enum.Enum):
     EBAY_MEKONG = "EBAY_MEKONG"
     EBAY_USAV = "EBAY_USAV"
     EBAY_DRAGON = "EBAY_DRAGON"
+    EBAY_PURCHASING = "EBAY_PURCHASING"
     ECWID = "ECWID"
     SHOPIFY = "SHOPIFY"
     WALMART = "WALMART"
@@ -66,6 +67,8 @@ class OrderStatus(str, enum.Enum):
     DELIVERED = "DELIVERED"
     CANCELLED = "CANCELLED"
     REFUNDED = "REFUNDED"
+    PARTIALLY_REFUNDED = "PARTIALLY_REFUNDED"
+    RETURN = "RETURN"
     ON_HOLD = "ON_HOLD"
     ERROR = "ERROR"
 
@@ -101,6 +104,8 @@ class ShippingStatus(str, enum.Enum):
     PACKED = "PACKED"
     SHIPPING = "SHIPPING"
     DELIVERED = "DELIVERED"
+    RETURNED = "RETURNED"
+    REFUNDED = "REFUNDED"
 
 
 class IntegrationSyncStatus(str, enum.Enum):
@@ -222,6 +227,10 @@ class Order(Base, ZohoSyncMixin, TimestampMixin):
         default=ZohoSyncStatus.PENDING,
         comment="Outbound Zoho sync status.",
     )
+    zoho_marked_as_fulfilled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false",
+        comment="Whether this order was successfully marked as fulfilled in Zoho.",
+    )
     shipping_status: Mapped[ShippingStatus] = mapped_column(
         Enum(ShippingStatus, name="shipping_status_enum", create_constraint=False),
         nullable=False,
@@ -276,6 +285,16 @@ class Order(Base, ZohoSyncMixin, TimestampMixin):
     )
     carrier: Mapped[Optional[str]] = mapped_column(
         String(50), nullable=True, comment="Shipping carrier (UPS, FedEx, USPS).",
+    )
+
+    # ---- Verification ----
+    verify_status: Mapped[Optional[str]] = mapped_column(
+        String(50), nullable=True, default="UNVERIFIED", server_default="UNVERIFIED",
+        comment="Verification status: UNVERIFIED, VERIFIED, READY, ERROR_MISSING_TRACKING, ERROR_COUNT_MISMATCH.",
+    )
+    packing_metadata: Mapped[Optional[dict]] = mapped_column(
+        JSONB, nullable=True, default={}, server_default="{}",
+        comment="Metadata containing links to Synology NAS photos.",
     )
 
     # ---- Metadata ----

@@ -61,6 +61,7 @@ export interface ReturnRecordBrief {
   source_status: string | null
   source_substatus: string | null
   reason: string | null
+  fulfillment_channel: string
   order_total_amount: string
   refunded_amount: string
   currency: string
@@ -79,6 +80,15 @@ export interface ReturnRecordBrief {
 export interface ReturnRecordDetail extends ReturnRecordBrief {
   raw_payload: Record<string, unknown> | null
   items: ReturnItemDetail[]
+}
+
+export interface ReturnRecordUpdate {
+  normalized_status?: ReturnNormalizedStatus
+  reason?: string
+  customer_name?: string
+  customer_email?: string
+  refunded_amount?: number
+  zoho_sync_status?: ReturnZohoSyncStatus
 }
 
 export interface ReturnListResponse {

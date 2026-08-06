@@ -49,6 +49,7 @@ _PLATFORM_MAP: dict[str, OrderPlatform] = {
     "EBAY_MEKONG": OrderPlatform.EBAY_MEKONG,
     "EBAY_USAV": OrderPlatform.EBAY_USAV,
     "EBAY_DRAGON": OrderPlatform.EBAY_DRAGON,
+    "EBAY_PURCHASING": OrderPlatform.EBAY_PURCHASING,
     "ECWID": OrderPlatform.ECWID,
     "SHOPIFY": OrderPlatform.SHOPIFY,
     "WALMART": OrderPlatform.WALMART,
@@ -61,6 +62,7 @@ _ORDER_TO_ENTITY_PLATFORM: dict[OrderPlatform, Platform] = {
     OrderPlatform.EBAY_MEKONG: Platform.EBAY_MEKONG,
     OrderPlatform.EBAY_USAV: Platform.EBAY_USAV,
     OrderPlatform.EBAY_DRAGON: Platform.EBAY_DRAGON,
+    OrderPlatform.EBAY_PURCHASING: Platform.EBAY_PURCHASING,
     OrderPlatform.ECWID: Platform.ECWID,
     OrderPlatform.WALMART: Platform.WALMART,
 }
@@ -70,6 +72,7 @@ _MARKETPLACE_ORDER_PLATFORMS: set[OrderPlatform] = {
     OrderPlatform.EBAY_MEKONG,
     OrderPlatform.EBAY_USAV,
     OrderPlatform.EBAY_DRAGON,
+    OrderPlatform.EBAY_PURCHASING,
     OrderPlatform.WALMART,
 }
 
@@ -278,6 +281,7 @@ class OrderSyncService:
         *,
         source: Optional[str] = None,
         fulfillment_channel: Optional[OrderFulfillmentChannel] = None,
+        skip_existing: bool = False,
     ) -> SyncResponse:
         """
         Fetch orders within an explicit date range.
@@ -309,6 +313,7 @@ class OrderSyncService:
                     response,
                     source=source or self._platform_source(platform_name),
                     fulfillment_channel=fulfillment_channel,
+                    skip_existing=skip_existing,
                 )
                 if ingest_state == "unchanged":
                     response.skipped_duplicates += 1
@@ -493,6 +498,7 @@ class OrderSyncService:
         *,
         source: str,
         fulfillment_channel: Optional[OrderFulfillmentChannel] = None,
+        skip_existing: bool = False,
     ) -> str:
         """
         Insert or update a single external order + items.
@@ -504,6 +510,8 @@ class OrderSyncService:
             platform, ext.platform_order_id,
         )
         if existing is not None:
+            if skip_existing:
+                return "unchanged"
             changed = await self._update_existing_order(
                 existing=existing,
                 ext=ext,

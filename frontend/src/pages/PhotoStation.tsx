@@ -28,7 +28,7 @@ import { useAuth } from '../hooks/useAuth'
 
 interface PendingOrder {
   id: number
-  external_order_id: str
+  external_order_id: string
   external_order_number?: string
   platform: string
   ordered_at?: string

@@ -39,6 +39,9 @@ class PurchaseDeliverStatus(str, enum.Enum):
     CREATED = "CREATED"
     BILLED = "BILLED"
     DELIVERED = "DELIVERED"
+    CANCELLED = "CANCELLED"
+    RETURNED = "RETURNED"
+    REFUNDED = "REFUNDED"
 
 
 class PurchaseOrderItemStatus(str, enum.Enum):

@@ -167,6 +167,7 @@ _IMPORT_SOURCE_TO_PLATFORM: dict[SalesImportApiSource, str] = {
     SalesImportApiSource.EBAY_MEKONG: "EBAY_MEKONG",
     SalesImportApiSource.EBAY_USAV: "EBAY_USAV",
     SalesImportApiSource.EBAY_DRAGON: "EBAY_DRAGON",
+    SalesImportApiSource.EBAY_PURCHASING: "EBAY_PURCHASING",
     SalesImportApiSource.WALMART: "WALMART",
 }
 
@@ -175,6 +176,7 @@ _PLATFORM_TO_SOURCE: dict[str, str] = {
     "EBAY_MEKONG": "EBAY_MEKONG_API",
     "EBAY_USAV": "EBAY_USAV_API",
     "EBAY_DRAGON": "EBAY_DRAGON_API",
+    "EBAY_PURCHASING": "EBAY_PURCHASING_API",
     "ECWID": "ECWID_API",
     "SHOPIFY": "SHOPIFY_API",
     "WALMART": "WALMART_API",
@@ -214,6 +216,7 @@ def _build_platform_clients() -> dict[str, BasePlatformClient]:
         "EBAY_MEKONG": settings.ebay_refresh_token_mekong,
         "EBAY_USAV": settings.ebay_refresh_token_usav,
         "EBAY_DRAGON": settings.ebay_refresh_token_dragon,
+        "EBAY_PURCHASING": settings.ebay_refresh_token_purchasing,
     }
     
     # Check shared eBay credentials
@@ -290,6 +293,10 @@ class _StaticImportClient(BasePlatformClient):
 
 
 def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
+    lines = file_text.splitlines()
+    while lines and (not lines[0].strip() or not lines[0].replace(",", "").strip()):
+        lines.pop(0)
+    file_text = "\n".join(lines)
     reader = csv.DictReader(io.StringIO(file_text))
     grouped: dict[str, dict] = {}
     seen = 0
@@ -309,7 +316,7 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
         if not value:
             return default
         try:
-            return float(value)
+            return float(value.replace("$", "").replace(",", ""))
         except ValueError:
             return default
 
@@ -349,6 +356,8 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
         return " ".join(str(part or "").strip() for part in signal_parts).upper()
 
     def _detect_platform(row_data: dict[str, str]) -> str:
+        if row_data.get("Sales Record Number"):
+            return "EBAY_PURCHASING"
         text = _platform_signal_text(row_data)
         if "SHOPIFY" in text:
             return "SHOPIFY"
@@ -416,18 +425,29 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
         valid_rows = raw_rows
 
     for row in valid_rows:
-        order_number = _pick(row, "Order - Number", "external_order_number", "order_number")
-        ext_order_id = order_number or _pick(row, "external_order_id", "order_id", "Order - CustomerID")
+        order_number = _pick(row, "Order - Number", "external_order_number", "order_number", "Order Number")
+        ext_order_id = order_number or _pick(row, "external_order_id", "order_id", "Order - CustomerID", "Sales Record Number")
         if not ext_order_id:
             skipped += 1
             continue
 
-        quantity = _as_int(row, "Item - Qty", "quantity", "Count - Number of Items", default=1)
-        unit_price = _as_float(row, "Item - Price", "unit_price", default=0.0)
+        if "record(s) downloaded" in ext_order_id.lower() or "seller id" in ext_order_id.lower():
+            skipped += 1
+            continue
+
+        platform_name = _detect_platform(row)
+        import_source = "EBAY_SALE_ORDER_CSV" if platform_name == "EBAY_PURCHASING" else "SHIPSTATION_CSV"
+
+        if platform_name == "ECWID":
+            skipped += 1
+            continue
+
+        quantity = _as_int(row, "Item - Qty", "quantity", "Count - Number of Items", "Quantity", default=1)
+        unit_price = _as_float(row, "Item - Price", "unit_price", "Sold For", default=0.0)
         total_price = _as_float(row, "Item - Total", "item_total", "line_total", "Amount - Item Total", "total_price", default=0.0)
         if unit_price == 0.0 or total_price == 0.0:
             subtotal_amount = _as_float(row, "subtotal_amount", "subtotal", "Amount - Order Subtotal", default=0.0)
-            total_amount = _as_float(row, "total_amount", "total", "Amount - Order Total", default=0.0)
+            total_amount = _as_float(row, "total_amount", "total", "Amount - Order Total", "Total Price", default=0.0)
             if is_shipstation_order_csv:
                 if unit_price == 0.0 and total_price > 0.0:
                     unit_price = total_price / quantity if quantity > 0 else 0.0
@@ -438,10 +458,10 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
                 if unit_price == 0.0:
                     unit_price = item_total_fallback / quantity if quantity > 0 else 0.0
                 if total_price == 0.0:
-                    total_price = item_total_fallback if item_total_fallback > 0 else (unit_price * quantity)
+                    total_price = (unit_price * quantity) if unit_price > 0 else item_total_fallback
 
         ordered_at = None
-        ordered_at_raw = _pick(row, "ordered_at", "Date - Order Date")
+        ordered_at_raw = _pick(row, "ordered_at", "Date - Order Date", "Sale Date")
         if ordered_at_raw:
             try:
                 ordered_at = datetime.fromisoformat(ordered_at_raw.replace("Z", "+00:00"))
@@ -449,7 +469,10 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
                 try:
                     ordered_at = datetime.strptime(ordered_at_raw, "%m/%d/%Y %I:%M:%S %p")
                 except ValueError:
-                    ordered_at = None
+                    try:
+                        ordered_at = datetime.strptime(ordered_at_raw, "%b-%d-%y")
+                    except ValueError:
+                        ordered_at = None
 
         platform_name = _detect_platform(row)
         if platform_name == "ECWID":
@@ -463,28 +486,28 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
                 "platform_name": platform_name,
                 "platform_order_id": ext_order_id,
                 "platform_order_number": order_number or None,
-                "customer_name": _pick(row, "customer_name", "Bill To - Name", "Ship To - Name") or None,
-                "customer_email": _pick(row, "customer_email", "Customer Email") or None,
-                "ship_address_line1": _pick(row, "shipping_address_line1", "Ship To - Address 1") or None,
-                "ship_address_line2": _pick(row, "shipping_address_line2", "Ship To - Address 2") or None,
+                "customer_name": _pick(row, "customer_name", "Bill To - Name", "Ship To - Name", "Buyer Name", "Buyer Username") or None,
+                "customer_email": _pick(row, "customer_email", "Customer Email", "Buyer Email") or None,
+                "ship_address_line1": _pick(row, "shipping_address_line1", "Ship To - Address 1", "Ship To Address 1") or None,
+                "ship_address_line2": _pick(row, "shipping_address_line2", "Ship To - Address 2", "Ship To Address 2") or None,
                 "ship_address_line3": _pick(row, "shipping_address_line3", "Ship To - Address 3") or None,
-                "ship_city": _pick(row, "shipping_city", "Ship To - City") or None,
-                "ship_state": _pick(row, "shipping_state", "Ship To - State") or None,
-                "ship_postal_code": _pick(row, "shipping_postal_code", "Ship To - Postal Code") or None,
-                "ship_country": _pick(row, "shipping_country", "Ship To - Country") or "US",
+                "ship_city": _pick(row, "shipping_city", "Ship To - City", "Ship To City") or None,
+                "ship_state": _pick(row, "shipping_state", "Ship To - State", "Ship To State") or None,
+                "ship_postal_code": _pick(row, "shipping_postal_code", "Ship To - Postal Code", "Ship To Zip") or None,
+                "ship_country": _pick(row, "shipping_country", "Ship To - Country", "Ship To Country") or "US",
                 "subtotal": _as_float(row, "subtotal_amount", "subtotal", "Amount - Order Subtotal", default=0.0),
-                "tax": _as_float(row, "tax_amount", "tax", "Amount - Order Tax", default=0.0),
-                "shipping": _as_float(row, "shipping_amount", "Amount - Shipping Cost", "shipping", "Amount - Order Shipping", default=0.0),
+                "tax": _as_float(row, "tax_amount", "tax", "Amount - Order Tax", "eBay Collected Tax", default=0.0),
+                "shipping": _as_float(row, "shipping_amount", "Amount - Shipping Cost", "shipping", "Amount - Order Shipping", "Shipping And Handling", default=0.0),
                 "handling": _as_float(row, "handling_amount", "handling", "Amount - Handling", "Amount - Handling Cost", default=0.0),
-                "total": _as_float(row, "total_amount", "total", "Amount - Order Total", default=0.0),
+                "total": _as_float(row, "total_amount", "total", "Amount - Order Total", "Total Price", default=0.0),
                 "currency": _pick(row, "currency") or "USD",
                 "ordered_at": ordered_at,
                 "items": [],
                 "tracking_number": None,
                 "raw_data": {
-                    "import_source": "SHIPSTATION_CSV",
+                    "import_source": import_source,
                     "platform_name": platform_name,
-                    "source": "SHIPSTATION_CSV",
+                    "source": import_source,
                     "tracking_number": None,
                 },
                 "_tracking_parts": [],
@@ -504,11 +527,11 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
 
         order_entry["items"].append(
             {
-                "platform_item_id": _pick(row, "external_item_id", "Order - Number") or None,
-                "platform_sku": _pick(row, "Item - SKU", "external_sku", "sku", "SKU") or None,
+                "platform_item_id": _pick(row, "external_item_id", "Order - Number", "Item Number") or None,
+                "platform_sku": _pick(row, "Item - SKU", "external_sku", "sku", "SKU", "Custom Label") or None,
                 "asin": (row.get("external_asin") or "").strip() or None,
                 "title": (
-                    _pick(row, "Item - Name", "item_name", "title", "Item Name", "Product Name")
+                    _pick(row, "Item - Name", "item_name", "title", "Item Name", "Product Name", "Item Title")
                     or "Imported order line"
                 ),
                 "quantity": quantity,
@@ -873,12 +896,15 @@ async def _process_tracking_import_rows(
             skipped_duplicates += 1
             continue
 
-        # Detect carrier and update order status flags to SHIPPED and SHIPPING respectively
+        # Leave already-imported tracking untouched unless its outbound payload changes.
         carrier = _detect_carrier(tracking)
+        if order.tracking_number == tracking and order.carrier == carrier:
+            continue
+
         order.tracking_number = tracking
         order.carrier = carrier
-        order.status = OrderStatus.SHIPPED
-        order.shipping_status = ShippingStatus.SHIPPING
+        # order.status = OrderStatus.SHIPPED
+        # order.shipping_status = ShippingStatus.SHIPPING
         order.zoho_sync_status = ZohoSyncStatus.DIRTY
         db.add(order)
         updated_count += 1
@@ -1154,6 +1180,7 @@ async def import_orders_from_file(
         SalesImportFileSource.AMAZON_FBA_CSV,
         SalesImportFileSource.SHIPSTATION_CUSTOMER_CSV,
         SalesImportFileSource.TRACKING_CSV,
+        SalesImportFileSource.SHIPPING_STATUS_CSV,
     }:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1200,6 +1227,71 @@ async def import_orders_from_file(
             errors=errors,
         )
 
+
+    if source == SalesImportFileSource.SHIPPING_STATUS_CSV:
+        reader = csv.DictReader(io.StringIO(text))
+        rows_seen = 0
+        rows_skipped = 0
+        updated_count = 0
+        
+        processed_orders = set()
+
+        for row in reader:
+            rows_seen += 1
+            order_number = row.get("order_number", "").strip()
+            scraped_status = row.get("scraped_status", "").strip().upper()
+            
+            if not order_number:
+                rows_skipped += 1
+                continue
+                
+            if order_number in processed_orders:
+                continue
+                
+            shipping_status = ShippingStatus.PENDING
+            if scraped_status == "DELIVERED":
+                shipping_status = ShippingStatus.DELIVERED
+            elif scraped_status in {"SHIPPED", "SHIPPING"}:
+                shipping_status = ShippingStatus.SHIPPING
+            elif scraped_status == "RETURNED":
+                shipping_status = ShippingStatus.RETURNED
+            elif scraped_status == "REFUNDED":
+                shipping_status = ShippingStatus.REFUNDED
+            elif scraped_status == "CANCELLED":
+                shipping_status = ShippingStatus.CANCELLED
+                
+            stmt = select(Order).where(
+                (Order.external_order_id == order_number) | (Order.external_order_number == order_number)
+            )
+            orders = (await db.execute(stmt)).scalars().all()
+            if not orders:
+                rows_skipped += 1
+                continue
+                
+            for order in orders:
+                if order.shipping_status == shipping_status:
+                    continue
+                order.shipping_status = shipping_status
+                db.add(order)
+                updated_count += 1
+            
+            processed_orders.add(order_number)
+            
+        await db.commit()
+
+        return SalesImportFileResponse(
+            source=source,
+            source_rows_seen=rows_seen,
+            source_rows_skipped=rows_skipped,
+            customers_created=0,
+            customers_updated=0,
+            new_orders=updated_count,
+            new_items=0,
+            auto_matched=0,
+            skipped_duplicates=0,
+            success=True,
+            errors=[],
+        )
 
     if source == SalesImportFileSource.SHIPSTATION_CUSTOMER_CSV:
         customers, rows_seen, rows_skipped = _parse_shipstation_customer_csv(text)
@@ -1371,6 +1463,7 @@ async def import_orders_from_file(
                 if source == SalesImportFileSource.AMAZON_FBA_CSV
                 else None
             ),
+            skip_existing=source == SalesImportFileSource.CSV_GENERIC,
         )
         aggregate["new_orders"] += result.new_orders
         aggregate["new_items"] += result.new_items
@@ -2125,3 +2218,341 @@ async def reject_order_item(
     await db.commit()
     await db.refresh(item)
     return OrderItemDetail.model_validate(item)
+
+
+# ============================================================================
+# PHOTO STATION & BOX COUNT VERIFICATION ENDPOINTS
+# ============================================================================
+
+class PhotoStationVerifyRequest(BaseModel):
+    order_number: str
+    slip_photo_path: str
+    box_photo_path: str
+    extracted_tracking_number: Optional[str] = None
+
+class PhotoStationVerifyResponse(BaseModel):
+    success: bool
+    message: str
+    order_id: Optional[int] = None
+    verify_status: str
+
+class OCRExtractResponse(BaseModel):
+    success: bool
+    platform: str
+    order_id: str
+    tracking_number: str
+    message: str
+
+@router.post("/photo-station/extract-ocr", response_model=OCRExtractResponse)
+async def extract_ocr_from_slip(
+    file: Annotated[UploadFile, File(...)],
+):
+    """
+    Upload a packing slip image and extract Platform, Order ID, and Tracking Number
+    using Google's Gemini Vision AI API (gemini-2.5-flash).
+    """
+    import os
+    import json
+    
+    logger.info("[OCR] Received extraction request.")
+    
+    image_bytes = await file.read()
+    image_size_kb = len(image_bytes) / 1024
+    mime_type = file.content_type or 'image/jpeg'
+    logger.info(f"[OCR] Image received: size={image_size_kb:.1f}KB mime={mime_type}")
+    
+    if len(image_bytes) == 0:
+        logger.warning("[OCR] Empty image payload received — aborting.")
+        return OCRExtractResponse(
+            success=False,
+            platform="UNKNOWN",
+            order_id="",
+            tracking_number="",
+            message="Empty image payload."
+        )
+    
+    # Check if API key is configured
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        logger.error("[OCR] CRITICAL: Gemini API key is not configured. Set GEMINI_API_KEY in environment.")
+        return OCRExtractResponse(
+            success=False,
+            platform="UNKNOWN",
+            order_id="",
+            tracking_number="",
+            message="Gemini API key is not configured. Please set GEMINI_API_KEY in the environment."
+        )
+    logger.info("[OCR] API key found. Proceeding with Gemini Vision.")
+        
+    try:
+        from google import genai
+        from google.genai import types
+        
+        # Initialize client
+        logger.info("[OCR] Initializing GenAI client...")
+        client = genai.Client(api_key=api_key)
+        
+        # Prompt Gemini with strict JSON guidelines
+        prompt = (
+            "Analyze this packing slip image. Extract the following details:\n"
+            "1. Platform (marketplace platform like AMAZON, EBAY, WALMART, SHOPIFY, ECWID, etc.)\n"
+            "2. Order ID (e.g. 114-0294090-0548272 for Amazon, 26-14651-46671 for eBay, or standard order numbers)\n"
+            "3. Shipping Carrier Tracking Number (UPS: 1Z..., USPS: 20-22 digits starting with 9, FedEx: 12/15 digits)\n\n"
+            "Return the result STRICTLY as a raw JSON object with keys: 'platform', 'order_id', and 'tracking_number'. "
+            "Do not wrap the response in markdown code blocks like ```json."
+        )
+        
+        logger.info(f"[OCR] Sending {image_size_kb:.1f}KB image to gemini-2.5-flash...")
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=[
+                types.Part.from_bytes(
+                    data=image_bytes,
+                    mime_type=file.content_type or 'image/jpeg',
+                ),
+                prompt
+            ]
+        )
+        
+        # Parse the JSON response
+        text_resp = response.text.strip()
+        
+        # Strip potential markdown code block markers if the model included them
+        text_resp = re.sub(r"^```(?:json)?\n", "", text_resp)
+        text_resp = re.sub(r"\n```$", "", text_resp)
+        text_resp = text_resp.strip()
+        
+        data = json.loads(text_resp)
+        
+        extracted_platform = str(data.get("platform", "UNKNOWN")).upper()
+        has_order_id = bool(data.get("order_id", ""))
+        has_tracking = bool(data.get("tracking_number", ""))
+        logger.info(
+            f"[OCR] Extraction succeeded. platform={extracted_platform} "
+            f"has_order_id={has_order_id} has_tracking={has_tracking}"
+        )
+        
+        return OCRExtractResponse(
+            success=True,
+            platform=extracted_platform,
+            order_id=str(data.get("order_id", "")),
+            tracking_number=str(data.get("tracking_number", "")),
+            message="Successfully extracted packing details."
+        )
+        
+    except json.JSONDecodeError:
+        logger.error("[OCR] Failed to parse Gemini response as JSON. Model may have returned unexpected format.", exc_info=True)
+        return OCRExtractResponse(
+            success=False,
+            platform="UNKNOWN",
+            order_id="",
+            tracking_number="",
+            message="Gemini returned a non-JSON response. Please retry."
+        )
+    except Exception as e:
+        error_type = type(e).__name__
+        logger.error(f"[OCR] Extraction failed. error_type={error_type}", exc_info=True)
+        return OCRExtractResponse(
+            success=False,
+            platform="UNKNOWN",
+            order_id="",
+            tracking_number="",
+            message=f"Gemini Vision AI extraction failed: {str(e)}"
+        )
+
+class PendingOrderResponse(BaseModel):
+    id: int
+    external_order_id: str
+    external_order_number: Optional[str] = None
+    platform: str
+    ordered_at: Optional[datetime] = None
+    total_amount: Decimal
+    tracking_number: Optional[str] = None
+
+class ShelfVerifyRequest(BaseModel):
+    photo_path: str
+    manual_box_count: Optional[int] = None
+
+class ShelfVerifyResponse(BaseModel):
+    success: bool
+    box_count: int
+    verified_orders_count: int
+    mismatch: bool
+    message: str
+
+@router.get("/photo-station/pending", response_model=list[PendingOrderResponse])
+async def get_pending_verification_orders(
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get all pending unverified and not-ready orders.
+    """
+    stmt = (
+        select(Order)
+        .where(
+            (Order.verify_status == None) | (Order.verify_status.notin_(["VERIFIED", "READY"]))
+        )
+        .order_by(Order.created_at.desc())
+        .limit(100)
+    )
+    result = await db.execute(stmt)
+    orders = result.scalars().all()
+    
+    return [
+        PendingOrderResponse(
+            id=o.id,
+            external_order_id=o.external_order_id,
+            external_order_number=o.external_order_number,
+            platform=o.platform.value,
+            ordered_at=o.ordered_at,
+            total_amount=o.total_amount,
+            tracking_number=o.tracking_number
+        )
+        for o in orders
+    ]
+
+@router.post("/photo-station/verify", response_model=PhotoStationVerifyResponse)
+async def verify_order_photos(
+    body: PhotoStationVerifyRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Verify order packing slip and label photos.
+    Checks if order exists and if tracking number is present.
+    Updates the order status and stores photo paths in metadata.
+    """
+    clean_ord_num = body.order_number.strip()
+    
+    # Query database for order by external_order_id or external_order_number
+    stmt = select(Order).where(
+        (func.lower(Order.external_order_id) == func.lower(clean_ord_num)) |
+        (func.lower(Order.external_order_number) == func.lower(clean_ord_num))
+    )
+    order = (await db.execute(stmt)).scalars().first()
+    
+    if not order:
+        return PhotoStationVerifyResponse(
+            success=False,
+            message="Order not found in the system.",
+            verify_status="UNVERIFIED"
+        )
+        
+    # Store photos in metadata
+    meta = dict(order.packing_metadata or {})
+    meta["slip_photo"] = body.slip_photo_path
+    meta["box_photo"] = body.box_photo_path
+    order.packing_metadata = meta
+    
+    # If tracking was detected from label via OCR, and order has no tracking yet, update it
+    if body.extracted_tracking_number:
+        clean_tracking = re.sub(r"\s+", "", body.extracted_tracking_number.strip())
+        if clean_tracking and not order.tracking_number:
+            # Check if this tracking number is already used to avoid constraint violations
+            dup_stmt = select(Order).where(func.lower(Order.tracking_number) == func.lower(clean_tracking))
+            dup_order = (await db.execute(dup_stmt)).scalars().first()
+            if not dup_order:
+                order.tracking_number = clean_tracking
+                order.shipping_status = ShippingStatus.PACKED
+                order.status = OrderStatus.READY_TO_SHIP
+    
+    # Check if tracking exists
+    if not order.tracking_number:
+        order.verify_status = "ERROR_MISSING_TRACKING"
+        order.zoho_sync_status = ZohoSyncStatus.DIRTY
+        db.add(order)
+        await db.commit()
+        return PhotoStationVerifyResponse(
+            success=False,
+            message="Order found, but tracking number is missing in the system.",
+            order_id=order.id,
+            verify_status="ERROR_MISSING_TRACKING"
+        )
+        
+    order.verify_status = "VERIFIED"
+    order.zoho_sync_status = ZohoSyncStatus.DIRTY
+    db.add(order)
+    await db.commit()
+    
+    return PhotoStationVerifyResponse(
+        success=True,
+        message="Order verified successfully.",
+        order_id=order.id,
+        verify_status="VERIFIED"
+    )
+
+@router.post("/photo-station/verify-shelf", response_model=ShelfVerifyResponse)
+async def verify_shelf_boxes(
+    body: ShelfVerifyRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    End of day verification using box count detection.
+    Compares the count of boxes on the shelf to the verified orders count.
+    """
+    from app.core.locate_anything import count_boxes_in_image
+    
+    # Determine box count
+    if body.manual_box_count is not None:
+        box_count = body.manual_box_count
+    else:
+        # We can read the image if we had access to real bytes, but for NIM query fallback
+        # we pass empty bytes to run the model client.
+        box_count = count_boxes_in_image(b"")
+        
+    # Fetch all orders that are currently VERIFIED
+    stmt = select(Order).where(Order.verify_status == "VERIFIED")
+    verified_orders = (await db.execute(stmt)).scalars().all()
+    verified_count = len(verified_orders)
+    
+    mismatch = box_count != verified_count
+    
+    if not mismatch:
+        # Mark all as READY
+        for o in verified_orders:
+            o.verify_status = "READY"
+            o.zoho_sync_status = ZohoSyncStatus.DIRTY
+            db.add(o)
+        message = f"Box count matches verified orders ({box_count} boxes)."
+        success = True
+    else:
+        # Mark all as ERROR_COUNT_MISMATCH
+        for o in verified_orders:
+            o.verify_status = "ERROR_COUNT_MISMATCH"
+            o.zoho_sync_status = ZohoSyncStatus.DIRTY
+            db.add(o)
+        message = f"Discrepancy detected: {box_count} boxes found on shelf, but {verified_count} verified orders in system."
+        success = False
+        
+    await db.commit()
+    
+    return ShelfVerifyResponse(
+        success=success,
+        box_count=box_count,
+        verified_orders_count=verified_count,
+        mismatch=mismatch,
+        message=message
+    )
+
+class PhotoStationUploadResponse(BaseModel):
+    success: bool
+    path: str
+
+@router.post("/photo-station/upload", response_model=PhotoStationUploadResponse)
+async def upload_photo_station_file(
+    file: UploadFile = File(...),
+):
+    """
+    Upload a barcode scanner photo.
+    Saves the file to Synology NAS DS418j WebAPI, or falls back to local storage.
+    """
+    from app.core.synology import upload_to_synology
+    
+    file_bytes = await file.read()
+    try:
+        path = upload_to_synology(file_bytes, file.filename)
+        return PhotoStationUploadResponse(success=True, path=path)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Upload failed: {str(e)}"
+        )

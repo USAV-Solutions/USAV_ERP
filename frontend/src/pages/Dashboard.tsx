@@ -1,5 +1,8 @@
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { listPurchaseOrdersPaged } from '../api/purchasing'
+
 import {
   Alert,
   Box,
@@ -137,6 +140,7 @@ function TopProductsChart({ rows }: { rows: BestSellingProductRow[] }) {
 }
 
 export default function Dashboard() {
+  const navigate = useNavigate()
   const [startDate, setStartDate] = useState(dateDaysAgo(30))
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10))
   const [platform, setPlatform] = useState('')
@@ -183,6 +187,17 @@ export default function Dashboard() {
     queryFn: () => fetchBestSellingProductDetail(selectedSku || '', { startDate, endDate }),
     enabled: Boolean(selectedSku),
   })
+
+  const delayedPurchasesQuery = useQuery({
+    queryKey: ['delayed-purchases-count'],
+    queryFn: () =>
+      listPurchaseOrdersPaged({
+        deliverStatus: 'CREATED',
+        orderDateTo: dateDaysAgo(6),
+        limit: 100,
+      }),
+  })
+
 
   const rows = productsQuery.data?.rows ?? []
   const summary = summaryQuery.data
@@ -301,6 +316,22 @@ export default function Dashboard() {
       </Grid>
 
       <Stack spacing={1} sx={{ mb: 3 }}>
+        {delayedPurchasesQuery.data && delayedPurchasesQuery.data.length > 0 && (
+          <Alert
+            severity="warning"
+            action={
+              <Button
+                color="inherit"
+                size="small"
+                onClick={() => navigate('/purchasing?filter=delayed')}
+              >
+                View Orders
+              </Button>
+            }
+          >
+            There {delayedPurchasesQuery.data.length === 1 ? 'is 1 purchase order' : `are ${delayedPurchasesQuery.data.length} purchase orders`} that have been in 'CREATED' status for over 6 days.
+          </Alert>
+        )}
         {summary?.warnings.map((warning) => (
           <Alert severity={warning.severity} key={warning.code}>
             {warning.message} ({warning.count})

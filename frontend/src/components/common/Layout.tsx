@@ -35,8 +35,9 @@ import {
   AssignmentReturn,
   ExpandLess,
   ExpandMore,
-  PlaylistAdd,
   QrCodeScanner,
+  Add as AddIcon,
+  CameraAlt,
 } from '@mui/icons-material'
 import { useAuth } from '../../hooks/useAuth'
 
@@ -70,7 +71,7 @@ const navItems: NavItem[] = [
     roles: ['ADMIN', 'SALES_REP'],
     children: [
       { title: 'Active Listings', path: '/catalog/listings/active', icon: <Storefront />, roles: ['ADMIN', 'SALES_REP'] },
-      { title: 'Create New Listing', path: '/catalog/listings/create', icon: <PlaylistAdd />, roles: ['ADMIN', 'SALES_REP'] },
+      { title: 'Create New Listing', path: '/catalog/listings/create', icon: <AddIcon />, roles: ['ADMIN', 'SALES_REP'] },
     ],
   },
   { title: 'Orders', path: '/orders', icon: <ShoppingCart />, roles: ['ADMIN', 'SALES_REP', 'WAREHOUSE_OP', 'PACKER'] },
@@ -94,6 +95,7 @@ export default function Layout() {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
   const [accountingOpen, setAccountingOpen] = useState(location.pathname.startsWith('/accounting/'))
   const [productListingsOpen, setProductListingsOpen] = useState(location.pathname.startsWith('/catalog/listings/'))
+  const [scannerOpen, setScannerOpen] = useState(location.pathname.startsWith('/scan'))
   const { user, logout, hasRole } = useAuth()
   const navigate = useNavigate()
 
@@ -103,6 +105,9 @@ export default function Layout() {
     }
     if (location.pathname.startsWith('/catalog/listings/')) {
       setProductListingsOpen(true)
+    }
+    if (location.pathname.startsWith('/scan')) {
+      setScannerOpen(true)
     }
   }, [location.pathname])
 
@@ -166,15 +171,19 @@ export default function Layout() {
                         setAccountingOpen((open) => !open)
                         return
                       }
+                      if (item.title === 'Barcode Scanner') {
+                        setScannerOpen((open) => !open)
+                        return
+                      }
                       setProductListingsOpen((open) => !open)
                     }}
                   >
                     <ListItemIcon>{item.icon}</ListItemIcon>
                     <ListItemText primary={item.title} />
-                    {(item.title === 'Accounting' ? accountingOpen : productListingsOpen) ? <ExpandLess /> : <ExpandMore />}
+                    {(item.title === 'Accounting' ? accountingOpen : (item.title === 'Barcode Scanner' ? scannerOpen : productListingsOpen)) ? <ExpandLess /> : <ExpandMore />}
                   </ListItemButton>
                 </ListItem>
-                <Collapse in={item.title === 'Accounting' ? accountingOpen : productListingsOpen} timeout="auto" unmountOnExit>
+                <Collapse in={item.title === 'Accounting' ? accountingOpen : (item.title === 'Barcode Scanner' ? scannerOpen : productListingsOpen)} timeout="auto" unmountOnExit>
                   <List component="div" disablePadding>
                     {visibleChildren.map((child) => (
                       <ListItem key={child.path} disablePadding>
