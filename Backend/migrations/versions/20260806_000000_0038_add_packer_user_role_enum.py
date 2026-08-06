@@ -1,7 +1,7 @@
 """add PACKER to user role enum
 
-Revision ID: 0037
-Revises: 469482e42773
+Revision ID: 0038
+Revises: c2d3e4f5g6h7
 Create Date: 2026-08-06 00:00:00.000000
 """
 from typing import Sequence, Union
@@ -10,8 +10,8 @@ from alembic import op
 
 
 # revision identifiers, used by Alembic.
-revision: str = "0037"
-down_revision: Union[str, None] = "469482e42773"
+revision: str = "0038"
+down_revision: Union[str, None] = "c2d3e4f5g6h7"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
