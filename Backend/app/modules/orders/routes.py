@@ -2617,6 +2617,9 @@ async def list_nas_folder_files(
         )
 
 
+# In-memory diagnostic cache to prevent duplicate NAS/Gemini execution
+nas_file_diag_cache: dict[str, tuple[float, Any]] = {}
+
 @router.post("/photo-station/diagnose-nas-file")
 async def diagnose_single_nas_file(
     req: NASSingleFileRequest,
@@ -2624,10 +2627,20 @@ async def diagnose_single_nas_file(
 ):
     """
     Diagnose a single file from Synology NAS and return result with base64 thumbnail URL.
+    Uses a 120-second in-memory cache to prevent duplicate processing of the same file.
     """
     import os
+    import time
     from app.core.synology import download_synology_file
     from app.modules.orders.diagnose import diagnose_packaging_photo_bytes
+
+    now = time.time()
+    # Check cache (120 seconds TTL)
+    if req.file_path in nas_file_diag_cache:
+        cached_time, cached_res = nas_file_diag_cache[req.file_path]
+        if now - cached_time < 120:
+            logger.info(f"[Diagnostic Cache Hit] Returning cached result for {req.file_path}")
+            return cached_res
 
     try:
         image_bytes = download_synology_file(req.file_path)
@@ -2638,6 +2651,7 @@ async def diagnose_single_nas_file(
             db=db,
             include_image_data_url=True,
         )
+        nas_file_diag_cache[req.file_path] = (now, res)
         return res
     except Exception as e:
         raise HTTPException(

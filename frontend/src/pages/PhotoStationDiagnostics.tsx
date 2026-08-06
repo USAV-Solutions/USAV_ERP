@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useRef } from 'react'
 import {
   Box,
   Typography,
@@ -64,26 +64,17 @@ export default function PhotoStationDiagnostics() {
   const [totalInFolder, setTotalInFolder] = useState<number>(0)
   const [resultsHistory, setResultsHistory] = useState<DiagnosticResult[]>([])
   const [nasError, setNasError] = useState<string | null>(null)
+
   const isStreamingRef = useRef(false)
+  const activeStreamIdRef = useRef<number>(0)
   const processedFilesSet = useRef<Set<string>>(new Set())
-  const hasAutoStreamStarted = useRef(false)
 
   const nasFolderPath = '/USAV Media/Packing Shipping/Packing Photos/Packing Station 2/2026/Q2 26'
 
-  // Auto-stream NAS photos on page load (guarded against React StrictMode double invocation)
-  useEffect(() => {
-    if (!hasAutoStreamStarted.current) {
-      hasAutoStreamStarted.current = true
-      startNasStream(0, 5, true)
-    }
-  }, [])
-
   const startNasStream = async (offset: number = 0, limit: number = nasLimit, resetHistory: boolean = false) => {
-    if (isStreamingRef.current) {
-      console.warn('Stream loop already in progress, skipping concurrent execution.')
-      return
-    }
-
+    // Generate new unique stream session ID and cancel any running streams
+    const streamId = Date.now()
+    activeStreamIdRef.current = streamId
     isStreamingRef.current = true
     setIsStreaming(true)
     setNasError(null)
@@ -100,6 +91,8 @@ export default function PhotoStationDiagnostics() {
         params: { folder_path: nasFolderPath, offset: offset, limit: limit }
       })
 
+      if (activeStreamIdRef.current !== streamId) return // Abort if cancelled
+
       const filePaths: string[] = listRes.data.files || []
       setTotalInFolder(listRes.data.total_in_folder || 0)
 
@@ -114,12 +107,18 @@ export default function PhotoStationDiagnostics() {
 
       // 2. Stream each NAS file one-by-one in real-time
       for (let i = 0; i < filePaths.length; i++) {
+        // Abort loop if user started a new stream session
+        if (activeStreamIdRef.current !== streamId) {
+          console.warn('Stream session superseded by new user action, cancelling loop.')
+          return
+        }
+
         const filePath = filePaths[i]
         const filename = filePath.split('/').pop() || filePath
 
         // Guard against duplicate file requests
         if (processedFilesSet.current.has(filePath)) {
-          console.warn(`File ${filePath} already requested, skipping duplicate call.`)
+          console.warn(`File ${filePath} already requested, skipping.`)
           continue
         }
         processedFilesSet.current.add(filePath)
@@ -131,15 +130,16 @@ export default function PhotoStationDiagnostics() {
             file_path: filePath
           })
 
+          if (activeStreamIdRef.current !== streamId) return // Abort if cancelled
+
           const data: DiagnosticResult = {
             ...diagRes.data,
             previewUrl: diagRes.data.image_data_url || undefined
           }
 
-          // Instantly pop the result card onto the screen (strict Map deduplication by filename)
+          // Strict Map deduplication by filename
           setResultsHistory((prev) => {
             const map = new Map<string, DiagnosticResult>()
-            // Preserve order: newest item at top, deduplicated by filename
             map.set(data.filename, data)
             prev.forEach((item) => {
               if (!map.has(item.filename)) {
@@ -154,13 +154,17 @@ export default function PhotoStationDiagnostics() {
       }
 
       // Update current offset for next batch
-      setCurrentOffset(offset + filePaths.length)
+      if (activeStreamIdRef.current === streamId) {
+        setCurrentOffset(offset + filePaths.length)
+      }
     } catch (err: any) {
       console.error('Failed to list NAS files:', err)
       setNasError(err?.response?.data?.detail || 'Failed to connect to Synology NAS over QuickConnect.')
     } finally {
-      setIsStreaming(false)
-      isStreamingRef.current = false
+      if (activeStreamIdRef.current === streamId) {
+        setIsStreaming(false)
+        isStreamingRef.current = false
+      }
     }
   }
 
@@ -195,8 +199,14 @@ export default function PhotoStationDiagnostics() {
       }
 
       setResultsHistory((prev) => {
-        const filtered = prev.filter((item) => item.filename !== data.filename)
-        return [data, ...filtered]
+        const map = new Map<string, DiagnosticResult>()
+        map.set(data.filename, data)
+        prev.forEach((item) => {
+          if (!map.has(item.filename)) {
+            map.set(item.filename, item)
+          }
+        })
+        return Array.from(map.values())
       })
     } catch (err: any) {
       console.error('Diagnosis failed:', err)
@@ -410,7 +420,7 @@ export default function PhotoStationDiagnostics() {
                 No diagnostic results visible
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 460, mx: 'auto', mb: 3 }}>
-                Click <strong>"STREAM NEXT {nasLimit} PHOTOS"</strong> to stream the next set of packaging photos from your Synology NAS over QuickConnect.
+                Click <strong>"STREAM NEXT {nasLimit} PHOTOS"</strong> to stream packaging photos from your Synology NAS over QuickConnect.
               </Typography>
               <Button
                 variant="contained"
