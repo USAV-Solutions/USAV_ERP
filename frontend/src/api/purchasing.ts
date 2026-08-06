@@ -17,6 +17,7 @@ import type {
   VendorCreate,
   PurchaseOrderDeliveryBackfillResponse,
   ZohoPurchaseImportResponse,
+  PurchaseDeliverStatus,
 } from '../types/purchasing'
 
 export async function listVendors(): Promise<Vendor[]> {
@@ -59,7 +60,7 @@ export async function listPurchaseOrdersPaged(params: {
   skip?: number
   limit?: number
   poNumber?: string
-  deliverStatus?: 'CREATED' | 'BILLED' | 'DELIVERED'
+  deliverStatus?: PurchaseDeliverStatus
   itemMatchStatus?: 'matched' | 'unmatched'
   zohoSyncStatus?: 'PENDING' | 'SYNCED' | 'ERROR' | 'DIRTY'
   source?: string
