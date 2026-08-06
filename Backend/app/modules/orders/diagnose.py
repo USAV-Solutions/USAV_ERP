@@ -18,6 +18,8 @@ from app.modules.orders.models import Order, OrderItem
 logger = logging.getLogger(__name__)
 
 
+import base64
+
 class AIDiagnosticResponse(BaseModel):
     success: bool
     filename: str
@@ -33,6 +35,7 @@ class AIDiagnosticResponse(BaseModel):
     confidence_score: float
     status: str  # E.g. "CORRECT", "ITEM_MISMATCH", "MISSING_TRACKING", "NO_PACKING_SLIP", "ERROR"
     message: str
+    image_data_url: Optional[str] = None
 
 
 async def diagnose_packaging_photo_bytes(
@@ -40,6 +43,7 @@ async def diagnose_packaging_photo_bytes(
     filename: str = "sample_photo.jpg",
     mime_type: str = "image/jpeg",
     db: Optional[AsyncSession] = None,
+    include_image_data_url: bool = False,
 ) -> AIDiagnosticResponse:
     """
     Diagnose a packing photo using Gemini Vision AI (gemini-3.5-flash).
@@ -143,6 +147,8 @@ async def diagnose_packaging_photo_bytes(
         detected_item = str(data.get("detected_physical_item", "Unidentified object")).strip()
         confidence = float(data.get("confidence_score", 0.90))
 
+        data_url = f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('utf-8')}" if include_image_data_url else None
+
         if not is_valid or not (extracted_order_id or extracted_tracking):
             return AIDiagnosticResponse(
                 success=True,
@@ -158,7 +164,8 @@ async def diagnose_packaging_photo_bytes(
                 item_match=False,
                 confidence_score=confidence,
                 status="NO_PACKING_SLIP",
-                message="No packing slip or valid order details detected in photo."
+                message="No packing slip or valid order details detected in photo.",
+                image_data_url=data_url,
             )
 
         # DB Cross-Check if database session is provided
@@ -206,7 +213,8 @@ async def diagnose_packaging_photo_bytes(
             item_match=item_match,
             confidence_score=confidence,
             status=status,
-            message=msg
+            message=msg,
+            image_data_url=data_url,
         )
 
     except Exception as e:

@@ -2575,5 +2575,50 @@ async def diagnose_packing_photo(
         filename=file.filename or "sample_photo.jpg",
         mime_type=file.content_type or "image/jpeg",
         db=db,
+        include_image_data_url=True,
     )
     return res
+
+
+class NASDiagnoseRequest(BaseModel):
+    folder_path: str = "/USAV Media/Packing Shipping/Packing Photos/Packing Station 2/2026/Q2 26"
+    limit: int = 5
+
+
+@router.post("/photo-station/diagnose-nas")
+async def diagnose_nas_folder(
+    req: NASDiagnoseRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Bulk diagnose historical sample photos from Synology NAS folder over QuickConnect WebAPI.
+    Returns results with embedded image previews for live rendering in the UI.
+    """
+    from app.core.synology import list_synology_files, download_synology_file
+    from app.modules.orders.diagnose import diagnose_packaging_photo_bytes
+
+    try:
+        nas_files = list_synology_files(req.folder_path)
+        nas_files = [f for f in nas_files if f.lower().endswith((".jpg", ".jpeg", ".png"))][:req.limit]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to fetch files from Synology NAS: {str(e)}"
+        )
+
+    results = []
+    for file_path in nas_files:
+        try:
+            image_bytes = download_synology_file(file_path)
+            res = await diagnose_packaging_photo_bytes(
+                image_bytes=image_bytes,
+                filename=os.path.basename(file_path),
+                mime_type="image/jpeg",
+                db=db,
+                include_image_data_url=True,
+            )
+            results.append(res)
+        except Exception as e:
+            logger.error(f"Failed to diagnose NAS file {file_path}: {e}")
+
+    return results
