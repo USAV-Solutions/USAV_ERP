@@ -46,14 +46,23 @@ interface NavItem {
   title: string
   path?: string
   icon: React.ReactNode
-  roles: ('ADMIN' | 'WAREHOUSE_OP' | 'SALES_REP' | 'ACCOUNTANT')[]
+  roles: ('ADMIN' | 'WAREHOUSE_OP' | 'PACKER' | 'SALES_REP' | 'ACCOUNTANT')[]
   children?: NavItem[]
 }
 
 const navItems: NavItem[] = [
   { title: 'Dashboard', path: '/', icon: <Dashboard />, roles: ['ADMIN', 'WAREHOUSE_OP', 'SALES_REP', 'ACCOUNTANT'] },
-  { title: 'Warehouse Operations', path: '/warehouse/ops', icon: <Search />, roles: ['ADMIN', 'WAREHOUSE_OP'] },
-  { title: 'Barcode Scanner', path: '/scan', icon: <QrCodeScanner />, roles: ['ADMIN', 'WAREHOUSE_OP'] },
+  { title: 'Warehouse Operations', path: '/warehouse/ops', icon: <Search />, roles: ['ADMIN', 'WAREHOUSE_OP', 'PACKER'] },
+  {
+    title: 'Barcode Scanner',
+    icon: <QrCodeScanner />,
+    roles: ['ADMIN', 'WAREHOUSE_OP', 'PACKER'],
+    children: [
+      { title: 'Scan Barcodes', path: '/scan', icon: <QrCodeScanner />, roles: ['ADMIN', 'WAREHOUSE_OP', 'PACKER'] },
+      { title: 'Photo Station', path: '/scan/photo-station', icon: <CameraAlt />, roles: ['ADMIN', 'WAREHOUSE_OP', 'PACKER'] },
+      { title: 'End-of-Day Verification', path: '/scan/end-of-day', icon: <LocalShipping />, roles: ['ADMIN', 'WAREHOUSE_OP', 'PACKER'] },
+    ],
+  },
   { title: 'Inventory Management', path: '/catalog/inventory', icon: <Inventory />, roles: ['ADMIN', 'SALES_REP'] },
   {
     title: 'Product Listings',
@@ -64,7 +73,7 @@ const navItems: NavItem[] = [
       { title: 'Create New Listing', path: '/catalog/listings/create', icon: <PlaylistAdd />, roles: ['ADMIN', 'SALES_REP'] },
     ],
   },
-  { title: 'Orders', path: '/orders', icon: <ShoppingCart />, roles: ['ADMIN', 'SALES_REP', 'WAREHOUSE_OP'] },
+  { title: 'Orders', path: '/orders', icon: <ShoppingCart />, roles: ['ADMIN', 'SALES_REP', 'WAREHOUSE_OP', 'PACKER'] },
   { title: 'Returns', path: '/returns', icon: <AssignmentReturn />, roles: ['ADMIN', 'SALES_REP', 'WAREHOUSE_OP'] },
   { title: 'Purchasing', path: '/purchasing', icon: <LocalShipping />, roles: ['ADMIN', 'SALES_REP', 'WAREHOUSE_OP'] },
   {

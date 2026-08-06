@@ -27,12 +27,14 @@ class UserRole(str, enum.Enum):
     Hierarchy:
     - ADMIN: Full access. Can create Product Families/Identities (Layer 1). Can manage users.
     - WAREHOUSE_OP: Operational access. Can RECEIVE, MOVE, AUDIT inventory. Read-only for products.
+    - PACKER: Station & mobile packaging access. Prioritized access to Photo Station & Barcode Scanning.
     - SALES_REP: Commercial access. Can edit Variant prices/descriptions. Read-only stock levels.
     - ACCOUNTANT: Accounting module access. Reports and bank conversion scaffolding.
     - SYSTEM_BOT: Restricted. Reserved for Zoho Sync Worker. Only sync-related updates.
     """
     ADMIN = "ADMIN"
     WAREHOUSE_OP = "WAREHOUSE_OP"
+    PACKER = "PACKER"
     SALES_REP = "SALES_REP"
     ACCOUNTANT = "ACCOUNTANT"
     SYSTEM_BOT = "SYSTEM_BOT"
