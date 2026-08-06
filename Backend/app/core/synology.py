@@ -99,3 +99,56 @@ def upload_to_synology(file_bytes: bytes, filename: str) -> str:
         with open(local_path, "wb") as f:
             f.write(file_bytes)
         return f"/static/photos/{today_str}/{filename}"
+
+
+def list_synology_files(folder_path: str) -> list[str]:
+    """
+    List files in a Synology NAS directory via FileStation WebAPI.
+    """
+    nas_ip = os.getenv("SYNOLOGY_NAS_IP")
+    nas_port = os.getenv("SYNOLOGY_NAS_PORT", "5000")
+    if not nas_ip:
+        raise ValueError("SYNOLOGY_NAS_IP is not set in environment.")
+
+    sid = get_synology_sid()
+    url = f"http://{nas_ip}:{nas_port}/webapi/entry.cgi"
+    params = {
+        "api": "SYNO.FileStation.List",
+        "version": "2",
+        "method": "list",
+        "folder_path": folder_path,
+        "_sid": sid
+    }
+    response = requests.get(url, params=params, timeout=15)
+    response.raise_for_status()
+    data = response.json()
+    if not data.get("success"):
+        error_code = data.get("error", {}).get("code", "unknown")
+        raise RuntimeError(f"Synology List failed with error code: {error_code}")
+
+    files = data.get("data", {}).get("files", [])
+    return [f["path"] for f in files if not f.get("isdir")]
+
+
+def download_synology_file(file_path: str) -> bytes:
+    """
+    Download file bytes from Synology NAS via FileStation WebAPI.
+    """
+    nas_ip = os.getenv("SYNOLOGY_NAS_IP")
+    nas_port = os.getenv("SYNOLOGY_NAS_PORT", "5000")
+    if not nas_ip:
+        raise ValueError("SYNOLOGY_NAS_IP is not set in environment.")
+
+    sid = get_synology_sid()
+    url = f"http://{nas_ip}:{nas_port}/webapi/entry.cgi"
+    params = {
+        "api": "SYNO.FileStation.Download",
+        "version": "2",
+        "method": "download",
+        "path": file_path,
+        "mode": "download",
+        "_sid": sid
+    }
+    response = requests.get(url, params=params, timeout=30)
+    response.raise_for_status()
+    return response.content
