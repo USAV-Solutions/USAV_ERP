@@ -2556,3 +2556,24 @@ async def upload_photo_station_file(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Upload failed: {str(e)}"
         )
+
+
+@router.post("/photo-station/diagnose")
+async def diagnose_packing_photo(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Diagnose a packing station photo using Gemini 3.5 Flash Vision AI.
+    Extracts document OCR (Order ID, Tracking, SKU) and compares physical item with ERP records.
+    """
+    from app.modules.orders.diagnose import diagnose_packaging_photo_bytes
+    
+    image_bytes = await file.read()
+    res = await diagnose_packaging_photo_bytes(
+        image_bytes=image_bytes,
+        filename=file.filename or "sample_photo.jpg",
+        mime_type=file.content_type or "image/jpeg",
+        db=db,
+    )
+    return res

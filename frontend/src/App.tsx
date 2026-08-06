@@ -18,6 +18,7 @@ import Layout from './components/common/Layout'
 import RoleGuard from './components/guards/RoleGuard'
 import PhotoStation from './pages/PhotoStation'
 import EndOfDayVerification from './pages/EndOfDayVerification'
+import PhotoStationDiagnostics from './pages/PhotoStationDiagnostics'
 
 
 function HomeRedirect() {
@@ -55,6 +56,7 @@ function App() {
           <Route path="/warehouse/ops" element={<WarehouseOps />} />
           <Route path="/scan" element={<WarehouseScan />} />
           <Route path="/scan/photo-station" element={<PhotoStation />} />
+          <Route path="/scan/photo-station/test-diagnostics" element={<PhotoStationDiagnostics />} />
           <Route path="/scan/end-of-day" element={<EndOfDayVerification />} />
         </Route>
 

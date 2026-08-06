@@ -38,6 +38,7 @@ import {
   QrCodeScanner,
   Add as AddIcon,
   CameraAlt,
+  AutoAwesome,
 } from '@mui/icons-material'
 import { useAuth } from '../../hooks/useAuth'
 
@@ -61,6 +62,7 @@ const navItems: NavItem[] = [
     children: [
       { title: 'Scan Barcodes', path: '/scan', icon: <QrCodeScanner />, roles: ['ADMIN', 'WAREHOUSE_OP', 'PACKER'] },
       { title: 'Photo Station', path: '/scan/photo-station', icon: <CameraAlt />, roles: ['ADMIN', 'WAREHOUSE_OP', 'PACKER'] },
+      { title: 'AI Diagnostic Sandbox', path: '/scan/photo-station/test-diagnostics', icon: <AutoAwesome />, roles: ['ADMIN', 'WAREHOUSE_OP', 'PACKER'] },
       { title: 'End-of-Day Verification', path: '/scan/end-of-day', icon: <LocalShipping />, roles: ['ADMIN', 'WAREHOUSE_OP', 'PACKER'] },
     ],
   },
