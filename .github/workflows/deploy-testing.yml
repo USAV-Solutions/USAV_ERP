@@ -39,7 +39,7 @@ jobs:
 
           echo "Purging old usav_* containers..."
           docker compose --profile dev down --remove-orphans || true
-          docker rm -f 6553ed7cc6c24398149912c62b610d6fb620c7224edc908c092c36663e397323 d8634b7f898b2fff582b7bebcae2f877a44e0dbbb6c31caf0c6dfab703dfb841 usav_migrations usav_backend_dev usav_frontend_dev usav_db usav_backup || true
+          docker rm -f eb8236e10bb1513aa327e307c49cf5952a3c02b97474e90f0b8cabf99ee1b1be usav_frontend usav_frontend_dev usav_migrations usav_backend_dev usav_db usav_backup || true
 
           echo "Running database migrations..."
           docker compose --profile migrate up --remove-orphans migrations || true
