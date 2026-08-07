@@ -41,9 +41,15 @@ jobs:
 
           git config --global --add safe.directory '*' || true
 
+          if [ ! -d ".git" ]; then
+            echo "Initializing git repository in $(pwd)..."
+            git init
+            git remote add origin https://github.com/USAV-Solutions/USAV_ERP.git || git remote set-url origin https://github.com/USAV-Solutions/USAV_ERP.git
+          fi
+
           echo "Fetching latest code for ${TARGET_BRANCH}..."
           git fetch origin "${TARGET_BRANCH}"
-          git checkout "${TARGET_BRANCH}"
+          git checkout -B "${TARGET_BRANCH}" "origin/${TARGET_BRANCH}"
           git reset --hard "origin/${TARGET_BRANCH}"
 
           echo "Running database migrations..."
