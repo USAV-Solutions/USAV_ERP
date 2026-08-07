@@ -7,6 +7,9 @@ export default defineConfig({
     port: 3636,
     host: '0.0.0.0',
     allowedHosts: true,
+    hmr: {
+      clientPort: 9636,
+    },
     proxy: {
       '/api': {
         target: 'http://usav_backend_dev:8080',
