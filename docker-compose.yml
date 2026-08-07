@@ -69,7 +69,7 @@ services:
       - SYNOLOGY_NAS_USER=${SYNOLOGY_NAS_USER:-}
       - SYNOLOGY_NAS_PASSWORD=${SYNOLOGY_NAS_PASSWORD:-}
     ports:
-      - "8080:8080"
+      - "${BACKEND_PORT:-8081}:8080"
     depends_on:
       db:
         condition: service_healthy
@@ -130,7 +130,7 @@ services:
       - ZOHO_AUTO_INBOUND_SYNC_ENABLED=false
       - PRODUCT_IMAGES_PATH=/tmp/usav_product_images
     ports:
-      - "8080:8080"
+      - "${BACKEND_PORT:-8081}:8080"
     depends_on:
       db:
         condition: service_healthy
