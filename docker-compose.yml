@@ -90,8 +90,6 @@ services:
       context: ./Backend
       dockerfile: Dockerfile
     container_name: usav_backend_dev
-    profiles:
-      - dev
     command: uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
     volumes:
       - ./Backend:/app
@@ -229,8 +227,6 @@ services:
       context: ./frontend
       dockerfile: Dockerfile.dev
     container_name: usav_frontend_dev
-    profiles:
-      - dev
     command: npm run dev -- --host 0.0.0.0 --port 3636
     volumes:
       - ./frontend/src:/app/src
