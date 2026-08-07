@@ -39,6 +39,7 @@ jobs:
 
           echo "Cleaning old containers..."
           docker compose --profile dev down --remove-orphans || true
+          docker rm -f a8c16b9152a80cff04c9f25e304a30a5d318815f7533e4ceb52d39b35eb535dd usav_db || true
 
           echo "Running database migrations..."
           docker compose --profile migrate up --remove-orphans migrations || true
