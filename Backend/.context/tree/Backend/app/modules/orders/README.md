@@ -53,6 +53,7 @@ Sales orders domain: ingestion/import, listing-centric matching, filtering, cust
 - `AMAZON_FBA_CSV` imports `Backend/misc/weekly.csv`-style exports, groups rows by `order-id`, always ingests under platform `AMAZON`, and marks matching/new orders `fulfillment_channel=AMAZON_FBA`.
 - `AMAZON_FBA_CSV` customer handling now treats `buyer-id` as the stable identity key (fallback: marketplace-email local part), stores it on `Customer.amazon_buyer_id`, and keeps `buyer-name` as the local human-readable customer name. Matching now prefers `amazon_buyer_id` before email/name fallbacks.
 - Standard API / ShipStation CSV imports create new orders as `SELF_FULFILLED`; if an existing Amazon order was previously upgraded by FBA CSV import, later API syncs must not downgrade it back.
+- **Synology NAS Diagnostic Cache & SID Session Caching:** `POST /orders/photo-station/diagnose-nas-file` uses a 120-second in-memory result cache (`nas_file_diag_cache`). `POST /orders/photo-station/clear-cache` purges the diagnostic cache. `synology.py` caches the DSM session `_sid` token for 10 minutes and uses a 3-attempt retry loop to prevent QuickConnect SSL handshake throttling (`SSLEOFError`) during bulk photo streaming.
 
 ## Recent Behavior Change: Platform Listing mappings
 - The `_learn_listing` flow allows multiple listings per `variant_id` on the same platform as long as `external_ref_id` is unique.
