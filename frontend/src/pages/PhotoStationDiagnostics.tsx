@@ -71,29 +71,46 @@ export default function PhotoStationDiagnostics() {
 
   const nasFolderPath = '/USAV Media/Packing Shipping/Packing Photos/Packing Station 2/2026/Q2 26'
 
+  // NO AUTO-STREAMING ON MOUNT. All stream operations are 100% manual user clicks.
+
+  const clearAllCacheAndState = async () => {
+    setResultsHistory([])
+    setCurrentOffset(0)
+    processedFilesSet.current.clear()
+    try {
+      await axiosClient.post('/orders/photo-station/clear-cache')
+      console.log('[NAS Stream] Diagnostic cache cleared successfully.')
+    } catch (e) {
+      console.warn('[NAS Stream] Failed to clear backend cache:', e)
+    }
+  }
+
   const startNasStream = async (offset: number = 0, limit: number = nasLimit, resetHistory: boolean = false) => {
-    // Generate new unique stream session ID and cancel any running streams
     const streamId = Date.now()
+    console.log(`[NAS Stream Start] Session ID=${streamId} | Offset=${offset} | Limit=${limit} | ResetHistory=${resetHistory}`)
+
     activeStreamIdRef.current = streamId
     isStreamingRef.current = true
     setIsStreaming(true)
     setNasError(null)
 
     if (resetHistory) {
-      setResultsHistory([])
-      setCurrentOffset(0)
-      processedFilesSet.current.clear()
+      await clearAllCacheAndState()
     }
 
     try {
-      // 1. Fetch NAS file list with offset pagination
+      console.log(`[NAS Stream] Fetching NAS file list with offset=${offset}, limit=${limit}...`)
       const listRes = await axiosClient.get('/orders/photo-station/nas-files', {
         params: { folder_path: nasFolderPath, offset: offset, limit: limit }
       })
 
-      if (activeStreamIdRef.current !== streamId) return // Abort if cancelled
+      if (activeStreamIdRef.current !== streamId) {
+        console.warn(`[NAS Stream] Session ${streamId} cancelled after file list fetch.`)
+        return
+      }
 
       const filePaths: string[] = listRes.data.files || []
+      console.log(`[NAS Stream] NAS returned ${filePaths.length} files:`, filePaths)
       setTotalInFolder(listRes.data.total_in_folder || 0)
 
       if (filePaths.length === 0) {
@@ -105,24 +122,22 @@ export default function PhotoStationDiagnostics() {
 
       setStreamProgress({ current: 0, total: filePaths.length, filename: 'Initializing stream...' })
 
-      // 2. Stream each NAS file one-by-one in real-time
       for (let i = 0; i < filePaths.length; i++) {
-        // Abort loop if user started a new stream session
         if (activeStreamIdRef.current !== streamId) {
-          console.warn('Stream session superseded by new user action, cancelling loop.')
+          console.warn(`[NAS Stream] Session ${streamId} superseded at loop index ${i}, stopping.`)
           return
         }
 
         const filePath = filePaths[i]
         const filename = filePath.split('/').pop() || filePath
 
-        // Guard against duplicate file requests
         if (processedFilesSet.current.has(filePath)) {
-          console.warn(`File ${filePath} already requested, skipping.`)
+          console.warn(`[NAS Stream] File ${filePath} already processed in this stream session, skipping.`)
           continue
         }
         processedFilesSet.current.add(filePath)
 
+        console.log(`[NAS Stream] [Session ${streamId}] [${i + 1}/${filePaths.length}] Diagnosing file: ${filePath}`)
         setStreamProgress({ current: i + 1, total: filePaths.length, filename: filename })
 
         try {
@@ -130,35 +145,34 @@ export default function PhotoStationDiagnostics() {
             file_path: filePath
           })
 
-          if (activeStreamIdRef.current !== streamId) return // Abort if cancelled
+          if (activeStreamIdRef.current !== streamId) {
+            console.warn(`[NAS Stream] Session ${streamId} cancelled after HTTP POST for ${filename}.`)
+            return
+          }
 
           const data: DiagnosticResult = {
             ...diagRes.data,
             previewUrl: diagRes.data.image_data_url || undefined
           }
 
-          // Strict Map deduplication by filename
+          console.log(`[NAS Stream API Success] ${filename} -> Order: ${data.order_id}, Item: "${data.detected_physical_item}"`)
+
+          // Strict filtering deduplication by filename
           setResultsHistory((prev) => {
-            const map = new Map<string, DiagnosticResult>()
-            map.set(data.filename, data)
-            prev.forEach((item) => {
-              if (!map.has(item.filename)) {
-                map.set(item.filename, item)
-              }
-            })
-            return Array.from(map.values())
+            const filtered = prev.filter((item) => item.filename !== data.filename)
+            return [data, ...filtered]
           })
         } catch (err: any) {
-          console.error(`Failed to diagnose ${filename}:`, err)
+          console.error(`[NAS Stream Error] Failed to diagnose ${filename}:`, err)
         }
       }
 
-      // Update current offset for next batch
       if (activeStreamIdRef.current === streamId) {
         setCurrentOffset(offset + filePaths.length)
+        console.log(`[NAS Stream Complete] Session ${streamId} finished. Next offset: ${offset + filePaths.length}`)
       }
     } catch (err: any) {
-      console.error('Failed to list NAS files:', err)
+      console.error('[NAS Stream Error] Failed to list NAS files:', err)
       setNasError(err?.response?.data?.detail || 'Failed to connect to Synology NAS over QuickConnect.')
     } finally {
       if (activeStreamIdRef.current === streamId) {
@@ -199,14 +213,8 @@ export default function PhotoStationDiagnostics() {
       }
 
       setResultsHistory((prev) => {
-        const map = new Map<string, DiagnosticResult>()
-        map.set(data.filename, data)
-        prev.forEach((item) => {
-          if (!map.has(item.filename)) {
-            map.set(item.filename, item)
-          }
-        })
-        return Array.from(map.values())
+        const filtered = prev.filter((item) => item.filename !== data.filename)
+        return [data, ...filtered]
       })
     } catch (err: any) {
       console.error('Diagnosis failed:', err)
@@ -296,7 +304,7 @@ export default function PhotoStationDiagnostics() {
               onClick={() => startNasStream(0, nasLimit, true)}
               sx={{ fontWeight: 'bold', py: 1 }}
             >
-              RESTART FROM START
+              RE-STREAM FROM START
             </Button>
 
             <Button
@@ -401,8 +409,8 @@ export default function PhotoStationDiagnostics() {
               <FindInPage color="primary" /> Live Diagnostic Cards ({resultsHistory.length})
             </Typography>
             {resultsHistory.length > 0 && (
-              <Button size="small" variant="outlined" startIcon={<Refresh />} onClick={() => setResultsHistory([])}>
-                Clear
+              <Button size="small" variant="outlined" startIcon={<Refresh />} onClick={clearAllCacheAndState}>
+                Clear All Cards
               </Button>
             )}
           </Box>
@@ -420,7 +428,7 @@ export default function PhotoStationDiagnostics() {
                 No diagnostic results visible
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 460, mx: 'auto', mb: 3 }}>
-                Click <strong>"STREAM NEXT {nasLimit} PHOTOS"</strong> to stream packaging photos from your Synology NAS over QuickConnect.
+                Click <strong>"START LIVE STREAM NOW"</strong> or <strong>"RE-STREAM FROM START"</strong> to stream packaging photos from your Synology NAS over QuickConnect.
               </Typography>
               <Button
                 variant="contained"
@@ -429,12 +437,12 @@ export default function PhotoStationDiagnostics() {
                 onClick={() => startNasStream(0, nasLimit, true)}
                 sx={{ fontWeight: 'bold' }}
               >
-                START STREAM NOW
+                START LIVE STREAM NOW
               </Button>
             </Paper>
           ) : (
             resultsHistory.map((res, index) => (
-              <Card key={index} elevation={2} sx={{ mb: 2.5, borderRadius: 2, overflow: 'hidden', transition: 'all 0.3s' }}>
+              <Card key={res.filename || index} elevation={2} sx={{ mb: 2.5, borderRadius: 2, overflow: 'hidden', transition: 'all 0.3s' }}>
                 <CardContent sx={{ p: 2.5 }}>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>

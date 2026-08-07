@@ -2618,7 +2618,18 @@ async def list_nas_folder_files(
 
 
 # In-memory diagnostic cache to prevent duplicate NAS/Gemini execution
-nas_file_diag_cache: dict[str, tuple[float, Any]] = {}
+nas_file_diag_cache: dict = {}
+
+@router.post("/photo-station/clear-cache")
+async def clear_nas_diagnostic_cache():
+    """
+    Clear in-memory NAS diagnostic cache.
+    """
+    global nas_file_diag_cache
+    count = len(nas_file_diag_cache)
+    nas_file_diag_cache.clear()
+    logger.info(f"[NAS DIAG API] Cleared {count} entries from diagnostic cache.")
+    return {"message": f"Cleared {count} cached diagnostic items."}
 
 @router.post("/photo-station/diagnose-nas-file")
 async def diagnose_single_nas_file(
@@ -2635,25 +2646,34 @@ async def diagnose_single_nas_file(
     from app.modules.orders.diagnose import diagnose_packaging_photo_bytes
 
     now = time.time()
+    logger.info(f"[NAS DIAG API] Incoming POST request for file_path='{req.file_path}' (Cache Size: {len(nas_file_diag_cache)})")
+
     # Check cache (120 seconds TTL)
     if req.file_path in nas_file_diag_cache:
         cached_time, cached_res = nas_file_diag_cache[req.file_path]
-        if now - cached_time < 120:
-            logger.info(f"[Diagnostic Cache Hit] Returning cached result for {req.file_path}")
+        age = round(now - cached_time, 2)
+        if age < 120:
+            logger.info(f"[NAS DIAG API - CACHE HIT] Returning cached result for '{req.file_path}' (Age: {age}s)")
             return cached_res
+        else:
+            logger.info(f"[NAS DIAG API - CACHE EXPIRED] Cache age {age}s > 120s for '{req.file_path}', re-diagnosing.")
 
+    logger.info(f"[NAS DIAG API - CACHE MISS] Downloading & analyzing NAS file '{req.file_path}' with Gemini 3.5 Flash")
     try:
         image_bytes = download_synology_file(req.file_path)
+        filename = os.path.basename(req.file_path)
         res = await diagnose_packaging_photo_bytes(
             image_bytes=image_bytes,
-            filename=os.path.basename(req.file_path),
+            filename=filename,
             mime_type="image/jpeg",
             db=db,
             include_image_data_url=True,
         )
         nas_file_diag_cache[req.file_path] = (now, res)
+        logger.info(f"[NAS DIAG API - SUCCESS] Finished diagnosis for '{filename}' in {res.latency_ms}ms (Status: {res.status})")
         return res
     except Exception as e:
+        logger.error(f"[NAS DIAG API - ERROR] Failed to diagnose '{req.file_path}': {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to diagnose NAS file {req.file_path}: {str(e)}"

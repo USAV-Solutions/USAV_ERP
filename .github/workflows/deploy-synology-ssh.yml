@@ -1,0 +1,50 @@
+name: Deploy Feature to Synology NAS (via SSH)
+
+on:
+  push:
+    branches: ["feature/tracking_manager"]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to deploy to Synology NAS via SSH"
+        required: true
+        default: "feature/tracking_manager"
+
+concurrency:
+  group: synology-ssh-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy-ssh:
+    runs-on: ubuntu-latest
+    if: github.repository == 'USAV-Solutions/USAV_ERP'
+
+    steps:
+      - name: Deploy via SSH to Synology NAS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.NAS_SSH_HOST }}
+          username: ${{ secrets.NAS_SSH_USER }}
+          password: ${{ secrets.NAS_SSH_PASSWORD }}
+          key: ${{ secrets.NAS_SSH_KEY }}
+          port: ${{ secrets.NAS_SSH_PORT || 22 }}
+          script: |
+            set -e
+            TARGET_BRANCH="${{ github.event.inputs.branch || github.ref_name }}"
+            echo "Deploying branch ${TARGET_BRANCH} to Synology NAS..."
+
+            # Navigate to Synology project folder
+            cd /volume1/docker/USAV_ERP || cd ~/USAV_Inventory
+
+            git fetch origin "${TARGET_BRANCH}"
+            git checkout "${TARGET_BRANCH}"
+            git reset --hard "origin/${TARGET_BRANCH}"
+
+            echo "Running database migrations..."
+            docker compose --profile migrate up --build --remove-orphans migrations || true
+
+            echo "Restarting containers on Synology NAS..."
+            docker compose --profile dev up -d --build --remove-orphans
+
+            echo "Pruning unused images..."
+            docker image prune -f
