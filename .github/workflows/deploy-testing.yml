@@ -19,38 +19,23 @@ jobs:
     runs-on: self-hosted
 
     steps:
+      - name: Checkout Repository with Auth
+        uses: actions/checkout@v4
+        with:
+          ref: feature/tracking_manager
+
       - name: Deploy Feature Branch on Synology NAS
         shell: bash
         run: |
           set -euo pipefail
 
-          TARGET_BRANCH="feature/tracking_manager"
-          echo "Deploying branch: ${TARGET_BRANCH} to Synology NAS testing environment..."
+          echo "Deploying branch: feature/tracking_manager to Synology NAS testing environment..."
 
-          # Navigate to workspace directory on Synology NAS
           if [ -d "/volume1/docker/USAV_ERP" ]; then
             cd "/volume1/docker/USAV_ERP"
           elif [ -d "/docker/USAV_ERP" ]; then
             cd "/docker/USAV_ERP"
-          elif [ -d "$HOME/USAV_Inventory" ]; then
-            cd "$HOME/USAV_Inventory"
-          else
-            echo "Error: USAV ERP directory not found on NAS host."
-            exit 1
           fi
-
-          git config --global --add safe.directory '*' || true
-
-          if [ ! -d ".git" ]; then
-            echo "Initializing git repository in $(pwd)..."
-            git init
-            git remote add origin https://github.com/USAV-Solutions/USAV_ERP.git || git remote set-url origin https://github.com/USAV-Solutions/USAV_ERP.git
-          fi
-
-          echo "Fetching latest code for ${TARGET_BRANCH}..."
-          git fetch origin "${TARGET_BRANCH}"
-          git checkout -B "${TARGET_BRANCH}" "origin/${TARGET_BRANCH}"
-          git reset --hard "origin/${TARGET_BRANCH}"
 
           echo "Running database migrations..."
           docker compose --profile migrate up --build --remove-orphans migrations || true
@@ -61,4 +46,4 @@ jobs:
           echo "Cleaning up unused Docker images..."
           docker image prune -f
 
-          echo "Deployment of ${TARGET_BRANCH} to Synology NAS completed successfully!"
+          echo "Deployment completed successfully!"
