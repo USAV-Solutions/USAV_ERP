@@ -2,7 +2,7 @@ name: Deploy Feature/Testing to Synology NAS
 
 on:
   push:
-    branches: ["feature/tracking_manager", "feature/*"]
+    branches: ["feature/tracking_manager"]
   workflow_dispatch:
     inputs:
       branch:
@@ -24,16 +24,16 @@ jobs:
         run: |
           set -euo pipefail
 
-          TARGET_BRANCH="${{ github.event.inputs.branch || github.ref_name }}"
+          TARGET_BRANCH="feature/tracking_manager"
           echo "Deploying branch: ${TARGET_BRANCH} to Synology NAS testing environment..."
 
           # Navigate to workspace directory on Synology NAS
-          if [ -d "$HOME/USAV_Inventory" ]; then
+          if [ -d "/docker/USAV_ERP" ]; then
+            cd "/docker/USAV_ERP"
+          elif [ -d "$HOME/USAV_Inventory" ]; then
             cd "$HOME/USAV_Inventory"
           elif [ -d "/volume1/docker/USAV_ERP" ]; then
             cd "/volume1/docker/USAV_ERP"
-          elif [ -d "/volume1/projects/USAV_ERP" ]; then
-            cd "/volume1/projects/USAV_ERP"
           else
             echo "Error: USAV ERP directory not found on NAS host."
             exit 1
