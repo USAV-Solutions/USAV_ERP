@@ -37,18 +37,17 @@ jobs:
             cd "/docker/USAV_ERP"
           fi
 
-          echo "Cleaning old conflicting containers..."
-          docker compose --profile dev down -v --remove-orphans || true
-          docker ps -a --filter "name=usav_" -q | xargs -r docker rm -f || true
-          docker rm -f usav_db usav_backend usav_backend_dev usav_frontend usav_frontend_dev usav_migrations a8c16b9152a80cff04c9f25e304a30a5d318815f7533e4ceb52d39b35eb535dd || true
+          echo "Cleaning old containers..."
+          docker compose --profile dev down --remove-orphans || true
 
           echo "Running database migrations..."
-          docker compose --profile migrate up --build --remove-orphans migrations || true
+          docker compose --profile migrate up --remove-orphans migrations || true
 
-          echo "Building and restarting testing containers..."
-          docker compose --profile dev up -d --build --remove-orphans
+          echo "Starting testing containers..."
+          docker compose --profile dev up -d --remove-orphans
 
           echo "Cleaning up unused Docker images..."
+          docker image prune -f
           docker image prune -f
 
           echo "Deployment completed successfully!"
