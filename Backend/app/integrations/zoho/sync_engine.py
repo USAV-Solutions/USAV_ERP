@@ -2174,6 +2174,22 @@ async def sync_order_outbound(order_id: int) -> None:
                 await db.commit()
                 return
 
+        # ---- DEPENDENCY: No unmatched line items ----
+        unmatched_items = [
+            item for item in (order.items or [])
+            if item.variant_id is None
+        ]
+        if unmatched_items:
+            order.zoho_sync_error = "Cannot sync order: contains unmatched items."
+            order.zoho_sync_status = ZohoSyncStatus.ERROR
+            order._updated_by_sync = True
+            await db.commit()
+            logger.warning(
+                "sync_order_outbound: order %s contains %d unmatched items, skipping sync",
+                order_id, len(unmatched_items),
+            )
+            return
+
         # ---- DEPENDENCY: All line-item variants must have zoho_item_id ----
         missing_variants: list[int] = []
         for item in (order.items or []):
