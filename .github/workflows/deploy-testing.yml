@@ -23,6 +23,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: feature/tracking_manager
+          clean: false
 
       - name: Deploy Feature Branch on Synology NAS
         shell: bash
