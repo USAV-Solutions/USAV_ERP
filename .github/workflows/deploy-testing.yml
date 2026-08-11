@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: self-hosted
+    runs-on: [self-hosted, synology]
 
     steps:
       - name: Checkout Repository with Auth
