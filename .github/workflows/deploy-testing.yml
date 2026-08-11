@@ -19,19 +19,18 @@ jobs:
     runs-on: self-hosted
 
     steps:
+      - name: Checkout Repository with Auth
+        uses: actions/checkout@v4
+        with:
+          ref: feature/tracking_manager
+          clean: false
+
       - name: Deploy Feature Branch on Synology NAS
         shell: bash
         run: |
           set -euo pipefail
 
-          PROJECT_DIR="/volume1/docker/USAV_ERP"
-
-          echo "Pulling latest code from feature/tracking_manager..."
-          cd "$PROJECT_DIR"
-          git config --global --add safe.directory "$PROJECT_DIR"
-          git fetch origin
-          git checkout feature/tracking_manager
-          git reset --hard origin/feature/tracking_manager
+          echo "Deploying branch: feature/tracking_manager..."
 
           mkdir -p backups static/photos
 
