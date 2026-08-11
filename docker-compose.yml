@@ -180,7 +180,9 @@ services:
     container_name: usav_backup
     restart: always
     volumes:
-      - ./backups:/backups
+      # Proxmox / Production default: postgres_backups named volume
+      # Prevents root-owned backup files from cluttering the Git working directory
+      - postgres_backups:/backups
     environment:
       POSTGRES_HOST: db
       POSTGRES_DB: ${DB_NAME:-inventory_system}
@@ -297,4 +299,5 @@ networks:
 # =============================================================================
 volumes:
   postgres_data:
+  postgres_backups:
   pgadmin_data:
