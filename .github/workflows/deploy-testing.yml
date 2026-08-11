@@ -19,13 +19,6 @@ jobs:
     runs-on: self-hosted
 
     steps:
-      - name: Fix Workspace Permissions
-        shell: bash
-        run: |
-          sudo rm -rf /home/usav/actions-runner/_work/USAV_ERP/USAV_ERP/backups || true
-          sudo rm -rf backups || true
-          sudo rm -rf /volume1/docker/USAV_ERP/backups || true
-
       - name: Checkout Repository with Auth
         uses: actions/checkout@v4
         with:
