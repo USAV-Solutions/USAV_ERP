@@ -22,12 +22,9 @@ jobs:
       - name: Fix Workspace Permissions
         shell: bash
         run: |
-          if [ -d "/home/usav/actions-runner/_work/USAV_ERP/USAV_ERP/backups" ]; then
-            sudo chmod -R 777 /home/usav/actions-runner/_work/USAV_ERP/USAV_ERP/backups || true
-          fi
-          if [ -d "backups" ]; then
-            sudo chmod -R 777 backups || true
-          fi
+          sudo rm -rf /home/usav/actions-runner/_work/USAV_ERP/USAV_ERP/backups/daily || true
+          sudo rm -rf backups/daily || true
+          sudo chmod -R 777 /home/usav/actions-runner/_work/USAV_ERP/USAV_ERP || true
 
       - name: Checkout Repository with Auth
         uses: actions/checkout@v4
