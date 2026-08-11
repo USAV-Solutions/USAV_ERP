@@ -10,6 +10,10 @@ export default defineConfig({
     hmr: {
       clientPort: 9636,
     },
+    watch: {
+      usePolling: false,
+      ignored: ['**/node_modules/**', '**/.git/**'],
+    },
     proxy: {
       '/api': {
         target: 'http://usav_backend_dev:8080',
