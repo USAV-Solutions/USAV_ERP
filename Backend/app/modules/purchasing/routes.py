@@ -309,7 +309,7 @@ def _map_zoho_po_status(status_raw: object) -> PurchaseDeliverStatus:
         return PurchaseDeliverStatus.BILLED
     if status_text in {"closed", "received"}:
         return PurchaseDeliverStatus.DELIVERED
-    return PurchaseDeliverStatus.CREATED
+    return PurchaseDeliverStatus.UNRECEIVED
 
 
 def _extract_receive_purchaseorder_id(receive: dict) -> str | None:
@@ -1386,7 +1386,7 @@ async def _import_goodwill_shipped_csv(
         po_payload = {
             "po_number": po_number,
             "vendor_id": goodwill_vendor_id,
-            "deliver_status": PurchaseDeliverStatus.CREATED,
+            "deliver_status": PurchaseDeliverStatus.UNRECEIVED,
             "order_date": order_date,
             "expected_delivery_date": None,
             "total_amount": total_amount,
@@ -1546,7 +1546,7 @@ async def _import_amazon_csv(
         po_payload = {
             "po_number": po_number,
             "vendor_id": vendor_id,
-            "deliver_status": PurchaseDeliverStatus.CREATED,
+            "deliver_status": PurchaseDeliverStatus.UNRECEIVED,
             "order_date": order_data["order_date"],
             "expected_delivery_date": None,
             "total_amount": total_amount,
@@ -1684,7 +1684,7 @@ async def _import_aliexpress_json(
         po_payload = {
             "po_number": po_number,
             "vendor_id": vendor_id,
-            "deliver_status": PurchaseDeliverStatus.CREATED,
+            "deliver_status": PurchaseDeliverStatus.UNRECEIVED,
             "order_date": order_date,
             "expected_delivery_date": None,
             "total_amount": total_amount,
@@ -1874,7 +1874,7 @@ async def _import_aliexpress_csv(
         po_payload = {
             "po_number": po_number,
             "vendor_id": vendor_id,
-            "deliver_status": PurchaseDeliverStatus.CREATED,
+            "deliver_status": PurchaseDeliverStatus.UNRECEIVED,
             "order_date": order_data["order_date"],
             "expected_delivery_date": None,
             "total_amount": total_amount,
@@ -2169,7 +2169,7 @@ async def _import_ebay_purchase_api(
             po_payload = {
                 "po_number": po_number,
                 "vendor_id": vendor_id,
-                "deliver_status": PurchaseDeliverStatus.CREATED,
+                "deliver_status": PurchaseDeliverStatus.UNRECEIVED,
                 "order_date": order_date_value,
                 "expected_delivery_date": None,
                 "total_amount": total_amount,
