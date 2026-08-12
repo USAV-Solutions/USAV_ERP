@@ -192,7 +192,7 @@ export default function Dashboard() {
     queryKey: ['delayed-purchases-count'],
     queryFn: () =>
       listPurchaseOrdersPaged({
-        deliverStatus: 'CREATED',
+        deliverStatus: 'UNRECEIVED',
         orderDateTo: dateDaysAgo(6),
         limit: 100,
       }),
@@ -329,7 +329,7 @@ export default function Dashboard() {
               </Button>
             }
           >
-            There {delayedPurchasesQuery.data.length === 1 ? 'is 1 purchase order' : `are ${delayedPurchasesQuery.data.length} purchase orders`} that have been in 'CREATED' status for over 6 days.
+            There {delayedPurchasesQuery.data.length === 1 ? 'is 1 purchase order' : `are ${delayedPurchasesQuery.data.length} purchase orders`} that have been in 'UNRECEIVED' status for over 6 days.
           </Alert>
         )}
         {summary?.warnings.map((warning) => (
