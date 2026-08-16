@@ -60,6 +60,7 @@ import HoldActionPromptDialog from '../components/common/HoldActionPromptDialog'
 import LongPressTableRow from '../components/common/LongPressTableRow'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { compileSearchMatcher } from '../utils/search'
+import ZohoSyncStatusChip from '../components/common/ZohoSyncStatusChip'
 
 type ViewMode = 'list' | 'grouped'
 type ListSortBy = 'name' | 'sku' | 'brand' | 'upis' | 'type' | 'color' | 'condition' | 'zoho'
@@ -156,15 +157,7 @@ const getTypeColor = (type: ProductType): 'primary' | 'secondary' | 'success' | 
 }
 
 const getSyncStatusChip = (status: string) => {
-  type ChipColor = 'success' | 'warning' | 'error' | 'default'
-  const configs: Record<string, { color: ChipColor; label: string }> = {
-    SYNCED: { color: 'success', label: '🟢 Synced' },
-    PENDING: { color: 'warning', label: '🟡 Pending' },
-    ERROR: { color: 'error', label: '🔴 Error' },
-    DIRTY: { color: 'warning', label: '🟡 Dirty' },
-  }
-  const config = configs[status] || { color: 'default' as ChipColor, label: status }
-  return <Chip size="small" color={config.color} label={config.label} />
+  return <ZohoSyncStatusChip status={status} />
 }
 
 function ExpandedRow({

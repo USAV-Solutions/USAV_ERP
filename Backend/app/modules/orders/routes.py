@@ -1272,6 +1272,7 @@ async def import_orders_from_file(
                 if order.shipping_status == shipping_status:
                     continue
                 order.shipping_status = shipping_status
+                order.zoho_sync_status = ZohoSyncStatus.DIRTY
                 db.add(order)
                 updated_count += 1
             

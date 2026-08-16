@@ -81,6 +81,7 @@ import VariantSearchAutocomplete from '../components/common/VariantSearchAutocom
 import HoldActionPromptDialog from '../components/common/HoldActionPromptDialog'
 import LongPressTableRow from '../components/common/LongPressTableRow'
 import TablePaginationWithPageJump from '../components/common/TablePaginationWithPageJump'
+import ZohoSyncStatusChip from '../components/common/ZohoSyncStatusChip'
 import OrderSummaryCards from '../components/common/OrderSummaryCards'
 import type { VariantSearchResult } from '../types/orders'
 
@@ -1351,11 +1352,10 @@ export default function PurchasingManagement() {
                               {po.total_amount} {po.currency}
                             </TableCell>
                             <TableCell align="center">
-                              <Chip
+                              <ZohoSyncStatusChip
                                 size="small"
                                 variant="outlined"
-                                color={zohoSyncColor[po.zoho_sync_status]}
-                                label={po.zoho_sync_status}
+                                status={po.zoho_sync_status}
                                 title={po.zoho_sync_error || ''}
                               />
                             </TableCell>

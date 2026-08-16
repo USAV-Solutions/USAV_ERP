@@ -249,7 +249,11 @@ export default function AccountingReports() {
               label="Start Date"
               type="date"
               value={startDate}
-              onChange={(event) => setStartDate(event.target.value)}
+              onChange={(event) => {
+                const value = event.target.value
+                setStartDate(value)
+                setAppliedStartDate(value)
+              }}
               InputLabelProps={{ shrink: true }}
             />
           </Grid>
@@ -259,7 +263,11 @@ export default function AccountingReports() {
               label="End Date"
               type="date"
               value={endDate}
-              onChange={(event) => setEndDate(event.target.value)}
+              onChange={(event) => {
+                const value = event.target.value
+                setEndDate(value)
+                setAppliedEndDate(value)
+              }}
               InputLabelProps={{ shrink: true }}
             />
           </Grid>
@@ -270,7 +278,11 @@ export default function AccountingReports() {
                 labelId="order-by-label"
                 value={orderBy}
                 label="Order By"
-                onChange={(event) => setOrderBy(event.target.value as OrderBy)}
+                onChange={(event) => {
+                  const value = event.target.value as OrderBy
+                  setOrderBy(value)
+                  setAppliedOrderBy(value)
+                }}
               >
                 <MenuItem value="total_price">Total Price</MenuItem>
                 <MenuItem value="quantity">Quantity</MenuItem>
@@ -287,7 +299,11 @@ export default function AccountingReports() {
                 labelId="group-by-label"
                 value={groupBy}
                 label="Group By"
-                onChange={(event) => setGroupBy(event.target.value as ReportGroupBy)}
+                onChange={(event) => {
+                  const value = event.target.value as ReportGroupBy
+                  setGroupBy(value)
+                  setAppliedGroupBy(value)
+                }}
               >
                 <MenuItem value="sku">SKU</MenuItem>
                 <MenuItem value="source">Source</MenuItem>

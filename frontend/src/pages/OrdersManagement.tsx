@@ -83,6 +83,7 @@ import SearchField from '../components/common/SearchField'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import LongPressTableRow from '../components/common/LongPressTableRow'
 import HoldActionPromptDialog from '../components/common/HoldActionPromptDialog'
+import ZohoSyncStatusChip from '../components/common/ZohoSyncStatusChip'
 import TablePaginationWithPageJump from '../components/common/TablePaginationWithPageJump'
 
 // ── Label maps ───────────────────────────────────────────────────────
@@ -202,6 +203,7 @@ export default function OrdersManagement() {
   const [selectedOrder, setSelectedOrder] = useState<OrderBrief | null>(null)
   const [editOrderStatus, setEditOrderStatus] = useState<OrderStatus>('PENDING')
   const [editShippingStatus, setEditShippingStatus] = useState<ShippingStatus>('PENDING')
+  const [editTrackingNumber, setEditTrackingNumber] = useState('')
   const [editNotes, setEditNotes] = useState('')
 
   // Bulk Zoho sync (matched orders only)
@@ -463,6 +465,7 @@ export default function OrdersManagement() {
 
       await updateShippingStatus(selectedOrder.id, {
         shipping_status: editShippingStatus,
+        tracking_number: editTrackingNumber.trim() || undefined,
       })
     },
     onSuccess: async () => {
@@ -509,6 +512,7 @@ export default function OrdersManagement() {
     setSelectedOrder(order)
     setEditOrderStatus(order.status)
     setEditShippingStatus(order.shipping_status)
+    setEditTrackingNumber(order.tracking_number || '')
     setEditNotes('')
     setHoldPromptOpen(true)
   }
@@ -1163,12 +1167,7 @@ export default function OrdersManagement() {
                           </FormControl>
                         </TableCell>
                         <TableCell>
-                          <Chip
-                            size="small"
-                            variant="outlined"
-                            color={ZOHO_SYNC_COLOR[order.zoho_sync_status]}
-                            label={order.zoho_sync_status}
-                          />
+                          <ZohoSyncStatusChip status={order.zoho_sync_status} variant="outlined" />
                         </TableCell>
                         <TableCell>
                           <Typography variant="body2">
@@ -1704,6 +1703,13 @@ export default function OrdersManagement() {
               ))}
             </Select>
           </FormControl>
+          <TextField
+            label="Tracking Number"
+            value={editTrackingNumber}
+            onChange={(e) => setEditTrackingNumber(e.target.value)}
+            fullWidth
+            size="small"
+          />
           <TextField
             label="Processing Notes"
             value={editNotes}
