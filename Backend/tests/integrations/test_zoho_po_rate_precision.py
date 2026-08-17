@@ -2,7 +2,10 @@ from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from types import SimpleNamespace
 
-from app.integrations.zoho.sync_engine import purchase_order_to_zoho_payload
+from app.integrations.zoho.sync_engine import (
+    _build_ebay_bill_payload,
+    purchase_order_to_zoho_payload,
+)
 
 
 def _build_po_item(*, quantity: int, unit_price: str, total_price: str):
@@ -90,3 +93,21 @@ def test_po_payload_keeps_total_exact_when_adjustment_share_repeats():
     )
 
     assert payload_total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) == Decimal("8.00")
+
+
+def test_ebay_bill_payload_does_not_include_charge_adjustments():
+    item = _build_po_item(quantity=2, unit_price="10.00", total_price="20.00")
+    po = _build_po(
+        item,
+        tax_amount="5.00",
+        shipping_amount="10.00",
+        handling_amount="2.50",
+    )
+    po.zoho_id = "5623409000002999001"
+
+    bill_payload = _build_ebay_bill_payload(po)
+
+    assert "adjustment" not in bill_payload
+    assert "adjustment_description" not in bill_payload
+    assert bill_payload["purchaseorder_id"] == "5623409000002999001"
+

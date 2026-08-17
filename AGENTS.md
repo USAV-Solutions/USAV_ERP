@@ -3,6 +3,7 @@
 ## 1. Coding Rules:
 Follow these guidelines:
 
+- Always follow YAGNI.
 - State assumptions before making changes.
 - Prefer the smallest correct change.
 - Do not add features, abstractions, or configurability that were not requested.
