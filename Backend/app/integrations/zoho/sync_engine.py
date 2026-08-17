@@ -965,15 +965,6 @@ def _build_ebay_bill_payload(po: PurchaseOrder) -> dict[str, Any]:
     else:
         payload["line_items"] = line_items
 
-    charge_total = (
-        _to_decimal(getattr(po, "tax_amount", 0), "0")
-        + _to_decimal(getattr(po, "shipping_amount", 0), "0")
-        + _to_decimal(getattr(po, "handling_amount", 0), "0")
-    )
-    if charge_total != Decimal("0"):
-        payload["adjustment"] = float(charge_total)
-        payload["adjustment_description"] = "Shipping Fee + Tax + Handling Fee"
-
     if po.notes:
         payload["notes"] = str(po.notes)
 
