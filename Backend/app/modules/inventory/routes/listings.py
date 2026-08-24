@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 import httpx
-from sqlalchemy import select
+from sqlalchemy import select, or_, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -22,15 +22,29 @@ from app.api.deps import AdminOrSalesUser
 from app.core.config import settings
 from app.core.database import get_db
 from app.integrations.ebay.client import EbayClient
+from app.integrations.shopify.client import ShopifyClient
 from app.models import Platform, PlatformSyncStatus
-from app.models.entities import ProductVariant, ProductIdentity, ProductFamily
+from app.models.entities import ProductVariant, ProductIdentity, ProductFamily, PlatformListing
 from app.repositories import PlatformListingRepository, ProductVariantRepository
 from app.modules.inventory.schemas import (
-    PlatformListingMatchRequest,
+    AISuggestRequest,
+    AISuggestResponse,
+    AISuggestion,
+    CompareField,
+    CompareRequest,
+    CompareResponse,
+    GraphEdge,
+    GraphTopologyResponse,
+    ListingNode,
+    LockRelationshipRequest,
+    LockRelationshipResponse,
     PaginatedResponse,
     PlatformListingCreate,
+    PlatformListingMatchRequest,
     PlatformListingResponse,
     PlatformListingUpdate,
+    ProductNode,
+    RelationshipType,
 )
 from app.modules.inventory.schemas.ebay_listing import (
     EbayAccountResponse,
@@ -60,6 +74,7 @@ _CSV_PLATFORM_MAP: dict[str, Platform] = {
     "ebay_usav": Platform.EBAY_USAV,
     "ebay_dragon": Platform.EBAY_DRAGON,
     "ecwid": Platform.ECWID,
+    "shopify": Platform.SHOPIFY,
     "walmart": Platform.WALMART,
 }
 
@@ -330,6 +345,624 @@ async def import_platform_listings_csv(
         "updated_logs": updated_logs[:200],
         "errors": errors[:200],
     }
+
+
+@router.post("/import/shopify", response_model=dict[str, Any])
+async def import_shopify_listings(
+    _user: AdminOrSalesUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Import all products and variants from Shopify into PlatformListing.
+    
+    Auto-links each variant to existing ERP ProductVariant by matching SKU
+    against ProductVariant.full_sku or matching Ecwid PlatformListing.
+    """
+    shopify = ShopifyClient(
+        shop_url=settings.shopify_shop_url,
+        access_token=settings.shopify_access_token,
+        api_version=settings.shopify_api_version,
+    )
+    
+    # Test connection first
+    conn = await shopify.test_connection()
+    if not conn.get("success"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Shopify connection failed: {conn.get('error')}",
+        )
+    
+    products = await shopify.get_all_products()
+    listing_repo = PlatformListingRepository(db)
+    variant_repo = ProductVariantRepository(db)
+    
+    created = 0
+    updated = 0
+    matched = 0
+    unmatched = 0
+    errors: list[str] = []
+    
+    for item in products:
+        variant_gid = item.get("variant_id")
+        if not variant_gid:
+            continue
+        
+        sku = (item.get("sku") or "").strip()
+        price_val = float(item["price"]) if item.get("price") else None
+        qty_val = item.get("inventory_quantity")
+        listed_title = f"{item.get('product_title', '')} - {item.get('variant_title', '')}".strip(" -")
+        
+        # 1. Attempt to match ERP variant by SKU
+        matched_variant_id: int | None = None
+        if sku:
+            variant = await variant_repo.get_by_sku(sku)
+            if variant:
+                matched_variant_id = variant.id
+            else:
+                # Fallback: check if an Ecwid listing has this merchant_sku with a variant_id
+                ecwid_listing = await listing_repo.get_by_external_ref(Platform.ECWID, sku)
+                if ecwid_listing and ecwid_listing.variant_id:
+                    matched_variant_id = ecwid_listing.variant_id
+        
+        if matched_variant_id:
+            matched += 1
+        else:
+            unmatched += 1
+            
+        listing_data = {
+            "variant_id": matched_variant_id,
+            "platform": Platform.SHOPIFY,
+            "external_ref_id": variant_gid,
+            "merchant_sku": sku or None,
+            "listed_name": listed_title or None,
+            "listing_price": price_val,
+            "listing_quantity": qty_val,
+            "sync_status": PlatformSyncStatus.SYNCED if matched_variant_id else PlatformSyncStatus.PENDING,
+        }
+        
+        try:
+            existing = await listing_repo.get_by_external_ref(Platform.SHOPIFY, variant_gid)
+            if existing:
+                update_fields = {}
+                if price_val is not None:
+                    update_fields["listing_price"] = price_val
+                if qty_val is not None:
+                    update_fields["listing_quantity"] = qty_val
+                if listed_title:
+                    update_fields["listed_name"] = listed_title
+                if sku:
+                    update_fields["merchant_sku"] = sku
+                if existing.variant_id is None and matched_variant_id is not None:
+                    update_fields["variant_id"] = matched_variant_id
+                    update_fields["sync_status"] = PlatformSyncStatus.SYNCED
+                
+                if update_fields:
+                    await listing_repo.update(existing, update_fields)
+                updated += 1
+            else:
+                await listing_repo.create(listing_data)
+                created += 1
+        except Exception as e:
+            msg = f"Failed to save Shopify variant {variant_gid} ({sku}): {e}"
+            logger.error(msg)
+            errors.append(msg)
+            
+    return {
+        "created": created,
+        "updated": updated,
+        "matched": matched,
+        "unmatched": unmatched,
+        "total": len(products),
+        "errors": errors[:100],
+    }
+
+
+# ============================================================================
+# GRAPH & AI RELATIONSHIP MANAGEMENT
+# ============================================================================
+
+@router.get("/graph/{variant_id}", response_model=GraphTopologyResponse)
+async def get_variant_graph_topology(
+    variant_id: int,
+    _user: AdminOrSalesUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get knowledge graph topology for a product variant and its linked platform listings.
+    """
+    stmt = (
+        select(ProductVariant)
+        .options(
+            selectinload(ProductVariant.identity).selectinload(ProductIdentity.family),
+        )
+        .where(ProductVariant.id == variant_id)
+    )
+    result = await db.execute(stmt)
+    variant = result.scalar_one_or_none()
+
+    if not variant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Product variant {variant_id} not found"
+        )
+
+    product_node = ProductNode(
+        variant_id=variant.id,
+        full_sku=variant.full_sku,
+        variant_name=variant.variant_name,
+        thumbnail_url=variant.thumbnail_url,
+        identity_name=variant.identity.identity_name if variant.identity else None,
+        family_name=variant.identity.family.base_name if variant.identity and variant.identity.family else None,
+        family_code=variant.identity.family.family_code if variant.identity and variant.identity.family else None,
+        condition_code=variant.condition_code.value if variant.condition_code else None,
+        color_code=variant.color_code,
+    )
+
+    listings_stmt = select(PlatformListing).where(PlatformListing.variant_id == variant.id)
+    listings_result = await db.execute(listings_stmt)
+    listings = listings_result.scalars().all()
+
+    listing_nodes = []
+    edges = []
+    for listing in listings:
+        meta_rel = None
+        if listing.platform_metadata and isinstance(listing.platform_metadata, dict):
+            meta_rel = listing.platform_metadata.get("relationship_type")
+        
+        if meta_rel and meta_rel in RelationshipType.__members__:
+            rel_type = RelationshipType(meta_rel)
+        else:
+            lname = (listing.listed_name or "").lower()
+            vname = (variant.variant_name or "").lower()
+            if "bundle" in lname or "package" in lname:
+                rel_type = RelationshipType.BUNDLE
+            elif any(kw in lname for kw in ["bracket", "adapter", "cable", "remote", "antenna", "dock", "mount", "stand"]) and not any(kw in vname for kw in ["bracket", "adapter", "cable", "remote", "antenna", "dock", "mount", "stand"]):
+                rel_type = RelationshipType.ACCESSORY
+            else:
+                rel_type = RelationshipType.EXACT
+
+        listing_nodes.append(ListingNode(
+            listing_id=listing.id,
+            variant_id=listing.variant_id,
+            platform=listing.platform,
+            external_ref_id=listing.external_ref_id,
+            merchant_sku=listing.merchant_sku,
+            listed_name=listing.listed_name,
+            listing_price=float(listing.listing_price) if listing.listing_price is not None else None,
+            listing_quantity=listing.listing_quantity,
+            sync_status=listing.sync_status,
+            relationship_type=rel_type,
+            last_synced_at=listing.last_synced_at,
+            sync_error_message=listing.sync_error_message,
+        ))
+        edges.append(GraphEdge(
+            source="product",
+            target=f"listing-{listing.id}",
+            relationship=rel_type.value.lower(),
+            relationship_type=rel_type,
+        ))
+
+    # Query related products within same family (accessories, parts, bundles, sibling variants)
+    related_products_nodes = []
+    if variant.identity and variant.identity.product_id:
+        family_id = variant.identity.product_id
+        rel_stmt = (
+            select(ProductVariant)
+            .join(ProductIdentity, ProductVariant.identity_id == ProductIdentity.id)
+            .options(selectinload(ProductVariant.identity).selectinload(ProductIdentity.family))
+            .where(
+                ProductIdentity.product_id == family_id,
+                ProductVariant.id != variant.id,
+            )
+            .limit(10)
+        )
+        rel_res = await db.execute(rel_stmt)
+        rel_variants = rel_res.scalars().all()
+        for rv in rel_variants:
+            rv_type = rv.identity.type.value if rv.identity and rv.identity.type else "Product"
+            if rv_type in ["P", "A"]:
+                rv_rel = RelationshipType.ACCESSORY
+            elif rv_type in ["B", "K"]:
+                rv_rel = RelationshipType.BUNDLE
+            else:
+                rv_rel = RelationshipType.RELATED_PRODUCT
+
+            related_products_nodes.append(ProductNode(
+                variant_id=rv.id,
+                full_sku=rv.full_sku,
+                variant_name=rv.variant_name,
+                thumbnail_url=rv.thumbnail_url,
+                identity_name=rv.identity.identity_name if rv.identity else None,
+                family_name=rv.identity.family.base_name if rv.identity and rv.identity.family else None,
+                family_code=rv.identity.family.family_code if rv.identity and rv.identity.family else None,
+                condition_code=rv.condition_code.value if rv.condition_code else None,
+                color_code=rv.color_code,
+                identity_type=rv_type,
+            ))
+            edges.append(GraphEdge(
+                source="product",
+                target=f"related-product-{rv.id}",
+                relationship=rv_rel.value.lower(),
+                relationship_type=rv_rel,
+            ))
+
+    return GraphTopologyResponse(
+        product=product_node,
+        listings=listing_nodes,
+        related_products=related_products_nodes,
+        edges=edges,
+    )
+
+
+@router.post("/suggest", response_model=AISuggestResponse)
+async def suggest_listing_matches(
+    request: AISuggestRequest,
+    _user: AdminOrSalesUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    AI-powered listing match suggestions for a product variant.
+    Computes match confidence (0.0 - 1.0) and reasoning using Gemini AI with fallback.
+    """
+    # 1. Fetch target variant
+    stmt = (
+        select(ProductVariant)
+        .options(
+            selectinload(ProductVariant.identity).selectinload(ProductIdentity.family)
+        )
+        .where(ProductVariant.id == request.variant_id)
+    )
+    res = await db.execute(stmt)
+    variant = res.scalar_one_or_none()
+    if not variant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Product variant {request.variant_id} not found"
+        )
+
+    target_sku = variant.full_sku.strip()
+    target_sku_prefix = target_sku.split("-")[0] if "-" in target_sku else target_sku
+    target_name = (variant.variant_name or "").strip()
+    identity_name = (variant.identity.identity_name or "") if variant.identity else ""
+    family_name = (variant.identity.family.base_name or "") if variant.identity and variant.identity.family else ""
+
+    # 2. Query candidate listings
+    query = select(PlatformListing)
+    if not request.include_linked:
+        query = query.where(PlatformListing.variant_id.is_(None))
+    else:
+        query = query.where(
+            or_(PlatformListing.variant_id.is_(None), PlatformListing.variant_id != request.variant_id)
+        )
+
+    if request.platforms:
+        query = query.where(PlatformListing.platform.in_(request.platforms))
+
+    candidates_result = await db.execute(query.limit(200))
+    candidate_listings = candidates_result.scalars().all()
+
+    if not candidate_listings:
+        return AISuggestResponse(
+            variant_id=variant.id,
+            variant_sku=variant.full_sku,
+            variant_name=variant.variant_name,
+            suggestions=[],
+        )
+
+    # Pre-score candidates using string overlap heuristics
+    target_tokens = set(f"{target_sku} {target_name} {identity_name} {family_name}".lower().split())
+    target_tokens.discard("")
+
+    scored_candidates = []
+    for cand in candidate_listings:
+        cand_text = f"{cand.merchant_sku or ''} {cand.listed_name or ''}".lower()
+        cand_tokens = set(cand_text.split())
+
+        overlap = len(target_tokens & cand_tokens)
+        sku_match = target_sku_prefix.lower() in cand_text
+
+        base_score = 0.1
+        if sku_match:
+            base_score += 0.4
+        if overlap > 0:
+            base_score += min(0.4, overlap * 0.1)
+
+        scored_candidates.append((base_score, cand))
+
+    scored_candidates.sort(key=lambda x: x[0], reverse=True)
+    top_candidates = [c for _, c in scored_candidates[:min(15, len(scored_candidates))]]
+
+    # 3. Use Gemini AI for deep semantic scoring if API key is available
+    suggestions: list[AISuggestion] = []
+    ai_used = False
+
+    if settings.gemini_api_key:
+        try:
+            client = genai.Client(api_key=settings.gemini_api_key)
+            candidates_prompt_data = [
+                {
+                    "listing_id": c.id,
+                    "platform": c.platform.value,
+                    "sku": c.merchant_sku,
+                    "title": c.listed_name,
+                    "price": float(c.listing_price) if c.listing_price else None,
+                }
+                for c in top_candidates
+            ]
+
+            prompt = f"""
+            You are an AI product matching engine for an ERP catalog system.
+            We need to match an internal ERP Product Variant against candidate marketplace listings and classify their relationship.
+
+            TARGET ERP PRODUCT:
+            - Full SKU: "{target_sku}"
+            - Variant Name: "{target_name}"
+            - Identity Component: "{identity_name}"
+            - Family / Brand: "{family_name}"
+
+            CANDIDATE LISTINGS:
+            {json.dumps(candidates_prompt_data, indent=2)}
+
+            Evaluate how each candidate listing relates to the Target ERP Product:
+            - EXACT: The candidate is the exact same standalone physical product.
+            - BUNDLE: The candidate is a bundle/kit containing this product plus other items/accessories (e.g. includes amplifier, cables, etc.).
+            - ACCESSORY: The candidate is a compatible accessory or attachment for this product (e.g. bluetooth adapter, bracket, remote, cable).
+            - PART: The candidate is a sub-component or replacement part (e.g. media center only, power supply, laser lens).
+
+            For each candidate, output a JSON object with:
+            - listing_id: integer
+            - relationship_type: "EXACT" | "BUNDLE" | "ACCESSORY" | "PART"
+            - confidence: float between 0.00 and 1.00 (e.g. 0.95 for exact/high match, 0.50 for probable, 0.10 for unlikely)
+            - reasons: list of short strings explaining the match factors (e.g. "Includes Bluetooth adapter accessory", "SKU prefix match", "Compatible wall bracket")
+
+            Output ONLY a valid JSON array of objects, with no markdown code fences or backticks.
+            """
+
+            response = client.models.generate_content(
+                model=settings.gemini_model_name,
+                contents=prompt
+            )
+            raw_text = (response.text or "").strip()
+            if raw_text.startswith("```"):
+                lines = raw_text.splitlines()
+                raw_text = "\n".join(lines[1:-1] if lines[-1].startswith("```") else lines[1:])
+
+            parsed_ai = json.loads(raw_text)
+            ai_scores = {item["listing_id"]: item for item in parsed_ai if "listing_id" in item}
+
+            cand_map = {c.id: c for c in top_candidates}
+            for lid, ai_item in ai_scores.items():
+                if lid in cand_map:
+                    c = cand_map[lid]
+                    conf = float(ai_item.get("confidence", 0.0))
+                    conf = max(0.0, min(1.0, conf))
+                    rel_raw = str(ai_item.get("relationship_type", "EXACT")).upper()
+                    rel_type = RelationshipType(rel_raw) if rel_raw in RelationshipType.__members__ else RelationshipType.EXACT
+                    reasons = ai_item.get("reasons", [])
+                    if not isinstance(reasons, list):
+                        reasons = [str(reasons)]
+                    suggestions.append(AISuggestion(
+                        listing_id=c.id,
+                        platform=c.platform,
+                        external_ref_id=c.external_ref_id,
+                        merchant_sku=c.merchant_sku,
+                        listed_name=c.listed_name,
+                        listing_price=float(c.listing_price) if c.listing_price is not None else None,
+                        relationship_type=rel_type,
+                        confidence=round(conf, 2),
+                        reasons=reasons,
+                    ))
+            ai_used = True
+        except Exception as e:
+            logger.warning("Gemini AI matching fallback triggered: %s", e)
+            ai_used = False
+
+    # Fallback to rule-based scoring if AI wasn't used or returned empty
+    if not ai_used or not suggestions:
+        suggestions = []
+        for score, c in scored_candidates[:request.limit]:
+            reasons = []
+            lname = (c.listed_name or "").lower()
+            if "bundle" in lname or "package" in lname or "with" in lname:
+                rel_type = RelationshipType.BUNDLE
+                reasons.append("Multi-item bundle detected in title")
+            elif any(kw in lname for kw in ["bracket", "adapter", "cable", "remote", "antenna", "dock", "mount", "stand"]):
+                rel_type = RelationshipType.ACCESSORY
+                reasons.append("Compatible accessory / attachment keyword detected")
+            else:
+                rel_type = RelationshipType.EXACT
+
+            if target_sku_prefix and c.merchant_sku and target_sku_prefix.lower() in c.merchant_sku.lower():
+                reasons.append(f"SKU prefix '{target_sku_prefix}' matches")
+            if family_name and c.listed_name and family_name.lower() in c.listed_name.lower():
+                reasons.append(f"Product family '{family_name}' found in title")
+            if not reasons:
+                reasons.append("Keyword / token similarity")
+            suggestions.append(AISuggestion(
+                listing_id=c.id,
+                platform=c.platform,
+                external_ref_id=c.external_ref_id,
+                merchant_sku=c.merchant_sku,
+                listed_name=c.listed_name,
+                listing_price=float(c.listing_price) if c.listing_price is not None else None,
+                relationship_type=rel_type,
+                confidence=round(min(1.0, score), 2),
+                reasons=reasons,
+            ))
+
+    suggestions.sort(key=lambda s: s.confidence, reverse=True)
+    suggestions = suggestions[:request.limit]
+
+    return AISuggestResponse(
+        variant_id=variant.id,
+        variant_sku=variant.full_sku,
+        variant_name=variant.variant_name,
+        suggestions=suggestions,
+    )
+
+
+@router.post("/lock-relationship", response_model=LockRelationshipResponse)
+async def lock_listing_relationship(
+    request: LockRelationshipRequest,
+    _user: AdminOrSalesUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Lock a platform listing to an internal product variant.
+    Permanently establishes the graph relationship and optionally enriches variant metadata.
+    """
+    listing_repo = PlatformListingRepository(db)
+    variant_repo = ProductVariantRepository(db)
+
+    listing = await listing_repo.get(request.listing_id)
+    if not listing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Platform listing {request.listing_id} not found"
+        )
+
+    variant = await variant_repo.get(request.variant_id)
+    if not variant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Product variant {request.variant_id} not found"
+        )
+
+    listing.variant_id = variant.id
+    listing.sync_status = PlatformSyncStatus.SYNCED
+    listing.last_synced_at = datetime.now()
+    listing.sync_error_message = None
+
+    current_meta = dict(listing.platform_metadata or {})
+    current_meta["relationship_type"] = request.relationship_type.value
+    listing.platform_metadata = current_meta
+
+    enriched_fields: list[str] = []
+    if request.enrich_metadata:
+        if not variant.variant_name and listing.listed_name:
+            variant.variant_name = listing.listed_name
+            enriched_fields.append("variant_name")
+
+        if listing.upc:
+            current_meta["locked_upc"] = listing.upc
+            listing.platform_metadata = current_meta
+            enriched_fields.append("upc")
+
+    await db.commit()
+
+    return LockRelationshipResponse(
+        success=True,
+        listing_id=listing.id,
+        variant_id=variant.id,
+        platform=listing.platform,
+        relationship_type=request.relationship_type,
+        enriched_fields=enriched_fields,
+        message=f"Listing {listing.id} successfully locked to variant {variant.full_sku} as {request.relationship_type.value}",
+    )
+
+
+@router.post("/compare", response_model=CompareResponse)
+async def compare_listing_nodes(
+    request: CompareRequest,
+    _user: AdminOrSalesUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Compare 2 to 10 platform listing nodes side-by-side.
+    """
+    stmt = (
+        select(PlatformListing)
+        .where(PlatformListing.id.in_(request.listing_ids))
+    )
+    result = await db.execute(stmt)
+    listings = result.scalars().all()
+
+    found_ids = {l.id for l in listings}
+    missing_ids = set(request.listing_ids) - found_ids
+    if missing_ids:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Listings not found for IDs: {list(missing_ids)}"
+        )
+
+    listing_map = {l.id: l for l in listings}
+    ordered_listings = [listing_map[lid] for lid in request.listing_ids]
+
+    listing_nodes = [
+        ListingNode(
+            listing_id=l.id,
+            variant_id=l.variant_id,
+            platform=l.platform,
+            external_ref_id=l.external_ref_id,
+            merchant_sku=l.merchant_sku,
+            listed_name=l.listed_name,
+            listing_price=float(l.listing_price) if l.listing_price is not None else None,
+            listing_quantity=l.listing_quantity,
+            sync_status=l.sync_status,
+            last_synced_at=l.last_synced_at,
+            sync_error_message=l.sync_error_message,
+        )
+        for l in ordered_listings
+    ]
+
+    comparison_fields = [
+        CompareField(
+            key="platform",
+            label="Platform",
+            values={str(l.id): l.platform.value for l in ordered_listings},
+        ),
+        CompareField(
+            key="listed_name",
+            label="Listed Title",
+            values={str(l.id): l.listed_name for l in ordered_listings},
+        ),
+        CompareField(
+            key="merchant_sku",
+            label="Merchant SKU",
+            values={str(l.id): l.merchant_sku for l in ordered_listings},
+        ),
+        CompareField(
+            key="listing_price",
+            label="Price ($)",
+            values={str(l.id): float(l.listing_price) if l.listing_price is not None else None for l in ordered_listings},
+        ),
+        CompareField(
+            key="listing_quantity",
+            label="Stock Quantity",
+            values={str(l.id): l.listing_quantity for l in ordered_listings},
+        ),
+        CompareField(
+            key="listing_condition",
+            label="Condition",
+            values={str(l.id): l.listing_condition for l in ordered_listings},
+        ),
+        CompareField(
+            key="listing_type",
+            label="Listing Type",
+            values={str(l.id): l.listing_type for l in ordered_listings},
+        ),
+        CompareField(
+            key="sync_status",
+            label="Sync Status",
+            values={str(l.id): l.sync_status.value for l in ordered_listings},
+        ),
+        CompareField(
+            key="last_synced_at",
+            label="Last Synced",
+            values={str(l.id): l.last_synced_at.isoformat() if l.last_synced_at else None for l in ordered_listings},
+        ),
+        CompareField(
+            key="external_ref_id",
+            label="External Ref ID",
+            values={str(l.id): l.external_ref_id for l in ordered_listings},
+        ),
+    ]
+
+    return CompareResponse(
+        listing_ids=request.listing_ids,
+        listings=listing_nodes,
+        comparison_fields=comparison_fields,
+    )
 
 
 @router.get("/{listing_id}", response_model=PlatformListingResponse)

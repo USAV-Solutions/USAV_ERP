@@ -104,6 +104,7 @@ class Platform(str, enum.Enum):
     EBAY_DRAGON = "EBAY_DRAGON"
     EBAY_PURCHASING = "EBAY_PURCHASING"
     ECWID = "ECWID"
+    SHOPIFY = "SHOPIFY"
     WALMART = "WALMART"
 
 

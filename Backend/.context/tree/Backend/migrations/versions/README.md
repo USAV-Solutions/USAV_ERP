@@ -1,4 +1,4 @@
-﻿# Backend\migrations\versions
+# Backend\migrations\versions
 
 ## What This Folder Does
 Concrete Alembic revision files; source of truth for schema transitions.
@@ -19,6 +19,7 @@ Concrete Alembic revision files; source of truth for schema transitions.
 - Migration `0028` drops duplicated customer/shipping snapshot columns from `orders`; it first backfills missing `customer` fields from latest order snapshots per customer.
 - Migration `0029` extends `order_platform_enum` with `SHOPIFY`; update backend/frontend enum lists in lockstep to avoid serialization/filter errors.
 - Migration `0031` extends `user_role` with `ACCOUNTANT`; apply before assigning accountant users or role writes will fail at the DB enum boundary.
+- Migration `0040` extends `platform_enum` with `SHOPIFY` for `platform_listing` table support.
 
 ## Child Folders
 - (No child folders)

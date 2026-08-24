@@ -31,6 +31,11 @@ from app.integrations.zoho.sync_engine import (
     process_order_inbound,
     register_sync_listeners,
 )
+from app.integrations.ecwid.webhooks import (
+    register_ecwid_webhook_handler,
+    router as ecwid_webhooks_router,
+)
+from app.integrations.ecwid.price_sync import sync_ecwid_price_to_shopify
 
 
 logging.basicConfig(
@@ -73,6 +78,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
         logger.info("Zoho auto inbound sync is ENABLED")
     else:
         logger.info("Zoho auto inbound sync is DISABLED")
+
+    # Register Ecwid webhook handlers when Shopify price sync is enabled.
+    if settings.shopify_price_sync_enabled:
+        register_ecwid_webhook_handler("product.updated", sync_ecwid_price_to_shopify)
+        logger = logging.getLogger(__name__)
+        logger.info("Ecwid to Shopify price sync is ENABLED")
+    else:
+        logger = logging.getLogger(__name__)
+        logger.info("Ecwid to Shopify price sync is DISABLED")
 
     yield
     
@@ -188,9 +202,10 @@ app.include_router(accounting_router, prefix=settings.api_prefix)
 app.include_router(dashboard_router, prefix=settings.api_prefix)
 app.include_router(sync_router, prefix=settings.api_prefix)
 
-# Zoho webhooks live outside the API prefix so that Zoho's static
-# webhook URL config stays simple (e.g. https://api.example.com/webhooks/zoho).
+# External webhooks live outside the API prefix so that static
+# webhook URL configs stay simple (e.g. https://domain.com/webhooks/zoho, /webhooks/ecwid).
 app.include_router(zoho_webhooks_router)
+app.include_router(ecwid_webhooks_router)
 
 
 if __name__ == "__main__":

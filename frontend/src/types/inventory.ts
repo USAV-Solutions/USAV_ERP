@@ -170,7 +170,7 @@ export interface BundleComponent {
 }
 
 // Platform types
-export type Platform = 'AMAZON' | 'EBAY_MEKONG' | 'EBAY_USAV' | 'EBAY_DRAGON' | 'ECWID' | 'WALMART'
+export type Platform = 'AMAZON' | 'EBAY_MEKONG' | 'EBAY_USAV' | 'EBAY_DRAGON' | 'EBAY_PURCHASING' | 'ECWID' | 'SHOPIFY' | 'WALMART'
 export type PlatformSyncStatus = 'PENDING' | 'SYNCED' | 'ERROR'
 
 export interface PlatformListing {
@@ -219,3 +219,109 @@ export interface PlatformListingUpdate {
   listing_condition?: string
   upc?: string
 }
+
+// Graph and AI Matching Types
+export type RelationshipType = 'EXACT' | 'BUNDLE' | 'ACCESSORY' | 'PART' | 'RELATED_PRODUCT'
+
+export interface ProductNode {
+  variant_id: number
+  full_sku: string
+  variant_name?: string | null
+  thumbnail_url?: string | null
+  identity_name?: string | null
+  family_name?: string | null
+  family_code?: string | null
+  condition_code?: string | null
+  color_code?: string | null
+  identity_type?: string | null
+}
+
+export interface ListingNode {
+  listing_id: number
+  variant_id?: number | null
+  platform: Platform
+  external_ref_id?: string | null
+  merchant_sku?: string | null
+  listed_name?: string | null
+  listing_price?: number | null
+  listing_quantity?: number | null
+  sync_status: PlatformSyncStatus
+  relationship_type?: RelationshipType
+  last_synced_at?: string | null
+  sync_error_message?: string | null
+}
+
+export interface GraphEdge {
+  source: string
+  target: string
+  relationship: string
+  relationship_type?: RelationshipType
+  confidence?: number | null
+}
+
+export interface GraphTopologyResponse {
+  product: ProductNode
+  listings: ListingNode[]
+  related_products?: ProductNode[]
+  edges: GraphEdge[]
+}
+
+export interface AISuggestRequest {
+  variant_id: number
+  platforms?: Platform[]
+  limit?: number
+  include_linked?: boolean
+}
+
+export interface AISuggestion {
+  listing_id: number
+  platform: Platform
+  external_ref_id?: string | null
+  merchant_sku?: string | null
+  listed_name?: string | null
+  listing_price?: number | null
+  relationship_type?: RelationshipType
+  confidence: number
+  reasons: string[]
+}
+
+export interface AISuggestResponse {
+  variant_id: number
+  variant_sku: string
+  variant_name?: string | null
+  suggestions: AISuggestion[]
+}
+
+export interface LockRelationshipRequest {
+  listing_id: number
+  variant_id: number
+  relationship_type?: RelationshipType
+  enrich_metadata?: boolean
+}
+
+export interface LockRelationshipResponse {
+  success: boolean
+  listing_id: number
+  variant_id: number
+  platform: Platform
+  relationship_type?: RelationshipType
+  enriched_fields: string[]
+  message: string
+}
+
+export interface CompareRequest {
+  listing_ids: number[]
+}
+
+export interface CompareField {
+  key: string
+  label: string
+  values: Record<string, any>
+}
+
+export interface CompareResponse {
+  listing_ids: number[]
+  listings: ListingNode[]
+  comparison_fields: CompareField[]
+}
+
