@@ -6,6 +6,9 @@ export default defineConfig({
   server: {
     port: 3636,
     host: '0.0.0.0',
+    watch: {
+      usePolling: true,
+    },
     proxy: {
       '/api': {
         target: 'http://usav_backend_dev:8080',

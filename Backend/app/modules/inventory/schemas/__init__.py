@@ -15,6 +15,21 @@ from app.modules.inventory.schemas.families import (
     ProductFamilyUpdate,
     ProductFamilyWithIdentities,
 )
+from app.modules.inventory.schemas.graph import (
+    AISuggestRequest,
+    AISuggestResponse,
+    AISuggestion,
+    CompareField,
+    CompareRequest,
+    CompareResponse,
+    GraphEdge,
+    GraphTopologyResponse,
+    ListingNode,
+    LockRelationshipRequest,
+    LockRelationshipResponse,
+    ProductNode,
+    RelationshipType,
+)
 from app.modules.inventory.schemas.identities import (
     ProductIdentityCreate,
     ProductIdentityResponse,
@@ -106,6 +121,20 @@ __all__ = [
     "InventoryReceiveRequest",
     "InventoryReceiveResponse",
     "InventorySummary",
+    # Graph & AI
+    "ProductNode",
+    "ListingNode",
+    "GraphEdge",
+    "GraphTopologyResponse",
+    "RelationshipType",
+    "AISuggestRequest",
+    "AISuggestion",
+    "AISuggestResponse",
+    "LockRelationshipRequest",
+    "LockRelationshipResponse",
+    "CompareRequest",
+    "CompareField",
+    "CompareResponse",
     # Listings
     "PlatformListingCreate",
     "PlatformListingResponse",

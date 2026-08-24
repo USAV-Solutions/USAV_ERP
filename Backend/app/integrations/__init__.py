@@ -22,6 +22,7 @@ from app.integrations.base import (
 from app.integrations.amazon.client import AmazonClient
 from app.integrations.ebay.client import EbayClient
 from app.integrations.ecwid.client import EcwidClient
+from app.integrations.shopify.client import ShopifyClient
 from app.integrations.walmart.client import WalmartClient
 
 # Register all known adapters with the factory
@@ -42,5 +43,6 @@ __all__ = [
     "AmazonClient",
     "EbayClient",
     "EcwidClient",
+    "ShopifyClient",
     "WalmartClient",
 ]

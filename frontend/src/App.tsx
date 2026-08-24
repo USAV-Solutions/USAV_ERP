@@ -8,6 +8,7 @@ import WarehouseScan from './pages/WarehouseScan'
 import InventoryManagement from './pages/InventoryManagement'
 import ProductListings from './pages/ProductListings'
 import CreateEbayListing from './pages/CreateEbayListing'
+import ListingGraphPage from './pages/ListingGraphPage'
 import OrdersManagement from './pages/OrdersManagement'
 import ReturnsManagement from './pages/ReturnsManagement'
 import PurchasingManagement from './pages/PurchasingManagement'
@@ -55,6 +56,7 @@ function App() {
           <Route path="/catalog/inventory" element={<InventoryManagement />} />
           <Route path="/catalog/listings/active" element={<ProductListings />} />
           <Route path="/catalog/listings/create" element={<CreateEbayListing />} />
+          <Route path="/catalog/listings/graph" element={<ListingGraphPage />} />
         </Route>
 
         {/* Orders Routes */}
