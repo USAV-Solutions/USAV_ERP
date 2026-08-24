@@ -44,6 +44,7 @@ export const LOOKUPS = {
 export const LISTINGS = {
   LIST: '/listings',
   IMPORT_CSV: '/listings/import/csv',
+  IMPORT_SHOPIFY: '/listings/import/shopify',
   LISTING: (id: number) => `/listings/${id}`,
   BY_PLATFORM_REF: (platform: string, refId: string) => `/listings/platform/${platform}/ref/${refId}`,
   PENDING: '/listings/pending',
@@ -53,6 +54,10 @@ export const LISTINGS = {
   SYNC: (id: number) => `/listings/${id}/sync`,
   MATCH: (id: number) => `/listings/${id}/match`,
   UNMATCH: (id: number) => `/listings/${id}/unmatch`,
+  GRAPH: (variantId: number) => `/listings/graph/${variantId}`,
+  SUGGEST: '/listings/suggest',
+  LOCK_RELATIONSHIP: '/listings/lock-relationship',
+  COMPARE: '/listings/compare',
 }
 
 export const EBAY_LISTING = {

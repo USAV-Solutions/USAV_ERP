@@ -38,6 +38,7 @@ import {
   QrCodeScanner,
   Add as AddIcon,
   CameraAlt,
+  Hub,
 } from '@mui/icons-material'
 import { useAuth } from '../../hooks/useAuth'
 
@@ -71,6 +72,7 @@ const navItems: NavItem[] = [
     roles: ['ADMIN', 'SALES_REP'],
     children: [
       { title: 'Active Listings', path: '/catalog/listings/active', icon: <Storefront />, roles: ['ADMIN', 'SALES_REP'] },
+      { title: 'Knowledge Graph', path: '/catalog/listings/graph', icon: <Hub />, roles: ['ADMIN', 'SALES_REP'] },
       { title: 'Create New Listing', path: '/catalog/listings/create', icon: <AddIcon />, roles: ['ADMIN', 'SALES_REP'] },
     ],
   },

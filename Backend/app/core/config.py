@@ -162,6 +162,12 @@ class Settings(BaseSettings):
     ecwid_store_id: str = ""
     ecwid_secret: str = ""
     ecwid_api_base_url: str = "https://app.ecwid.com/api/v3"
+
+    # Shopify Integration
+    shopify_shop_url: str = ""
+    shopify_access_token: str = ""
+    shopify_api_version: str = "2024-10"
+    shopify_price_sync_enabled: bool = False
     
     # Walmart Integration
     walmart_client_id: str = ""
@@ -170,7 +176,7 @@ class Settings(BaseSettings):
     
     # Google AISTUDIO
     gemini_api_key: str = ""
-    gemini_model_name: str = "gemini-2.5-flash-lite"
+    gemini_model_name: str = "gemini-2.5-flash"
 
     # Product Images
     product_images_path: str = "/mnt/product_images"

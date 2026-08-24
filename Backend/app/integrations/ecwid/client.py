@@ -127,6 +127,35 @@ class EcwidClient(BasePlatformClient):
         
         return result
     
+    async def get_product(self, product_id: str) -> Optional[dict]:
+        """Fetch full product details including combinations/variants from Ecwid.
+        
+        Returns raw Ecwid product JSON containing:
+        - price, compareToPrice, sku (base product)
+        - combinations[] (each with id, sku, price, options)
+        
+        Args:
+            product_id: Ecwid product ID
+            
+        Returns:
+            Product data dict if found, None otherwise
+        """
+        if not self.is_configured:
+            logger.error("Ecwid client not configured")
+            return None
+        
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(
+                    f"{self.base_url}/products/{product_id}",
+                    headers=self._get_headers()
+                )
+                response.raise_for_status()
+                return response.json()
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to fetch Ecwid product {product_id}: {e}")
+            return None
+    
     async def authenticate(self) -> bool:
         """
         Authenticate with the Ecwid API.

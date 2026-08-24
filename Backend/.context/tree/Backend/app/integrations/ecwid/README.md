@@ -1,4 +1,4 @@
-﻿# Backend\app\integrations\ecwid
+# Backend\app\integrations\ecwid
 
 ## What This Folder Does
 Ecwid integration client and Ecwid payload mapping utilities.
@@ -14,6 +14,7 @@ Ecwid integration client and Ecwid payload mapping utilities.
 - Ecwid shipping normalization now checks optional `street2/addressLine2` and `street3/addressLine3`; populate normalized `ship_address_line2/ship_address_line3` when available.
 - Ecwid order shipping amount should come from `shippingOption.shippingRate` (fallback `discountedShippingRate` / legacy `shipping`), because many order payloads do not populate top-level `shipping`.
 - Ecwid tracking should map from `trackingNumber` into normalized `ExternalOrder.tracking_number` so downstream order headers can expose shipment references.
+- Ecwid webhook endpoint (`POST /webhooks/ecwid`) handles `product.updated` and dispatches `sync_ecwid_price_to_shopify` in `price_sync.py` when `SHOPIFY_PRICE_SYNC_ENABLED=true`.
 
 ## Child Folders
 - (No child folders)

@@ -18,6 +18,7 @@ Core infrastructure configuration: environment settings, DB setup, security help
 - Zoho contact tax-exempt sync can use optional `zoho_contact_tax_exemption_id` and `zoho_contact_tax_authority_id`; if your Zoho org requires these for tax-exempt contacts, leaving them blank may cause contact validation failures.
 - `ENVIRONMENT=development` now forces `SEATALK_REDIRECT_URI` to `http://localhost:3636/auth/seatalk/callback` inside backend settings; non-local callbacks in `.env` are ignored in development mode.
 - eBay listing publish now depends on per-store env defaults (`ebay_*_{mekong|usav|dragon}`): policy IDs, marketplace/country/currency, location/postal code, and `dispatch_time_max`; missing values will hard-fail publish validation.
+- Shopify integration requires `SHOPIFY_SHOP_URL`, `SHOPIFY_ACCESS_TOKEN`, `SHOPIFY_API_VERSION` (default `2024-10`), and `SHOPIFY_PRICE_SYNC_ENABLED` (default `false`). If disabled, incoming Ecwid price sync webhooks are acknowledged but ignored.
 
 ## Child Folders
 - (No child folders)

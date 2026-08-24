@@ -21,6 +21,12 @@ Inventory route handlers split by feature surface (variants, listings, images, e
 - Active Listings now supports bulk CSV import via `POST /listings/import/csv` (Admin/Sales): expected columns are `item_id` (external ref), `platform`, `inventory_db_sku_primary` (variant full SKU), and `item_name`/`listing_name`; platform values may come as list-like strings (for example `['amazon']`) and are normalized to internal platform enums.
 - CSV import response now includes per-row `created_logs`, `updated_logs`, and `errors` summaries (first 200 lines each), and server logs emit row-level create/update/skip messages for troubleshooting.
 - eBay Listing flow is handled under `/listings/ebay/*` (e.g., `/accounts`, `/categories`, `/ai/*`, `/publish`). It uses the Inventory API (`put_inventory_item`, `create_offer`, `publish_offer`) and Gemini for AI suggestions. The store-specific configurations (policy IDs) are read from `ebay-accounts.json` external file.
+- Active Listings now supports Shopify catalog import via `POST /listings/import/shopify` (Admin/Sales): queries Shopify GraphQL `products` and auto-links to ERP variants by matching SKU against `ProductVariant.full_sku` or Ecwid `PlatformListing.merchant_sku`.
+- Active Listings Knowledge Graph and AI match endpoints added:
+  - `GET /listings/graph/{variant_id}`: returns central ProductVariant node, linked PlatformListing nodes, and topology edges for canvas visualization.
+  - `POST /listings/suggest`: AI listing matcher combining string heuristic pre-filtering with Gemini AI confidence scoring (0.0 to 1.0) and reasoning.
+  - `POST /listings/lock-relationship`: locks a platform listing to a product variant and enriches missing variant master metadata.
+  - `POST /listings/compare`: compares 2 to 10 listing nodes side-by-side across all channel metrics.
 
 ## Child Folders
 - (No child folders)
