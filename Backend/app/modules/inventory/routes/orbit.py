@@ -34,6 +34,7 @@ from app.modules.inventory.schemas.graph import (
     OrbitCreateVariantRequest,
     OrbitUpdateRelationshipRequest,
     OrbitUnlinkRequest,
+    OrbitConvertTypeRequest,
     ProductNode,
     RelationshipType,
 )
@@ -204,10 +205,22 @@ async def create_bundle_or_kit(
     if request.product_id:
         pid = request.product_id
     else:
-        # Find next available ProductFamily product_id
-        max_pid_stmt = select(func.max(ProductFamily.product_id))
-        max_pid = (await db.execute(max_pid_stmt)).scalar() or 9000
-        pid = max_pid + 1
+        # If components are provided, derive from the first component's ProductIdentity
+        derived_pid = None
+        for comp in request.components:
+            child_v = await db.get(ProductVariant, comp.child_variant_id)
+            if child_v and child_v.identity_id:
+                child_ident = await db.get(ProductIdentity, child_v.identity_id)
+                if child_ident:
+                    derived_pid = child_ident.product_id
+                    break
+        if derived_pid:
+            pid = derived_pid
+        else:
+            # Find next available ProductFamily product_id
+            max_pid_stmt = select(func.max(ProductFamily.product_id))
+            max_pid = (await db.execute(max_pid_stmt)).scalar() or 9000
+            pid = max_pid + 1
 
     family_code = f"{pid:05d}"
     upis_h = f"{family_code}-{btype_raw}"
@@ -224,37 +237,63 @@ async def create_bundle_or_kit(
         db.add(family)
         await db.flush()
 
-    # 3. Create ProductIdentity
+    # 3. Find or create ProductIdentity
     identity_type = IdentityType.B if btype_raw == "B" else IdentityType.K
-    identity = ProductIdentity(
-        product_id=family.product_id,
-        type=identity_type,
-        identity_name=request.name,
-        generated_upis_h=upis_h,
-        hex_signature=hex_sig,
+    ident_stmt = select(ProductIdentity).where(
+        ProductIdentity.product_id == family.product_id,
+        ProductIdentity.type == identity_type,
     )
-    db.add(identity)
-    await db.flush()
+    ident_res = await db.execute(ident_stmt)
+    identity = ident_res.scalar_one_or_none()
 
-    # 4. Add Bundle / Kit Component recipes
+    if not identity:
+        identity = ProductIdentity(
+            product_id=family.product_id,
+            type=identity_type,
+            identity_name=request.name,
+            generated_upis_h=upis_h,
+            hex_signature=hex_sig,
+        )
+        db.add(identity)
+        await db.flush()
+
+    # 4. Add or update Bundle / Kit Component recipes
     for comp in request.components:
         child_var = await db.get(ProductVariant, comp.child_variant_id)
         if child_var and child_var.identity_id:
-            bc = BundleComponent(
-                parent_identity_id=identity.id,
-                child_identity_id=child_var.identity_id,
-                quantity_required=comp.quantity_required,
+            # Check if this child recipe already exists
+            bc_stmt = select(BundleComponent).where(
+                BundleComponent.parent_identity_id == identity.id,
+                BundleComponent.child_identity_id == child_var.identity_id,
             )
-            db.add(bc)
+            bc_existing = (await db.execute(bc_stmt)).scalar_one_or_none()
+            if bc_existing:
+                bc_existing.quantity_required = comp.quantity_required
+            else:
+                bc = BundleComponent(
+                    parent_identity_id=identity.id,
+                    child_identity_id=child_var.identity_id,
+                    quantity_required=comp.quantity_required,
+                )
+                db.add(bc)
 
-    # 5. Create default sellable ProductVariant for the Bundle/Kit
-    bundle_variant = ProductVariant(
-        identity_id=identity.id,
-        full_sku=upis_h,
-        variant_name=request.name,
-        is_active=True,
+    # 5. Find or create default sellable ProductVariant for the Bundle/Kit
+    var_stmt = select(ProductVariant).where(
+        ProductVariant.identity_id == identity.id,
     )
-    db.add(bundle_variant)
+    var_res = await db.execute(var_stmt)
+    bundle_variant = var_res.scalar_one_or_none()
+
+    if not bundle_variant:
+        bundle_variant = ProductVariant(
+            identity_id=identity.id,
+            full_sku=upis_h,
+            variant_name=request.name,
+            is_active=True,
+        )
+        db.add(bundle_variant)
+        await db.flush()
+
     await db.commit()
     await db.refresh(bundle_variant)
 
@@ -266,6 +305,94 @@ async def create_bundle_or_kit(
         family_name=family.base_name,
         family_code=family.family_code,
         identity_type=btype_raw,
+    )
+
+
+@router.post("/convert-type", response_model=ProductNode)
+async def convert_product_type(
+    request: OrbitConvertTypeRequest,
+    _user: AdminOrSalesUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Fast conversion of a Product Variant to Kit (K), Bundle (B), or Base Product (Product).
+    Updates Identity Type, deterministically recalculates UPIS syntax, and attaches component recipes.
+    """
+    variant = await db.get(ProductVariant, request.variant_id)
+    if not variant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Product variant {request.variant_id} not found",
+        )
+
+    identity = await db.get(ProductIdentity, variant.identity_id)
+    if not identity:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Identity {variant.identity_id} not found",
+        )
+
+    family = await db.get(ProductFamily, identity.product_id)
+    if not family:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Family {identity.product_id} not found",
+        )
+
+    target_type_raw = request.target_type.strip().upper()
+    if target_type_raw == "K":
+        identity.type = IdentityType.K
+        new_upis_h = f"{family.family_code}-K"
+    elif target_type_raw == "B":
+        identity.type = IdentityType.B
+        new_upis_h = f"{family.family_code}-B"
+    else:
+        identity.type = IdentityType.PRODUCT
+        new_upis_h = family.family_code
+
+    identity.generated_upis_h = new_upis_h
+
+    # Update variant SKU metadata: [UPIS-H]-[Color]-[Condition]
+    sku_parts = [new_upis_h]
+    if variant.color_code:
+        sku_parts.append(variant.color_code)
+    if variant.condition_code:
+        cond_val = variant.condition_code.value if hasattr(variant.condition_code, "value") else str(variant.condition_code)
+        sku_parts.append(cond_val)
+
+    variant.full_sku = "-".join(sku_parts)
+
+    # Attach components if provided
+    if request.components:
+        for comp in request.components:
+            child_v = await db.get(ProductVariant, comp.child_variant_id)
+            if child_v and child_v.identity_id:
+                bc_stmt = select(BundleComponent).where(
+                    BundleComponent.parent_identity_id == identity.id,
+                    BundleComponent.child_identity_id == child_v.identity_id,
+                )
+                bc_existing = (await db.execute(bc_stmt)).scalar_one_or_none()
+                if bc_existing:
+                    bc_existing.quantity_required = comp.quantity_required
+                else:
+                    bc = BundleComponent(
+                        parent_identity_id=identity.id,
+                        child_identity_id=child_v.identity_id,
+                        quantity_required=comp.quantity_required,
+                    )
+                    db.add(bc)
+
+    await db.commit()
+    await db.refresh(variant)
+
+    return ProductNode(
+        variant_id=variant.id,
+        full_sku=variant.full_sku,
+        variant_name=variant.variant_name,
+        identity_name=identity.identity_name,
+        family_name=family.base_name,
+        family_code=family.family_code,
+        identity_type=identity.type.value if hasattr(identity.type, "value") else str(identity.type),
     )
 
 

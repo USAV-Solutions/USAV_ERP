@@ -22,6 +22,7 @@ import {
   TrendingUp,
   Warning,
   CenterFocusStrong,
+  ChangeCircle,
 } from '@mui/icons-material'
 import type { RelationshipType, Platform } from '../../types/inventory'
 
@@ -48,6 +49,7 @@ interface OrbitContextMenuProps {
   onUnlink: () => void
   onCreateVariant: () => void
   onFormBundleKit: () => void
+  onConvertType?: () => void
   onScanAI: () => void
   onViewAnalytics: () => void
   onFocusProduct?: (variantId: number) => void
@@ -71,6 +73,7 @@ export default function OrbitContextMenu({
   onUnlink,
   onCreateVariant,
   onFormBundleKit,
+  onConvertType,
   onScanAI,
   onViewAnalytics,
   onFocusProduct,
@@ -120,6 +123,20 @@ export default function OrbitContextMenu({
 
       {/* Master Core Actions */}
       {target.nodeType === 'product' && [
+        <MenuItem
+          key="convert-type"
+          onClick={() => {
+            onClose()
+            if (onConvertType) onConvertType()
+          }}
+          sx={{ fontSize: 12.5, py: 1 }}
+        >
+          <ListItemIcon sx={{ color: '#38bdf8', minWidth: 30 }}>
+            <ChangeCircle fontSize="small" />
+          </ListItemIcon>
+          <ListItemText primary="🔄 Convert Product Type (Kit / Bundle / Base)" primaryTypographyProps={{ fontSize: 12.5, fontWeight: 600, color: '#38bdf8' }} />
+        </MenuItem>,
+
         <MenuItem
           key="create-variant"
           onClick={() => {

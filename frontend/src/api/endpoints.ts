@@ -66,6 +66,7 @@ export const ORBIT = {
   CREATE_VARIANT: '/orbit/variant/create',
   UPDATE_RELATIONSHIP: '/orbit/relationship/update',
   UNLINK: '/orbit/relationship/unlink',
+  CONVERT_TYPE: '/orbit/convert-type',
 }
 
 export const EBAY_LISTING = {

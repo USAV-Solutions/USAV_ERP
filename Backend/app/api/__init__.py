@@ -20,6 +20,7 @@ def get_api_router() -> APIRouter:
         color_router,
         condition_router,
         lci_router,
+        orbit_router,
     )
     from app.modules.purchasing.routes import router as purchasing_router
 
@@ -38,6 +39,7 @@ def get_api_router() -> APIRouter:
     api_router.include_router(inventory_router)
     api_router.include_router(images_router)
     api_router.include_router(zoho_router)
+    api_router.include_router(orbit_router)
     # Lookup routes
     api_router.include_router(brand_router)
     api_router.include_router(color_router)
