@@ -24,6 +24,7 @@ import {
   MenuItem,
   Select,
   Alert,
+  Tooltip,
 } from '@mui/material'
 import {
   Inventory2,
@@ -33,15 +34,19 @@ import {
   Delete,
   Close,
   CheckCircle,
+  Search,
 } from '@mui/icons-material'
 import axiosClient from '../../api/axiosClient'
 import { ORBIT } from '../../api/endpoints'
+import VariantSearchAutocomplete from '../common/VariantSearchAutocomplete'
 import type { BundleComponentInput, OrbitCreateBundleKitRequest, ProductNode } from '../../types/inventory'
+import type { VariantSearchResult } from '../../types/orders'
 
 interface OrbitBundleKitModalProps {
   open: boolean
   onClose: () => void
   selectedNodes: Array<{ variant_id: number; full_sku: string; variant_name?: string | null }>
+  isDarkMode?: boolean
   onSuccess: (createdNode: ProductNode) => void
 }
 
@@ -52,6 +57,7 @@ export default function OrbitBundleKitModal({
   open,
   onClose,
   selectedNodes,
+  isDarkMode = true,
   onSuccess,
 }: OrbitBundleKitModalProps) {
   const [creationType, setCreationType] = useState<'K' | 'B'>('B')
@@ -61,6 +67,15 @@ export default function OrbitBundleKitModal({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Track component item metadata (name & SKU) for display
+  const [componentMetaMap, setComponentMetaMap] = useState<Record<number, { sku: string; name: string }>>(() => {
+    const map: Record<number, { sku: string; name: string }> = {}
+    selectedNodes.forEach((n) => {
+      map[n.variant_id] = { sku: n.full_sku, name: n.variant_name || n.full_sku }
+    })
+    return map
+  })
+
   const [components, setComponents] = useState<BundleComponentInput[]>(() =>
     selectedNodes.map((n, idx) => ({
       child_variant_id: n.variant_id,
@@ -68,6 +83,9 @@ export default function OrbitBundleKitModal({
       role: idx === 0 ? (creationType === 'K' ? 'MAIN_UNIT' : 'PRIMARY') : 'ACCESSORY',
     }))
   )
+
+  // Autocomplete search state for adding new items from catalog
+  const [searchedVariant, setSearchedVariant] = useState<VariantSearchResult | null>(null)
 
   // Auto-fill default title when opening or changing type
   React.useEffect(() => {
@@ -110,6 +128,33 @@ export default function OrbitBundleKitModal({
     setComponents((prev) => prev.filter((_, i) => i !== idx))
   }
 
+  // Handle adding an item from catalog search
+  const handleAddFromSearch = (result: VariantSearchResult | null) => {
+    if (!result) return
+    // Check if already in components
+    if (components.some((c) => c.child_variant_id === result.id)) {
+      setError(`Variant ${result.full_sku} is already added. Increase its quantity instead.`)
+      setSearchedVariant(null)
+      return
+    }
+
+    setComponentMetaMap((prev) => ({
+      ...prev,
+      [result.id]: { sku: result.full_sku, name: result.variant_name || result.product_name || result.full_sku },
+    }))
+
+    setComponents((prev) => [
+      ...prev,
+      {
+        child_variant_id: result.id,
+        quantity_required: 1,
+        role: creationType === 'K' ? 'ACCESSORY' : 'ACCESSORY',
+      },
+    ])
+    setSearchedVariant(null)
+    setError(null)
+  }
+
   const handleSubmit = async () => {
     if (!name.trim()) {
       setError('Please provide a bundle/kit name.')
@@ -148,9 +193,9 @@ export default function OrbitBundleKitModal({
       fullWidth
       PaperProps={{
         sx: {
-          bgcolor: '#0f172a',
-          color: '#f8fafc',
-          border: '1px solid rgba(255, 255, 255, 0.12)',
+          bgcolor: isDarkMode ? '#0f172a' : '#ffffff',
+          color: isDarkMode ? '#f8fafc' : '#0f172a',
+          border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.12)' : '1px solid #cbd5e1',
           borderRadius: 3,
         },
       }}
@@ -162,12 +207,12 @@ export default function OrbitBundleKitModal({
             {creationType === 'K' ? 'Form Predefined Kit (Type K)' : 'Form USAV Bundle (Type B)'}
           </Typography>
         </Stack>
-        <IconButton onClick={onClose} sx={{ color: '#94a3b8' }}>
+        <IconButton onClick={onClose} sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}>
           <Close />
         </IconButton>
       </DialogTitle>
 
-      <DialogContent dividers sx={{ borderColor: 'rgba(255, 255, 255, 0.08)' }}>
+      <DialogContent dividers sx={{ borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.08)' : '#e2e8f0' }}>
         {error && (
           <Alert severity="error" sx={{ mb: 2, bgcolor: 'rgba(127, 29, 29, 0.85)', color: '#ffffff' }}>
             {error}
@@ -175,7 +220,15 @@ export default function OrbitBundleKitModal({
         )}
 
         {/* Formation Type Selector */}
-        <Box sx={{ p: 2, mb: 3, bgcolor: 'rgba(255, 255, 255, 0.03)', borderRadius: 2, border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+        <Box
+          sx={{
+            p: 2,
+            mb: 3,
+            bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.03)' : '#f8fafc',
+            borderRadius: 2,
+            border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid #e2e8f0',
+          }}
+        >
           <Typography variant="subtitle2" sx={{ color: '#38bdf8', fontWeight: 600, mb: 1 }}>
             Select Classification (USAV Product Identification Specification)
           </Typography>
@@ -188,7 +241,7 @@ export default function OrbitBundleKitModal({
                   <Typography variant="body2" sx={{ fontWeight: 600, color: '#f59e0b' }}>
                     📦 USAV Bundle (Type B)
                   </Typography>
-                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block' }}>
+                  <Typography variant="caption" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', display: 'block' }}>
                     Logical grouping assembled dynamically at order time. Stock derived from components.
                   </Typography>
                 </Box>
@@ -203,7 +256,7 @@ export default function OrbitBundleKitModal({
                   <Typography variant="body2" sx={{ fontWeight: 600, color: '#818cf8' }}>
                     🧰 Predefined Kit (Type K)
                   </Typography>
-                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block' }}>
+                  <Typography variant="caption" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', display: 'block' }}>
                     Single sellable manufacturer kit or internally pre-assembled fixed unit. Warehouse picks 1 SKU.
                   </Typography>
                 </Box>
@@ -221,8 +274,13 @@ export default function OrbitBundleKitModal({
             value={name}
             onChange={(e) => setName(e.target.value)}
             size="small"
-            InputLabelProps={{ sx: { color: '#94a3b8' } }}
-            InputProps={{ sx: { color: '#ffffff', bgcolor: 'rgba(255, 255, 255, 0.04)' } }}
+            InputLabelProps={{ sx: { color: isDarkMode ? '#94a3b8' : '#64748b' } }}
+            InputProps={{
+              sx: {
+                color: isDarkMode ? '#ffffff' : '#0f172a',
+                bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.04)' : '#f8fafc',
+              },
+            }}
           />
 
           <Stack direction="row" spacing={2}>
@@ -233,8 +291,13 @@ export default function OrbitBundleKitModal({
               onChange={(e) => setProductId(e.target.value)}
               size="small"
               sx={{ flex: 1 }}
-              InputLabelProps={{ sx: { color: '#94a3b8' } }}
-              InputProps={{ sx: { color: '#ffffff', bgcolor: 'rgba(255, 255, 255, 0.04)' } }}
+              InputLabelProps={{ sx: { color: isDarkMode ? '#94a3b8' : '#64748b' } }}
+              InputProps={{
+                sx: {
+                  color: isDarkMode ? '#ffffff' : '#0f172a',
+                  bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.04)' : '#f8fafc',
+                },
+              }}
               helperText="Auto-generates next available 5-digit ID if empty"
             />
             <TextField
@@ -244,50 +307,104 @@ export default function OrbitBundleKitModal({
               onChange={(e) => setTargetPrice(e.target.value)}
               size="small"
               sx={{ flex: 1 }}
-              InputLabelProps={{ sx: { color: '#94a3b8' } }}
-              InputProps={{ sx: { color: '#ffffff', bgcolor: 'rgba(255, 255, 255, 0.04)' } }}
+              InputLabelProps={{ sx: { color: isDarkMode ? '#94a3b8' : '#64748b' } }}
+              InputProps={{
+                sx: {
+                  color: isDarkMode ? '#ffffff' : '#0f172a',
+                  bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.04)' : '#f8fafc',
+                },
+              }}
             />
           </Stack>
         </Stack>
 
+        {/* ➕ Add Component Search Bar */}
+        <Box
+          sx={{
+            p: 2,
+            mb: 2.5,
+            bgcolor: isDarkMode ? 'rgba(56, 189, 248, 0.05)' : '#f0f9ff',
+            borderRadius: 2,
+            border: isDarkMode ? '1px solid rgba(56, 189, 248, 0.2)' : '1px solid #bae6fd',
+          }}
+        >
+          <Typography variant="subtitle2" sx={{ color: '#0284c7', fontWeight: 600, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Search fontSize="small" /> Add Additional Components from Catalog
+          </Typography>
+          <VariantSearchAutocomplete
+            value={searchedVariant}
+            onChange={handleAddFromSearch}
+            placeholder="Search by SKU, product name, or UPIS to add component..."
+            width="100%"
+            isDarkMode={isDarkMode}
+          />
+        </Box>
+
         {/* Component Recipes Table */}
-        <Typography variant="subtitle2" sx={{ color: '#94a3b8', fontWeight: 600, mb: 1 }}>
-          Selected Components & Roles ({components.length})
+        <Typography variant="subtitle2" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', fontWeight: 600, mb: 1 }}>
+          Included Components & Roles ({components.length})
         </Typography>
 
-        <TableContainer component={Paper} sx={{ bgcolor: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+        <TableContainer
+          component={Paper}
+          sx={{
+            bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.02)' : '#ffffff',
+            border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.06)' : '1px solid #e2e8f0',
+          }}
+        >
           <Table size="small">
             <TableHead>
-              <TableRow sx={{ borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
-                <TableCell sx={{ color: '#94a3b8', fontWeight: 600 }}>Product / SKU</TableCell>
-                <TableCell sx={{ color: '#94a3b8', fontWeight: 600 }}>Quantity</TableCell>
-                <TableCell sx={{ color: '#94a3b8', fontWeight: 600 }}>Role in {creationType === 'K' ? 'Kit' : 'Bundle'}</TableCell>
-                <TableCell sx={{ color: '#94a3b8', width: 40 }}></TableCell>
+              <TableRow sx={{ borderBottom: isDarkMode ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid #cbd5e1' }}>
+                <TableCell sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', fontWeight: 600 }}>Product / SKU</TableCell>
+                <TableCell sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', fontWeight: 600 }}>Quantity</TableCell>
+                <TableCell sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', fontWeight: 600 }}>
+                  Role in {creationType === 'K' ? 'Kit' : 'Bundle'}
+                </TableCell>
+                <TableCell sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', width: 40 }}></TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {components.map((comp, idx) => {
-                const nodeInfo = selectedNodes.find((n) => n.variant_id === comp.child_variant_id)
+                const meta = componentMetaMap[comp.child_variant_id] || { sku: `#${comp.child_variant_id}`, name: 'Product' }
                 return (
-                  <TableRow key={comp.child_variant_id} sx={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)' }}>
-                    <TableCell sx={{ color: '#f8fafc' }}>
+                  <TableRow
+                    key={comp.child_variant_id}
+                    sx={{ borderBottom: isDarkMode ? '1px solid rgba(255, 255, 255, 0.04)' : '1px solid #f1f5f9' }}
+                  >
+                    <TableCell sx={{ color: isDarkMode ? '#f8fafc' : '#0f172a' }}>
                       <Typography variant="body2" sx={{ fontWeight: 600, fontSize: 12 }}>
-                        {nodeInfo?.variant_name || nodeInfo?.full_sku}
+                        {meta.name}
                       </Typography>
                       <Typography variant="caption" sx={{ color: '#38bdf8', fontFamily: 'monospace' }}>
-                        {nodeInfo?.full_sku}
+                        {meta.sku}
                       </Typography>
                     </TableCell>
 
                     <TableCell>
                       <Stack direction="row" alignItems="center" spacing={1}>
-                        <IconButton size="small" onClick={() => handleQtyChange(idx, -1)} sx={{ color: '#94a3b8' }}>
+                        <IconButton
+                          size="small"
+                          onClick={() => handleQtyChange(idx, -1)}
+                          sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}
+                        >
                           <Remove fontSize="small" />
                         </IconButton>
-                        <Typography variant="body2" sx={{ fontWeight: 600, color: '#f8fafc', minWidth: 20, textAlign: 'center' }}>
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            fontWeight: 600,
+                            color: isDarkMode ? '#f8fafc' : '#0f172a',
+                            minWidth: 20,
+                            textAlign: 'center',
+                          }}
+                        >
                           {comp.quantity_required}
                         </Typography>
-                        <IconButton size="small" onClick={() => handleQtyChange(idx, 1)} sx={{ color: '#94a3b8' }}>
+                        <IconButton
+                          size="small"
+                          onClick={() => handleQtyChange(idx, 1)}
+                          sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}
+                        >
                           <Add fontSize="small" />
                         </IconButton>
                       </Stack>
@@ -299,8 +416,8 @@ export default function OrbitBundleKitModal({
                         value={comp.role}
                         onChange={(e) => handleRoleChange(idx, e.target.value)}
                         sx={{
-                          color: '#ffffff',
-                          bgcolor: 'rgba(255, 255, 255, 0.05)',
+                          color: isDarkMode ? '#ffffff' : '#0f172a',
+                          bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : '#f8fafc',
                           fontSize: 12,
                           '& .MuiSelect-select': { py: 0.5 },
                         }}
@@ -327,7 +444,7 @@ export default function OrbitBundleKitModal({
       </DialogContent>
 
       <DialogActions sx={{ p: 2, px: 3 }}>
-        <Button onClick={onClose} sx={{ color: '#94a3b8', textTransform: 'none' }}>
+        <Button onClick={onClose} sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', textTransform: 'none' }}>
           Cancel
         </Button>
         <Button
