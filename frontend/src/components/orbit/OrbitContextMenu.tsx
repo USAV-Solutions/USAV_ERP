@@ -21,6 +21,7 @@ import {
   CheckCircle,
   TrendingUp,
   Warning,
+  CenterFocusStrong,
 } from '@mui/icons-material'
 import type { RelationshipType, Platform } from '../../types/inventory'
 
@@ -28,6 +29,7 @@ export interface ContextMenuTarget {
   type: 'node' | 'edge'
   nodeType?: 'product' | 'listing' | 'related_product' | 'ai_candidate'
   id: string
+  numericId?: number
   title: string
   subtitle?: string
   relationshipType?: RelationshipType
@@ -40,6 +42,7 @@ export interface ContextMenuTarget {
 interface OrbitContextMenuProps {
   anchorPos: { mouseX: number; mouseY: number } | null
   target: ContextMenuTarget | null
+  isDarkMode?: boolean
   onClose: () => void
   onChangeRelationship: (relType: RelationshipType) => void
   onUnlink: () => void
@@ -47,20 +50,22 @@ interface OrbitContextMenuProps {
   onFormBundleKit: () => void
   onScanAI: () => void
   onViewAnalytics: () => void
+  onFocusProduct?: (variantId: number) => void
 }
 
 const RELATIONSHIP_OPTIONS: Array<{ type: RelationshipType; label: string; icon: string; color: string }> = [
-  { type: 'EXACT', label: '🎯 EXACT (1:1 Listing)', icon: '🎯', color: '#38bdf8' },
-  { type: 'ACCESSORY', label: '🔌 ACCESSORY (Compatible Attachment)', icon: '🔌', color: '#10b981' },
-  { type: 'BUNDLE_COMPONENT', label: '📦 BUNDLE_COMPONENT (USAV Bundle B)', icon: '📦', color: '#f59e0b' },
-  { type: 'KIT_COMPONENT', label: '🧰 KIT_COMPONENT (Manufacturer Kit K)', icon: '🧰', color: '#818cf8' },
-  { type: 'PART_LCI', label: '⚙️ PART_LCI (Internal LCI Component P)', icon: '⚙️', color: '#f97316' },
-  { type: 'SIBLING_VARIANT', label: '🔗 SIBLING_VARIANT (Color/Condition)', icon: '🔗', color: '#a855f7' },
+  { type: 'EXACT', label: 'EXACT (1:1 Listing)', icon: '🎯', color: '#38bdf8' },
+  { type: 'ACCESSORY', label: 'ACCESSORY (Compatible Attachment)', icon: '🔌', color: '#10b981' },
+  { type: 'BUNDLE_COMPONENT', label: 'BUNDLE_COMPONENT (USAV Bundle B)', icon: '📦', color: '#f59e0b' },
+  { type: 'KIT_COMPONENT', label: 'KIT_COMPONENT (Manufacturer Kit K)', icon: '🧰', color: '#818cf8' },
+  { type: 'PART_LCI', label: 'PART_LCI (Internal LCI Component P)', icon: '⚙️', color: '#f97316' },
+  { type: 'SIBLING_VARIANT', label: 'SIBLING_VARIANT (Color/Condition)', icon: '🔗', color: '#a855f7' },
 ]
 
 export default function OrbitContextMenu({
   anchorPos,
   target,
+  isDarkMode = true,
   onClose,
   onChangeRelationship,
   onUnlink,
@@ -68,6 +73,7 @@ export default function OrbitContextMenu({
   onFormBundleKit,
   onScanAI,
   onViewAnalytics,
+  onFocusProduct,
 }: OrbitContextMenuProps) {
   if (!anchorPos || !target) return null
 
@@ -83,23 +89,23 @@ export default function OrbitContextMenu({
       }
       PaperProps={{
         sx: {
-          bgcolor: 'rgba(15, 23, 42, 0.96)',
+          bgcolor: isDarkMode ? 'rgba(15, 23, 42, 0.98)' : '#ffffff',
           backdropFilter: 'blur(16px)',
-          color: '#f8fafc',
-          border: '1px solid rgba(255, 255, 255, 0.15)',
+          color: isDarkMode ? '#f8fafc' : '#0f172a',
+          border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid #cbd5e1',
           borderRadius: 2.5,
-          boxShadow: '0 16px 48px rgba(0, 0, 0, 0.8)',
-          minWidth: 260,
+          boxShadow: isDarkMode ? '0 16px 48px rgba(0, 0, 0, 0.8)' : '0 16px 48px rgba(0, 0, 0, 0.15)',
+          minWidth: 270,
           py: 0.5,
         },
       }}
     >
       {/* Header */}
-      <Box sx={{ px: 2, py: 1, borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
+      <Box sx={{ px: 2, py: 1, borderBottom: isDarkMode ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid #e2e8f0' }}>
         <Typography variant="caption" sx={{ color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.8, fontSize: 9.5 }}>
           {target.type === 'edge' ? 'Relationship Tether' : `${target.nodeType || 'Node'}`}
         </Typography>
-        <Typography variant="body2" sx={{ fontWeight: 600, color: '#f8fafc', fontSize: 12 }} noWrap>
+        <Typography variant="body2" sx={{ fontWeight: 600, color: isDarkMode ? '#f8fafc' : '#0f172a', fontSize: 12.5 }} noWrap>
           {target.title}
         </Typography>
         {target.hasPriceMismatch && (
@@ -112,7 +118,7 @@ export default function OrbitContextMenu({
         )}
       </Box>
 
-      {/* Product Core Actions */}
+      {/* Master Core Actions */}
       {target.nodeType === 'product' && [
         <MenuItem
           key="create-variant"
@@ -156,7 +162,7 @@ export default function OrbitContextMenu({
           <ListItemText primary="View Order Velocity & Stock Runway" primaryTypographyProps={{ fontSize: 12.5 }} />
         </MenuItem>,
 
-        <Divider key="div-prod" sx={{ borderColor: 'rgba(255, 255, 255, 0.08)' }} />,
+        <Divider key="div-prod" sx={{ borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.08)' : '#e2e8f0' }} />,
 
         <MenuItem
           key="scan-ai"
@@ -173,8 +179,46 @@ export default function OrbitContextMenu({
         </MenuItem>,
       ]}
 
-      {/* Listing or Edge: Switch Relationship */}
-      {(target.nodeType === 'listing' || target.nodeType === 'ai_candidate' || target.type === 'edge') && (
+      {/* Related Product Actions (Ring 2, 3, 4) */}
+      {target.nodeType === 'related_product' && [
+        <MenuItem
+          key="focus-prod"
+          onClick={() => {
+            onClose()
+            if (target.numericId && onFocusProduct) {
+              onFocusProduct(target.numericId)
+            }
+          }}
+          sx={{ fontSize: 12.5, py: 1 }}
+        >
+          <ListItemIcon sx={{ color: '#38bdf8', minWidth: 30 }}>
+            <CenterFocusStrong fontSize="small" />
+          </ListItemIcon>
+          <ListItemText primary="🪐 Focus as Master Product" primaryTypographyProps={{ fontSize: 12.5, fontWeight: 600, color: '#38bdf8' }} />
+        </MenuItem>,
+
+        <MenuItem
+          key="add-to-bundle"
+          onClick={() => {
+            onClose()
+            onFormBundleKit()
+          }}
+          sx={{ fontSize: 12.5, py: 1 }}
+        >
+          <ListItemIcon sx={{ color: '#f59e0b', minWidth: 30 }}>
+            <Inventory2 fontSize="small" />
+          </ListItemIcon>
+          <ListItemText primary="Form Bundle / Kit with this item" primaryTypographyProps={{ fontSize: 12.5 }} />
+        </MenuItem>,
+
+        <Divider key="div-rel" sx={{ borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.08)' : '#e2e8f0' }} />,
+      ]}
+
+      {/* Listing, Related Product, or Edge: Switch Relationship */}
+      {(target.nodeType === 'listing' ||
+        target.nodeType === 'ai_candidate' ||
+        target.nodeType === 'related_product' ||
+        target.type === 'edge') && (
         <Box>
           <Box sx={{ px: 2, pt: 1, pb: 0.5 }}>
             <Typography variant="caption" sx={{ color: '#94a3b8', fontSize: 10, fontWeight: 600 }}>
@@ -199,13 +243,13 @@ export default function OrbitContextMenu({
                 primaryTypographyProps={{
                   fontSize: 12,
                   fontWeight: target.relationshipType === opt.type ? 700 : 400,
-                  color: target.relationshipType === opt.type ? opt.color : '#f8fafc',
+                  color: target.relationshipType === opt.type ? opt.color : isDarkMode ? '#f8fafc' : '#0f172a',
                 }}
               />
             </MenuItem>
           ))}
 
-          <Divider sx={{ borderColor: 'rgba(255, 255, 255, 0.08)', my: 0.5 }} />
+          <Divider sx={{ borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.08)' : '#e2e8f0', my: 0.5 }} />
 
           <MenuItem
             onClick={() => {
@@ -217,7 +261,7 @@ export default function OrbitContextMenu({
             <ListItemIcon sx={{ color: '#ef4444', minWidth: 30 }}>
               <LinkOff fontSize="small" />
             </ListItemIcon>
-            <ListItemText primary="Unlink / Sever Relationship" primaryTypographyProps={{ fontSize: 12, color: '#ef4444', fontWeight: 600 }} />
+            <ListItemText primary="Unlink / Sever Tether" primaryTypographyProps={{ fontSize: 12, color: '#ef4444', fontWeight: 600 }} />
           </MenuItem>
         </Box>
       )}

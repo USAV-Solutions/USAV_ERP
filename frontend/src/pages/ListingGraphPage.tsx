@@ -39,6 +39,9 @@ import {
   Palette,
   TrendingUp,
   Warning,
+  DarkMode,
+  LightMode,
+  CenterFocusStrong,
 } from '@mui/icons-material'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -114,6 +117,19 @@ interface CanvasEdge {
 export default function ListingGraphPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const queryClient = useQueryClient()
+
+  // Dark / Light Theme Toggle State
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    return localStorage.getItem('orbit_theme') !== 'light'
+  })
+
+  const toggleTheme = () => {
+    setIsDarkMode((prev) => {
+      const next = !prev
+      localStorage.setItem('orbit_theme', next ? 'dark' : 'light')
+      return next
+    })
+  }
 
   const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -197,6 +213,7 @@ export default function ListingGraphPage() {
     },
     enabled: !!activeVariantId,
     refetchInterval: 60000,
+    retry: 1,
   })
 
   // 3. Lock relationship mutation
@@ -491,7 +508,7 @@ export default function ListingGraphPage() {
     edgesRef.current = newEdges
   }, [graphData, selectedVariant, aiSuggestions])
 
-  // 9. Smooth Animation & Celestial Orbit Rendering Loop (requestAnimationFrame)
+  // 9. Animation & Celestial Orbit Rendering Loop (requestAnimationFrame)
   useEffect(() => {
     let isRunning = true
 
@@ -519,18 +536,18 @@ export default function ListingGraphPage() {
       const cx = canvas.clientWidth / 2
       const cy = canvas.clientHeight / 2
 
-      // Draw Celestial Orbit Guide Rings (Faint concentric circles)
+      // Draw Celestial Orbit Guide Rings
       const orbitRings = [175, 250, 325, 390]
       orbitRings.forEach((r, idx) => {
         ctx.beginPath()
         ctx.arc(cx, cy, r, 0, Math.PI * 2)
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)'
+        ctx.strokeStyle = isDarkMode ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.06)'
         ctx.lineWidth = 1
         ctx.setLineDash([4, 8])
         ctx.stroke()
         ctx.setLineDash([])
 
-        ctx.fillStyle = 'rgba(148, 163, 184, 0.25)'
+        ctx.fillStyle = isDarkMode ? 'rgba(148, 163, 184, 0.3)' : 'rgba(100, 116, 139, 0.5)'
         ctx.font = '8px Inter, sans-serif'
         ctx.fillText(`RING ${idx + 1}`, cx + r - 16, cy - 4)
       })
@@ -601,7 +618,7 @@ export default function ListingGraphPage() {
           const confText = `✨ ${(edge.confidence * 100).toFixed(0)}% ${relMeta.label}`
           ctx.font = 'bold 9.5px Inter, sans-serif'
           const tw = ctx.measureText(confText).width + 14
-          ctx.fillStyle = 'rgba(24, 15, 45, 0.94)'
+          ctx.fillStyle = isDarkMode ? 'rgba(24, 15, 45, 0.94)' : 'rgba(255, 255, 255, 0.95)'
           ctx.strokeStyle = '#c084fc'
           ctx.lineWidth = 1.2
           ctx.beginPath()
@@ -609,7 +626,7 @@ export default function ListingGraphPage() {
           ctx.fill()
           ctx.stroke()
 
-          ctx.fillStyle = '#f3e8ff'
+          ctx.fillStyle = isDarkMode ? '#f3e8ff' : '#6b21a8'
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
           ctx.fillText(confText, midX, midY)
@@ -617,7 +634,7 @@ export default function ListingGraphPage() {
           const badgeText = `${relMeta.icon} ${relMeta.label}`
           ctx.font = 'bold 8.5px Inter, sans-serif'
           const tw = ctx.measureText(badgeText).width + 12
-          ctx.fillStyle = 'rgba(15, 23, 42, 0.94)'
+          ctx.fillStyle = isDarkMode ? 'rgba(15, 23, 42, 0.94)' : 'rgba(255, 255, 255, 0.95)'
           ctx.strokeStyle = relMeta.color
           ctx.lineWidth = 1.2
           ctx.beginPath()
@@ -698,7 +715,7 @@ export default function ListingGraphPage() {
           const sku = (node.data as ProductNode).full_sku || ''
           ctx.fillText(sku.length > 12 ? sku.substring(0, 10) + '..' : sku, node.x, node.y + 2)
 
-          // Stock / Velocity Badge Pill under core
+          // Stock Badge Pill under core
           if (analyticsData) {
             ctx.fillStyle = analyticsData.available_stock === 0 ? '#ef4444' : '#4ade80'
             ctx.font = 'bold 8.5px Inter, sans-serif'
@@ -707,8 +724,8 @@ export default function ListingGraphPage() {
         } else if (node.type === 'related_product') {
           const pData = node.data as ProductNode
           const grad = ctx.createRadialGradient(node.x, node.y, 2, node.x, node.y, node.radius)
-          grad.addColorStop(0, '#1e293b')
-          grad.addColorStop(1, '#0f172a')
+          grad.addColorStop(0, isDarkMode ? '#1e293b' : '#ffffff')
+          grad.addColorStop(1, isDarkMode ? '#0f172a' : '#f1f5f9')
           ctx.fillStyle = grad
           ctx.fill()
 
@@ -718,13 +735,13 @@ export default function ListingGraphPage() {
           ctx.stroke()
           ctx.setLineDash([])
 
-          ctx.fillStyle = '#f8fafc'
+          ctx.fillStyle = isDarkMode ? '#f8fafc' : '#0f172a'
           ctx.font = 'bold 9px Inter, sans-serif'
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
           ctx.fillText(relMeta.icon, node.x, node.y - 6)
 
-          ctx.fillStyle = '#cbd5e1'
+          ctx.fillStyle = isDarkMode ? '#cbd5e1' : '#334155'
           ctx.font = '8px monospace'
           const rSku = pData.full_sku || ''
           ctx.fillText(rSku.length > 10 ? rSku.substring(0, 8) + '..' : rSku, node.x, node.y + 7)
@@ -765,8 +782,8 @@ export default function ListingGraphPage() {
           const pMeta = PLATFORM_META[lData.platform] || { label: lData.platform, color: '#38bdf8', icon: '🛒' }
 
           const grad = ctx.createRadialGradient(node.x, node.y, 2, node.x, node.y, node.radius)
-          grad.addColorStop(0, '#1e293b')
-          grad.addColorStop(1, '#0f172a')
+          grad.addColorStop(0, isDarkMode ? '#1e293b' : '#ffffff')
+          grad.addColorStop(1, isDarkMode ? '#0f172a' : '#f1f5f9')
           ctx.fillStyle = grad
           ctx.fill()
 
@@ -777,13 +794,13 @@ export default function ListingGraphPage() {
           ctx.stroke()
           ctx.shadowBlur = 0
 
-          ctx.fillStyle = '#f8fafc'
+          ctx.fillStyle = isDarkMode ? '#f8fafc' : '#0f172a'
           ctx.font = 'bold 9.5px Inter, sans-serif'
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
           ctx.fillText(pMeta.label, node.x, node.y - 7)
 
-          ctx.fillStyle = '#4ade80'
+          ctx.fillStyle = '#10b981'
           ctx.font = 'bold 9.5px Inter, sans-serif'
           const price =
             lData.listing_price !== null && lData.listing_price !== undefined
@@ -831,11 +848,11 @@ export default function ListingGraphPage() {
         cancelAnimationFrame(animFrameRef.current)
       }
     }
-  }, [pan, zoom, draggedNode, hoveredNode, selectedNodeIds, analyticsData])
+  }, [pan, zoom, draggedNode, hoveredNode, selectedNodeIds, analyticsData, isDarkMode])
 
   // Mouse Handlers: Drag, Pan, Select
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (e.button === 2) return // Ignore right-click for panning
+    if (e.button === 2) return
     const canvas = canvasRef.current
     if (!canvas) return
     const rect = canvas.getBoundingClientRect()
@@ -886,7 +903,6 @@ export default function ListingGraphPage() {
       return
     }
 
-    // Hover inspection
     const hovered = nodesRef.current.find((n) => {
       const dx = n.x - mouseX
       const dy = n.y - mouseY
@@ -922,7 +938,7 @@ export default function ListingGraphPage() {
     const mouseX = (e.clientX - rect.left - pan.x) / zoom
     const mouseY = (e.clientY - rect.top - pan.y) / zoom
 
-    // 1. Check if right-clicking a Node
+    // 1. Check Node right-click
     const clickedNode = nodesRef.current.find((n) => {
       const dx = n.x - mouseX
       const dy = n.y - mouseY
@@ -934,33 +950,39 @@ export default function ListingGraphPage() {
       let subtitle = ''
       let price: number | null = null
       let platform: Platform | undefined
+      let numericId: number | undefined
 
       if (clickedNode.type === 'product') {
         const p = clickedNode.data as ProductNode
         title = p.variant_name || p.full_sku
         subtitle = p.full_sku
+        numericId = p.variant_id
       } else if (clickedNode.type === 'listing') {
         const l = clickedNode.data as ListingNode
         title = l.listed_name || l.merchant_sku || 'Listing'
         subtitle = l.platform
         price = l.listing_price
         platform = l.platform
+        numericId = l.listing_id
       } else if (clickedNode.type === 'ai_candidate') {
         const a = clickedNode.data as AISuggestion
         title = a.listed_name || a.merchant_sku || 'AI Candidate'
         subtitle = a.platform
         price = a.listing_price
         platform = a.platform
+        numericId = a.listing_id
       } else {
         const rp = clickedNode.data as ProductNode
         title = rp.variant_name || rp.full_sku
         subtitle = rp.full_sku
+        numericId = rp.variant_id
       }
 
       setContextMenuTarget({
         type: 'node',
         nodeType: clickedNode.type,
         id: clickedNode.id,
+        numericId,
         title,
         subtitle,
         relationshipType: clickedNode.relationship_type,
@@ -974,14 +996,13 @@ export default function ListingGraphPage() {
       return
     }
 
-    // 2. Check if right-clicking an Edge
+    // 2. Check Edge right-click
     const clickedEdge = edgesRef.current.find((edge) => {
       const nodeMap = new Map<string, CanvasNode>()
       nodesRef.current.forEach((n) => nodeMap.set(n.id, n))
       const s = nodeMap.get(edge.source)
       const t = nodeMap.get(edge.target)
       if (!s || !t) return false
-      // Distance from point to line segment
       const midX = (s.x + t.x) / 2
       const midY = (s.y + t.y) / 2
       const dx = midX - mouseX
@@ -998,6 +1019,14 @@ export default function ListingGraphPage() {
       })
       setContextMenuAnchor({ mouseX: e.clientX, mouseY: e.clientY })
     }
+  }
+
+  // Focus a related product as central master core
+  const handleFocusProduct = (variantId: number) => {
+    setSearchParams({ variantId: variantId.toString() })
+    setSelectedVariant(null)
+    setAiSuggestions([])
+    setSelectedNodeIds([])
   }
 
   // Selected node for floating bar
@@ -1028,8 +1057,8 @@ export default function ListingGraphPage() {
         display: 'flex',
         flexDirection: 'column',
         height: 'calc(100vh - 70px)',
-        bgcolor: '#080c14',
-        color: '#f8fafc',
+        bgcolor: isDarkMode ? '#080c14' : '#f8fafc',
+        color: isDarkMode ? '#f8fafc' : '#0f172a',
         overflow: 'hidden',
       }}
     >
@@ -1039,9 +1068,9 @@ export default function ListingGraphPage() {
         sx={{
           p: 1.5,
           px: 3,
-          bgcolor: 'rgba(15, 23, 42, 0.95)',
+          bgcolor: isDarkMode ? 'rgba(15, 23, 42, 0.95)' : '#ffffff',
           backdropFilter: 'blur(12px)',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+          borderBottom: isDarkMode ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid #e2e8f0',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -1065,6 +1094,7 @@ export default function ListingGraphPage() {
                 }
               }}
               placeholder="Query product by SKU, Name, or UPIS..."
+              isDarkMode={isDarkMode}
             />
           </Box>
         </Stack>
@@ -1078,8 +1108,8 @@ export default function ListingGraphPage() {
                 label={`🔥 ${analyticsData.units_sold_30d} sold (30d) · ${analyticsData.available_stock} stock (${analyticsData.runway_days ?? '--'}d runway)`}
                 onClick={() => setAnalyticsModalOpen(true)}
                 sx={{
-                  bgcolor: 'rgba(16, 185, 129, 0.1)',
-                  color: '#10b981',
+                  bgcolor: isDarkMode ? 'rgba(16, 185, 129, 0.1)' : 'rgba(16, 185, 129, 0.15)',
+                  color: isDarkMode ? '#10b981' : '#047857',
                   border: '1px solid rgba(16, 185, 129, 0.3)',
                   fontWeight: 600,
                   fontSize: 11,
@@ -1089,7 +1119,7 @@ export default function ListingGraphPage() {
             </Tooltip>
           )}
 
-          {/* Form Bundle / Kit Button (Enabled when selecting items) */}
+          {/* Form Bundle / Kit Button */}
           <Button
             variant="outlined"
             size="small"
@@ -1157,11 +1187,27 @@ export default function ListingGraphPage() {
             {aiScanning ? 'Scanning...' : 'Scan AI'}
           </Button>
 
-          <Stack direction="row" sx={{ bgcolor: 'rgba(255, 255, 255, 0.05)', borderRadius: 1 }}>
-            <IconButton size="small" onClick={() => setZoom((z) => Math.min(2.5, z * 1.15))} sx={{ color: '#94a3b8' }}>
+          {/* Dark / Light Mode Toggle */}
+          <Tooltip title={`Switch to ${isDarkMode ? 'Light' : 'Dark'} Mode`}>
+            <IconButton
+              size="small"
+              onClick={toggleTheme}
+              sx={{
+                color: isDarkMode ? '#fbbf24' : '#64748b',
+                bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.06)' : '#f1f5f9',
+                borderRadius: 1.5,
+              }}
+            >
+              {isDarkMode ? <LightMode fontSize="small" /> : <DarkMode fontSize="small" />}
+            </IconButton>
+          </Tooltip>
+
+          {/* Pan / Zoom Reset Controls */}
+          <Stack direction="row" sx={{ bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : '#f1f5f9', borderRadius: 1 }}>
+            <IconButton size="small" onClick={() => setZoom((z) => Math.min(2.5, z * 1.15))} sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}>
               <ZoomIn fontSize="small" />
             </IconButton>
-            <IconButton size="small" onClick={() => setZoom((z) => Math.max(0.4, z * 0.85))} sx={{ color: '#94a3b8' }}>
+            <IconButton size="small" onClick={() => setZoom((z) => Math.max(0.4, z * 0.85))} sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}>
               <ZoomOut fontSize="small" />
             </IconButton>
             <IconButton
@@ -1170,7 +1216,7 @@ export default function ListingGraphPage() {
                 setZoom(1)
                 setPan({ x: 0, y: 0 })
               }}
-              sx={{ color: '#94a3b8' }}
+              sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}
             >
               <RestartAlt fontSize="small" />
             </IconButton>
@@ -1185,8 +1231,8 @@ export default function ListingGraphPage() {
             severity="warning"
             icon={<Warning sx={{ color: '#fbbf24' }} />}
             sx={{
-              bgcolor: 'rgba(120, 53, 15, 0.85)',
-              color: '#ffffff',
+              bgcolor: isDarkMode ? 'rgba(120, 53, 15, 0.85)' : '#fffbeb',
+              color: isDarkMode ? '#ffffff' : '#92400e',
               border: '1px solid #f59e0b',
               fontSize: 12.5,
               fontWeight: 600,
@@ -1206,11 +1252,28 @@ export default function ListingGraphPage() {
             sx={{
               bgcolor:
                 actionMessage.type === 'success'
-                  ? 'rgba(6, 78, 59, 0.85)'
+                  ? isDarkMode
+                    ? 'rgba(6, 78, 59, 0.85)'
+                    : '#ecfdf5'
                   : actionMessage.type === 'warning'
-                  ? 'rgba(120, 53, 15, 0.85)'
-                  : 'rgba(127, 29, 29, 0.85)',
-              color: '#ffffff',
+                  ? isDarkMode
+                    ? 'rgba(120, 53, 15, 0.85)'
+                    : '#fffbeb'
+                  : isDarkMode
+                  ? 'rgba(127, 29, 29, 0.85)'
+                  : '#fef2f2',
+              color:
+                actionMessage.type === 'success'
+                  ? isDarkMode
+                    ? '#ffffff'
+                    : '#065f46'
+                  : actionMessage.type === 'warning'
+                  ? isDarkMode
+                    ? '#ffffff'
+                    : '#92400e'
+                  : isDarkMode
+                  ? '#ffffff'
+                  : '#991b1b',
               border: `1px solid ${
                 actionMessage.type === 'success' ? '#10b981' : actionMessage.type === 'warning' ? '#f59e0b' : '#ef4444'
               }`,
@@ -1229,7 +1292,9 @@ export default function ListingGraphPage() {
           position: 'relative',
           overflow: 'hidden',
           cursor: isPanning ? 'grabbing' : 'grab',
-          background: 'radial-gradient(ellipse at center, #0f172a 0%, #080c14 100%)',
+          background: isDarkMode
+            ? 'radial-gradient(ellipse at center, #0f172a 0%, #080c14 100%)'
+            : 'radial-gradient(ellipse at center, #ffffff 0%, #f1f5f9 100%)',
         }}
       >
         {isGraphLoading && (
@@ -1244,7 +1309,7 @@ export default function ListingGraphPage() {
             }}
           >
             <CircularProgress size={40} sx={{ color: '#38bdf8' }} />
-            <Typography variant="body2" sx={{ color: '#94a3b8', mt: 1.5 }}>
+            <Typography variant="body2" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', mt: 1.5 }}>
               Loading Orbit Galaxy...
             </Typography>
           </Box>
@@ -1260,17 +1325,18 @@ export default function ListingGraphPage() {
               textAlign: 'center',
               maxWidth: 440,
               p: 4,
-              bgcolor: 'rgba(15, 23, 42, 0.85)',
+              bgcolor: isDarkMode ? 'rgba(15, 23, 42, 0.85)' : '#ffffff',
               backdropFilter: 'blur(10px)',
               borderRadius: 3,
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid #e2e8f0',
+              boxShadow: isDarkMode ? 'none' : '0 10px 30px rgba(0,0,0,0.08)',
             }}
           >
             <Search sx={{ fontSize: 48, color: '#38bdf8', mb: 1 }} />
-            <Typography variant="h6" sx={{ fontWeight: 600, color: '#f8fafc' }}>
+            <Typography variant="h6" sx={{ fontWeight: 600, color: isDarkMode ? '#f8fafc' : '#0f172a' }}>
               Search for an ERP Product
             </Typography>
-            <Typography variant="body2" sx={{ color: '#94a3b8', mt: 1 }}>
+            <Typography variant="body2" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', mt: 1 }}>
               Type any SKU (e.g. <code>00005-BK</code>, <code>00738</code>) above to open its full Orbit View with live sales velocity, kits, bundles, and channel sync.
             </Typography>
           </Box>
@@ -1294,11 +1360,11 @@ export default function ListingGraphPage() {
               left: hoverPos.x,
               top: hoverPos.y,
               maxWidth: 340,
-              bgcolor: 'rgba(15, 23, 42, 0.96)',
+              bgcolor: isDarkMode ? 'rgba(15, 23, 42, 0.96)' : 'rgba(255, 255, 255, 0.98)',
               backdropFilter: 'blur(14px)',
-              border: '1px solid rgba(255, 255, 255, 0.15)',
+              border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid #cbd5e1',
               borderRadius: 2,
-              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.7)',
+              boxShadow: isDarkMode ? '0 8px 32px rgba(0, 0, 0, 0.7)' : '0 8px 32px rgba(0, 0, 0, 0.15)',
               pointerEvents: 'none',
               zIndex: 20,
             }}
@@ -1316,7 +1382,7 @@ export default function ListingGraphPage() {
                   size="small"
                   label={RELATIONSHIP_META[hoveredNode.relationship_type]?.label || hoveredNode.relationship_type}
                   sx={{
-                    bgcolor: 'rgba(255, 255, 255, 0.08)',
+                    bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.08)' : '#f1f5f9',
                     color: RELATIONSHIP_META[hoveredNode.relationship_type]?.color || '#38bdf8',
                     fontWeight: 600,
                     fontSize: 10,
@@ -1324,19 +1390,19 @@ export default function ListingGraphPage() {
                 />
               </Stack>
 
-              <Typography variant="body2" sx={{ fontWeight: 600, color: '#f8fafc', fontSize: 12 }}>
+              <Typography variant="body2" sx={{ fontWeight: 600, color: isDarkMode ? '#f8fafc' : '#0f172a', fontSize: 12 }}>
                 {'listed_name' in hoveredNode.data
                   ? (hoveredNode.data as ListingNode).listed_name || (hoveredNode.data as ListingNode).merchant_sku
                   : (hoveredNode.data as ProductNode).variant_name || (hoveredNode.data as ProductNode).full_sku}
               </Typography>
 
               {hoveredNode.reasons && hoveredNode.reasons.length > 0 && (
-                <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
-                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                <Box sx={{ mt: 1, pt: 1, borderTop: isDarkMode ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid #e2e8f0' }}>
+                  <Typography variant="caption" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', display: 'block', mb: 0.5 }}>
                     Match Reasoning:
                   </Typography>
                   {hoveredNode.reasons.map((r, i) => (
-                    <Typography key={i} variant="caption" sx={{ color: '#cbd5e1', display: 'block', fontSize: 10.5 }}>
+                    <Typography key={i} variant="caption" sx={{ color: isDarkMode ? '#cbd5e1' : '#334155', display: 'block', fontSize: 10.5 }}>
                       • {r}
                     </Typography>
                   ))}
@@ -1359,9 +1425,9 @@ export default function ListingGraphPage() {
               bottom: 24,
               left: '50%',
               transform: 'translateX(-50%)',
-              bgcolor: 'rgba(15, 23, 42, 0.95)',
+              bgcolor: isDarkMode ? 'rgba(15, 23, 42, 0.95)' : '#ffffff',
               backdropFilter: 'blur(16px)',
-              border: '1px solid rgba(255, 255, 255, 0.15)',
+              border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid #cbd5e1',
               borderRadius: 3,
               p: 2,
               px: 3,
@@ -1369,7 +1435,7 @@ export default function ListingGraphPage() {
               alignItems: 'center',
               gap: 2.5,
               zIndex: 30,
-              boxShadow: '0 12px 40px rgba(0, 0, 0, 0.7)',
+              boxShadow: isDarkMode ? '0 12px 40px rgba(0, 0, 0, 0.7)' : '0 12px 40px rgba(0, 0, 0, 0.15)',
               maxWidth: '90%',
             }}
           >
@@ -1388,7 +1454,7 @@ export default function ListingGraphPage() {
                   />
                 )}
               </Stack>
-              <Typography variant="body2" sx={{ fontWeight: 600, color: '#f8fafc', fontSize: 12 }} noWrap>
+              <Typography variant="body2" sx={{ fontWeight: 600, color: isDarkMode ? '#f8fafc' : '#0f172a', fontSize: 12 }} noWrap>
                 {'listed_name' in selectedNode.data ? (selectedNode.data as ListingNode).listed_name : ''}
               </Typography>
             </Box>
@@ -1496,7 +1562,7 @@ export default function ListingGraphPage() {
               </Tooltip>
             </Stack>
 
-            <IconButton size="small" onClick={() => setSelectedNodeIds([])} sx={{ color: '#94a3b8' }}>
+            <IconButton size="small" onClick={() => setSelectedNodeIds([])} sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}>
               <Close fontSize="small" />
             </IconButton>
           </Paper>
@@ -1507,14 +1573,15 @@ export default function ListingGraphPage() {
       <OrbitContextMenu
         anchorPos={contextMenuAnchor}
         target={contextMenuTarget}
+        isDarkMode={isDarkMode}
         onClose={() => {
           setContextMenuAnchor(null)
           setContextMenuTarget(null)
         }}
         onChangeRelationship={(relType) => {
           if (!contextMenuTarget) return
-          const numericId = parseInt(
-            contextMenuTarget.id.replace('listing-', '').replace('ai-', '').replace('edge-listing-', ''),
+          const numericId = contextMenuTarget.numericId || parseInt(
+            contextMenuTarget.id.replace('listing-', '').replace('ai-', '').replace('edge-listing-', '').replace('related-product-', ''),
             10
           )
           updateRelMutation.mutate({
@@ -1525,8 +1592,8 @@ export default function ListingGraphPage() {
         }}
         onUnlink={() => {
           if (!contextMenuTarget) return
-          const numericId = parseInt(
-            contextMenuTarget.id.replace('listing-', '').replace('ai-', '').replace('edge-listing-', ''),
+          const numericId = contextMenuTarget.numericId || parseInt(
+            contextMenuTarget.id.replace('listing-', '').replace('ai-', '').replace('edge-listing-', '').replace('related-product-', ''),
             10
           )
           unlinkMutation.mutate({
@@ -1538,6 +1605,7 @@ export default function ListingGraphPage() {
         onFormBundleKit={() => setBundleKitModalOpen(true)}
         onScanAI={handleScanAI}
         onViewAnalytics={() => setAnalyticsModalOpen(true)}
+        onFocusProduct={handleFocusProduct}
       />
 
       {/* Bundle / Kit Creator Modal */}
@@ -1546,6 +1614,7 @@ export default function ListingGraphPage() {
           open={bundleKitModalOpen}
           onClose={() => setBundleKitModalOpen(false)}
           selectedNodes={multiSelectedProducts}
+          isDarkMode={isDarkMode}
           onSuccess={(created) => {
             setActionMessage({ type: 'success', text: `Created ${created.full_sku} (${created.variant_name})!` })
             queryClient.invalidateQueries({ queryKey: ['listing-graph', activeVariantId] })
@@ -1574,9 +1643,9 @@ export default function ListingGraphPage() {
         fullWidth
         PaperProps={{
           sx: {
-            bgcolor: '#0f172a',
-            color: '#f8fafc',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
+            bgcolor: isDarkMode ? '#0f172a' : '#ffffff',
+            color: isDarkMode ? '#f8fafc' : '#0f172a',
+            border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid #cbd5e1',
             borderRadius: 3,
           },
         }}
@@ -1588,21 +1657,29 @@ export default function ListingGraphPage() {
               Order Velocity & Inventory Runway
             </Typography>
           </Stack>
-          <IconButton onClick={() => setAnalyticsModalOpen(false)} sx={{ color: '#94a3b8' }}>
+          <IconButton onClick={() => setAnalyticsModalOpen(false)} sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}>
             <Close />
           </IconButton>
         </DialogTitle>
 
-        <DialogContent dividers sx={{ borderColor: 'rgba(255, 255, 255, 0.08)' }}>
+        <DialogContent dividers sx={{ borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.08)' : '#e2e8f0' }}>
           {analyticsData ? (
             <Stack spacing={2.5}>
               {/* Quick Metrics Grid */}
               <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 1.5 }}>
-                <Paper sx={{ p: 1.5, bgcolor: 'rgba(255, 255, 255, 0.04)', borderRadius: 2, textAlign: 'center' }}>
-                  <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                <Paper
+                  sx={{
+                    p: 1.5,
+                    bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.04)' : '#f8fafc',
+                    border: isDarkMode ? 'none' : '1px solid #e2e8f0',
+                    borderRadius: 2,
+                    textAlign: 'center',
+                  }}
+                >
+                  <Typography variant="caption" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}>
                     30-Day Sales
                   </Typography>
-                  <Typography variant="h6" sx={{ color: '#f8fafc', fontWeight: 700 }}>
+                  <Typography variant="h6" sx={{ color: isDarkMode ? '#f8fafc' : '#0f172a', fontWeight: 700 }}>
                     {analyticsData.units_sold_30d} units
                   </Typography>
                   <Typography variant="caption" sx={{ color: '#10b981', fontWeight: 600 }}>
@@ -1610,8 +1687,16 @@ export default function ListingGraphPage() {
                   </Typography>
                 </Paper>
 
-                <Paper sx={{ p: 1.5, bgcolor: 'rgba(255, 255, 255, 0.04)', borderRadius: 2, textAlign: 'center' }}>
-                  <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                <Paper
+                  sx={{
+                    p: 1.5,
+                    bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.04)' : '#f8fafc',
+                    border: isDarkMode ? 'none' : '1px solid #e2e8f0',
+                    borderRadius: 2,
+                    textAlign: 'center',
+                  }}
+                >
+                  <Typography variant="caption" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}>
                     Warehouse Stock
                   </Typography>
                   <Typography
@@ -1623,13 +1708,21 @@ export default function ListingGraphPage() {
                   >
                     {analyticsData.available_stock} units
                   </Typography>
-                  <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                  <Typography variant="caption" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}>
                     Available on-hand
                   </Typography>
                 </Paper>
 
-                <Paper sx={{ p: 1.5, bgcolor: 'rgba(255, 255, 255, 0.04)', borderRadius: 2, textAlign: 'center' }}>
-                  <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                <Paper
+                  sx={{
+                    p: 1.5,
+                    bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.04)' : '#f8fafc',
+                    border: isDarkMode ? 'none' : '1px solid #e2e8f0',
+                    borderRadius: 2,
+                    textAlign: 'center',
+                  }}
+                >
+                  <Typography variant="caption" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}>
                     Stock Runway
                   </Typography>
                   <Typography
@@ -1646,7 +1739,7 @@ export default function ListingGraphPage() {
                   >
                     {analyticsData.runway_days !== null ? `${analyticsData.runway_days} days` : '∞'}
                   </Typography>
-                  <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                  <Typography variant="caption" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}>
                     {analyticsData.stock_warning}
                   </Typography>
                 </Paper>
@@ -1661,26 +1754,33 @@ export default function ListingGraphPage() {
 
               {/* Channel Sales Table */}
               <Box>
-                <Typography variant="subtitle2" sx={{ color: '#94a3b8', fontWeight: 600, mb: 1 }}>
+                <Typography variant="subtitle2" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', fontWeight: 600, mb: 1 }}>
                   Channel Order Breakdown (Last 90 Days)
                 </Typography>
-                <TableContainer component={Paper} sx={{ bgcolor: 'transparent', boxShadow: 'none' }}>
+                <TableContainer
+                  component={Paper}
+                  sx={{
+                    bgcolor: isDarkMode ? 'transparent' : '#f8fafc',
+                    border: isDarkMode ? 'none' : '1px solid #e2e8f0',
+                    boxShadow: 'none',
+                  }}
+                >
                   <Table size="small">
                     <TableHead>
-                      <TableRow sx={{ borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
-                        <TableCell sx={{ color: '#94a3b8', fontWeight: 600 }}>Platform</TableCell>
-                        <TableCell sx={{ color: '#94a3b8', fontWeight: 600 }}>30d Units</TableCell>
-                        <TableCell sx={{ color: '#94a3b8', fontWeight: 600 }}>30d Revenue</TableCell>
-                        <TableCell sx={{ color: '#94a3b8', fontWeight: 600 }}>90d Units</TableCell>
+                      <TableRow sx={{ borderBottom: isDarkMode ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid #cbd5e1' }}>
+                        <TableCell sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', fontWeight: 600 }}>Platform</TableCell>
+                        <TableCell sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', fontWeight: 600 }}>30d Units</TableCell>
+                        <TableCell sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', fontWeight: 600 }}>30d Revenue</TableCell>
+                        <TableCell sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', fontWeight: 600 }}>90d Units</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
                       {analyticsData.channel_metrics.map((cm) => (
-                        <TableRow key={cm.platform} sx={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                          <TableCell sx={{ color: '#38bdf8', fontWeight: 600, fontSize: 12 }}>{cm.platform}</TableCell>
-                          <TableCell sx={{ color: '#f8fafc', fontSize: 12 }}>{cm.units_sold_30d}</TableCell>
+                        <TableRow key={cm.platform} sx={{ borderBottom: isDarkMode ? '1px solid rgba(255, 255, 255, 0.05)' : '1px solid #f1f5f9' }}>
+                          <TableCell sx={{ color: '#0284c7', fontWeight: 600, fontSize: 12 }}>{cm.platform}</TableCell>
+                          <TableCell sx={{ color: isDarkMode ? '#f8fafc' : '#0f172a', fontSize: 12 }}>{cm.units_sold_30d}</TableCell>
                           <TableCell sx={{ color: '#10b981', fontSize: 12 }}>${cm.revenue_30d.toFixed(2)}</TableCell>
-                          <TableCell sx={{ color: '#cbd5e1', fontSize: 12 }}>{cm.units_sold_90d}</TableCell>
+                          <TableCell sx={{ color: isDarkMode ? '#cbd5e1' : '#334155', fontSize: 12 }}>{cm.units_sold_90d}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -1694,7 +1794,7 @@ export default function ListingGraphPage() {
         </DialogContent>
 
         <DialogActions sx={{ p: 2 }}>
-          <Button onClick={() => setAnalyticsModalOpen(false)} sx={{ color: '#94a3b8', textTransform: 'none' }}>
+          <Button onClick={() => setAnalyticsModalOpen(false)} sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', textTransform: 'none' }}>
             Close
           </Button>
         </DialogActions>
@@ -1708,9 +1808,9 @@ export default function ListingGraphPage() {
         fullWidth
         PaperProps={{
           sx: {
-            bgcolor: '#0f172a',
-            color: '#f8fafc',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
+            bgcolor: isDarkMode ? '#0f172a' : '#ffffff',
+            color: isDarkMode ? '#f8fafc' : '#0f172a',
+            border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid #cbd5e1',
             borderRadius: 3,
           },
         }}
@@ -1722,12 +1822,12 @@ export default function ListingGraphPage() {
               Multi-Listing Side-by-Side Comparison
             </Typography>
           </Stack>
-          <IconButton onClick={() => setCompareOpen(false)} sx={{ color: '#94a3b8' }}>
+          <IconButton onClick={() => setCompareOpen(false)} sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}>
             <Close />
           </IconButton>
         </DialogTitle>
 
-        <DialogContent dividers sx={{ borderColor: 'rgba(255, 255, 255, 0.08)' }}>
+        <DialogContent dividers sx={{ borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.08)' : '#e2e8f0' }}>
           {isCompareLoading ? (
             <Box sx={{ textAlign: 'center', py: 4 }}>
               <CircularProgress size={32} sx={{ color: '#38bdf8' }} />
@@ -1736,8 +1836,8 @@ export default function ListingGraphPage() {
             <TableContainer component={Paper} sx={{ bgcolor: 'transparent', boxShadow: 'none' }}>
               <Table size="small">
                 <TableHead>
-                  <TableRow sx={{ borderBottom: '1px solid rgba(255, 255, 255, 0.12)' }}>
-                    <TableCell sx={{ color: '#94a3b8', fontWeight: 600 }}>Attribute</TableCell>
+                  <TableRow sx={{ borderBottom: isDarkMode ? '1px solid rgba(255, 255, 255, 0.12)' : '1px solid #cbd5e1' }}>
+                    <TableCell sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', fontWeight: 600 }}>Attribute</TableCell>
                     {compareData.listings.map((l) => (
                       <TableCell key={l.listing_id} sx={{ color: '#38bdf8', fontWeight: 600 }}>
                         {l.platform} (#{l.listing_id})
@@ -1747,10 +1847,10 @@ export default function ListingGraphPage() {
                 </TableHead>
                 <TableBody>
                   {compareData.comparison_fields.map((field) => (
-                    <TableRow key={field.key} sx={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                      <TableCell sx={{ color: '#94a3b8', fontWeight: 500, fontSize: 12 }}>{field.label}</TableCell>
+                    <TableRow key={field.key} sx={{ borderBottom: isDarkMode ? '1px solid rgba(255, 255, 255, 0.05)' : '1px solid #f1f5f9' }}>
+                      <TableCell sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', fontWeight: 500, fontSize: 12 }}>{field.label}</TableCell>
                       {compareData.listings.map((l) => (
-                        <TableCell key={l.listing_id} sx={{ color: '#f8fafc', fontSize: 12 }}>
+                        <TableCell key={l.listing_id} sx={{ color: isDarkMode ? '#f8fafc' : '#0f172a', fontSize: 12 }}>
                           {field.values[l.listing_id.toString()] ?? '--'}
                         </TableCell>
                       ))}
@@ -1760,14 +1860,14 @@ export default function ListingGraphPage() {
               </Table>
             </TableContainer>
           ) : (
-            <Typography variant="body2" sx={{ color: '#94a3b8', textAlign: 'center', py: 2 }}>
+            <Typography variant="body2" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', textAlign: 'center', py: 2 }}>
               Select 2 or more listing nodes on the canvas to compare.
             </Typography>
           )}
         </DialogContent>
 
         <DialogActions sx={{ p: 2 }}>
-          <Button onClick={() => setCompareOpen(false)} sx={{ color: '#94a3b8', textTransform: 'none' }}>
+          <Button onClick={() => setCompareOpen(false)} sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', textTransform: 'none' }}>
             Close
           </Button>
         </DialogActions>
