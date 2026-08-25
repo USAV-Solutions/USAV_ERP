@@ -60,6 +60,14 @@ export const LISTINGS = {
   COMPARE: '/listings/compare',
 }
 
+export const ORBIT = {
+  ANALYTICS: (variantId: number) => `/orbit/analytics/${variantId}`,
+  CREATE_BUNDLE_KIT: '/orbit/bundle-kit/create',
+  CREATE_VARIANT: '/orbit/variant/create',
+  UPDATE_RELATIONSHIP: '/orbit/relationship/update',
+  UNLINK: '/orbit/relationship/unlink',
+}
+
 export const EBAY_LISTING = {
   ACCOUNTS: '/listings/ebay/accounts',
   CATEGORY_SUGGESTIONS: '/listings/ebay/categories',

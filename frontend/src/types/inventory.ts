@@ -220,8 +220,83 @@ export interface PlatformListingUpdate {
   upc?: string
 }
 
-// Graph and AI Matching Types
-export type RelationshipType = 'EXACT' | 'BUNDLE' | 'ACCESSORY' | 'PART' | 'RELATED_PRODUCT'
+export type RelationshipType =
+  | 'EXACT'
+  | 'ACCESSORY'
+  | 'BUNDLE_COMPONENT'
+  | 'KIT_COMPONENT'
+  | 'PART_LCI'
+  | 'SIBLING_VARIANT'
+  | 'BUNDLE'
+  | 'PART'
+  | 'RELATED_PRODUCT'
+
+export type StockWarningStatus = 'HEALTHY' | 'LOW_STOCK' | 'OUT_OF_STOCK'
+
+export interface PriceMismatchAlert {
+  has_mismatch: boolean
+  ecwid_price?: number | null
+  shopify_price?: number | null
+  price_diff?: number | null
+  message?: string | null
+}
+
+export interface ChannelSalesMetric {
+  platform: string
+  units_sold_30d: number
+  revenue_30d: number
+  units_sold_90d: number
+  revenue_90d: number
+}
+
+export interface OrbitAnalyticsResponse {
+  variant_id: number
+  full_sku: string
+  units_sold_30d: number
+  revenue_30d: number
+  units_sold_90d: number
+  revenue_90d: number
+  monthly_velocity: number
+  available_stock: number
+  runway_days?: number | null
+  stock_warning: StockWarningStatus
+  price_mismatch: PriceMismatchAlert
+  channel_metrics: ChannelSalesMetric[]
+}
+
+export interface BundleComponentInput {
+  child_variant_id: number
+  quantity_required: number
+  role: string
+}
+
+export interface OrbitCreateBundleKitRequest {
+  type: 'B' | 'K'
+  name: string
+  product_id?: number | null
+  components: BundleComponentInput[]
+  target_price?: number | null
+}
+
+export interface OrbitCreateVariantRequest {
+  source_variant_id: number
+  color_code: string
+  condition_code?: string | null
+  variant_name?: string | null
+}
+
+export interface OrbitUpdateRelationshipRequest {
+  target_type: 'listing' | 'component'
+  source_variant_id: number
+  target_id: number
+  relationship_type: RelationshipType
+}
+
+export interface OrbitUnlinkRequest {
+  target_type: 'listing' | 'component'
+  target_id: number
+  source_variant_id: number
+}
 
 export interface ProductNode {
   variant_id: number
@@ -324,4 +399,5 @@ export interface CompareResponse {
   listings: ListingNode[]
   comparison_fields: CompareField[]
 }
+
 
