@@ -691,8 +691,8 @@ async def suggest_listing_matches(
             ]
 
             prompt = f"""
-            You are an AI product matching engine for an ERP catalog system.
-            We need to match an internal ERP Product Variant against candidate marketplace listings and classify their relationship.
+            You are an AI product matching engine for an ERP catalog system adhering to the USAV Product Identification Specification (UPIS).
+            We need to match an internal ERP Product Variant against candidate marketplace listings and classify their semantic relationship.
 
             TARGET ERP PRODUCT:
             - Full SKU: "{target_sku}"
@@ -705,15 +705,16 @@ async def suggest_listing_matches(
 
             Evaluate how each candidate listing relates to the Target ERP Product:
             - EXACT: The candidate is the exact same standalone physical product.
-            - BUNDLE: The candidate is a bundle/kit containing this product plus other items/accessories (e.g. includes amplifier, cables, etc.).
-            - ACCESSORY: The candidate is a compatible accessory or attachment for this product (e.g. bluetooth adapter, bracket, remote, cable).
-            - PART: The candidate is a sub-component or replacement part (e.g. media center only, power supply, laser lens).
+            - ACCESSORY: The candidate is a compatible accessory or attachment (e.g. bluetooth adapter, wall bracket, remote, link cable, stand).
+            - BUNDLE_COMPONENT: The candidate is a dynamic USAV bundle (Type B) containing this product plus other items.
+            - KIT_COMPONENT: The candidate is a component of a predefined manufacturer kit (Type K) (e.g. satellite speaker, subwoofer, media center).
+            - PART_LCI: The candidate is an internal replacement part or LCI component (Type P) (e.g. motherboard, laser lens, display board, power supply).
 
             For each candidate, output a JSON object with:
             - listing_id: integer
-            - relationship_type: "EXACT" | "BUNDLE" | "ACCESSORY" | "PART"
+            - relationship_type: "EXACT" | "ACCESSORY" | "BUNDLE_COMPONENT" | "KIT_COMPONENT" | "PART_LCI"
             - confidence: float between 0.00 and 1.00 (e.g. 0.95 for exact/high match, 0.50 for probable, 0.10 for unlikely)
-            - reasons: list of short strings explaining the match factors (e.g. "Includes Bluetooth adapter accessory", "SKU prefix match", "Compatible wall bracket")
+            - reasons: list of short strings explaining the match factors (e.g. "Includes Bluetooth adapter accessory", "SKU prefix match", "Laser lens replacement part")
 
             Output ONLY a valid JSON array of objects, with no markdown code fences or backticks.
             """
@@ -737,6 +738,11 @@ async def suggest_listing_matches(
                     conf = float(ai_item.get("confidence", 0.0))
                     conf = max(0.0, min(1.0, conf))
                     rel_raw = str(ai_item.get("relationship_type", "EXACT")).upper()
+                    # Map legacy names if returned by LLM
+                    if rel_raw == "BUNDLE":
+                        rel_raw = "BUNDLE_COMPONENT"
+                    elif rel_raw == "PART":
+                        rel_raw = "PART_LCI"
                     rel_type = RelationshipType(rel_raw) if rel_raw in RelationshipType.__members__ else RelationshipType.EXACT
                     reasons = ai_item.get("reasons", [])
                     if not isinstance(reasons, list):
@@ -764,8 +770,11 @@ async def suggest_listing_matches(
             reasons = []
             lname = (c.listed_name or "").lower()
             if "bundle" in lname or "package" in lname or "with" in lname:
-                rel_type = RelationshipType.BUNDLE
+                rel_type = RelationshipType.BUNDLE_COMPONENT
                 reasons.append("Multi-item bundle detected in title")
+            elif any(kw in lname for kw in ["lens", "laser", "board", "motor", "pcb", "drive", "supply", "chassis"]):
+                rel_type = RelationshipType.PART_LCI
+                reasons.append("Replacement part / LCI component detected")
             elif any(kw in lname for kw in ["bracket", "adapter", "cable", "remote", "antenna", "dock", "mount", "stand"]):
                 rel_type = RelationshipType.ACCESSORY
                 reasons.append("Compatible accessory / attachment keyword detected")
