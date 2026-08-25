@@ -223,3 +223,10 @@ class OrbitUnlinkRequest(BaseModel):
     target_type: str = Field(..., description="'listing' or 'component'")
     target_id: int
     source_variant_id: int
+
+
+class OrbitConvertTypeRequest(BaseModel):
+    """Request to convert an existing product variant to Kit (K), Bundle (B), or Base Product."""
+    variant_id: int = Field(..., description="Target variant ID to convert")
+    target_type: str = Field(..., description="'K' (Predefined Kit), 'B' (USAV Bundle), or 'Product' (Base)")
+    components: Optional[List[BundleComponentInput]] = Field(default_factory=list, description="Optional initial components")

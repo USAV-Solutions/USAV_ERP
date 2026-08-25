@@ -42,6 +42,7 @@ import {
   DarkMode,
   LightMode,
   CenterFocusStrong,
+  ChangeCircle,
 } from '@mui/icons-material'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -51,6 +52,7 @@ import VariantSearchAutocomplete from '../components/common/VariantSearchAutocom
 import OrbitContextMenu, { type ContextMenuTarget } from '../components/orbit/OrbitContextMenu'
 import OrbitBundleKitModal from '../components/orbit/OrbitBundleKitModal'
 import OrbitVariantModal from '../components/orbit/OrbitVariantModal'
+import OrbitConvertTypeModal from '../components/orbit/OrbitConvertTypeModal'
 import type { VariantSearchResult } from '../types/orders'
 import type {
   GraphTopologyResponse,
@@ -182,6 +184,7 @@ export default function ListingGraphPage() {
   const [compareOpen, setCompareOpen] = useState(false)
   const [bundleKitModalOpen, setBundleKitModalOpen] = useState(false)
   const [variantModalOpen, setVariantModalOpen] = useState(false)
+  const [convertTypeModalOpen, setConvertTypeModalOpen] = useState(false)
   const [analyticsModalOpen, setAnalyticsModalOpen] = useState(false)
   const [aiScanning, setAiScanning] = useState(false)
   const [aiSuggestions, setAiSuggestions] = useState<AISuggestion[]>([])
@@ -1119,6 +1122,24 @@ export default function ListingGraphPage() {
             </Tooltip>
           )}
 
+          {/* Convert Product Type Button */}
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<ChangeCircle />}
+            disabled={!activeVariantId}
+            onClick={() => setConvertTypeModalOpen(true)}
+            sx={{
+              borderColor: '#818cf8',
+              color: '#818cf8',
+              textTransform: 'none',
+              fontWeight: 600,
+              '&:hover': { bgcolor: 'rgba(129, 140, 248, 0.1)', borderColor: '#6366f1' },
+            }}
+          >
+            Convert Type
+          </Button>
+
           {/* Form Bundle / Kit Button */}
           <Button
             variant="outlined"
@@ -1603,10 +1624,28 @@ export default function ListingGraphPage() {
         }}
         onCreateVariant={() => setVariantModalOpen(true)}
         onFormBundleKit={() => setBundleKitModalOpen(true)}
+        onConvertType={() => setConvertTypeModalOpen(true)}
         onScanAI={handleScanAI}
         onViewAnalytics={() => setAnalyticsModalOpen(true)}
         onFocusProduct={handleFocusProduct}
       />
+
+      {/* Convert Product Type Modal */}
+      {convertTypeModalOpen && (selectedVariant || graphData?.product) && (
+        <OrbitConvertTypeModal
+          open={convertTypeModalOpen}
+          onClose={() => setConvertTypeModalOpen(false)}
+          variant={selectedVariant || graphData!.product}
+          isDarkMode={isDarkMode}
+          onSuccess={(converted) => {
+            setActionMessage({
+              type: 'success',
+              text: `Successfully converted product to ${converted.full_sku} (${converted.identity_type})!`,
+            })
+            queryClient.invalidateQueries({ queryKey: ['listing-graph', activeVariantId] })
+          }}
+        />
+      )}
 
       {/* Bundle / Kit Creator Modal */}
       {bundleKitModalOpen && (

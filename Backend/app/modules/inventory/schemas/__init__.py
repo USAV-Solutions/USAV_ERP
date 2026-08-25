@@ -38,6 +38,7 @@ from app.modules.inventory.schemas.graph import (
     OrbitCreateVariantRequest,
     OrbitUpdateRelationshipRequest,
     OrbitUnlinkRequest,
+    OrbitConvertTypeRequest,
 )
 from app.modules.inventory.schemas.identities import (
     ProductIdentityCreate,
