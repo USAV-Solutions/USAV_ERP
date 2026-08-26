@@ -240,6 +240,29 @@ async def _migrate_variant_links(
     return migrated_counts
 
 
+import re
+
+AUDIO_ERP_SYNONYMS = {
+    "sys": "system",
+    "spkr": "speaker",
+    "spk": "speaker",
+    "sub": "subwoofer",
+    "subw": "subwoofer",
+    "bt": "bluetooth",
+    "rem": "remote",
+    "ser": "series",
+    "sr": "series",
+    "adpt": "adapter",
+    "adapt": "adapter",
+    "pwr": "power",
+    "batt": "battery",
+    "doc": "dock",
+    "dck": "dock",
+    "mnt": "mount",
+    "brkt": "bracket",
+}
+
+
 @router.get("/search", summary="Search variants by product name or SKU")
 async def search_variants(
     q: Annotated[str, Query(min_length=1, description="Search term for product name or SKU")],
@@ -255,9 +278,8 @@ async def search_variants(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Search product variants by product family name or full SKU.
-
-    Returns compact results suitable for autocomplete / typeahead UIs.
+    Smart prefix-aware search for product variants by name, family, or SKU (Strategy 1).
+    Supports partial prefixes, common audio shorthand, and multi-token matching.
     """
     included = _parse_identity_types(include_identity_types, "include_identity_types")
     excluded = _parse_identity_types(exclude_identity_types, "exclude_identity_types")
@@ -268,14 +290,61 @@ async def search_variants(
             detail="include_identity_types and exclude_identity_types cannot overlap.",
         )
 
-    ts_query = func.websearch_to_tsquery("simple", q)
+    clean_q = q.strip()
+    raw_tokens = [w for w in re.split(r'[\s\-_\/]+', clean_q) if w]
+
+    # Build prefix-aware wildcard tsquery with audio/ERP synonym expansions
+    ts_terms = []
+    for t in raw_tokens:
+        clean = re.sub(r'[^a-zA-Z0-9]', '', t)
+        if clean:
+            syn = AUDIO_ERP_SYNONYMS.get(clean.lower())
+            if syn:
+                ts_terms.append(f"({clean}:* | {syn}:*)")
+            else:
+                ts_terms.append(f"{clean}:*")
+
+    ts_str = " & ".join(ts_terms) if ts_terms else clean_q
+    ts_query = func.to_tsquery("simple", ts_str)
+
     family_vector = func.to_tsvector("simple", func.coalesce(ProductFamily.base_name, ""))
     sku_vector = func.to_tsvector("simple", func.coalesce(ProductVariant.full_sku, ""))
     variant_name_vector = func.to_tsvector("simple", func.coalesce(ProductVariant.variant_name, ""))
-    rank = func.greatest(
-        func.ts_rank_cd(family_vector, ts_query),
-        func.ts_rank_cd(sku_vector, ts_query),
-        func.ts_rank_cd(variant_name_vector, ts_query),
+
+    ts_match = (
+        family_vector.op("@@")(ts_query)
+        | sku_vector.op("@@")(ts_query)
+        | variant_name_vector.op("@@")(ts_query)
+    )
+
+    # Multi-token ILIKE match across family, SKU, and variant name
+    ilike_token_conditions = [
+        or_(
+            ProductVariant.full_sku.ilike(f"%{tok}%"),
+            ProductVariant.variant_name.ilike(f"%{tok}%"),
+            ProductFamily.base_name.ilike(f"%{tok}%"),
+        )
+        for tok in raw_tokens
+        if len(tok) >= 2
+    ]
+
+    where_match = ts_match
+    if ilike_token_conditions:
+        where_match = or_(where_match, and_(*ilike_token_conditions))
+
+    # Priority Ranking (Prefix match bonus + FTS relevance)
+    rank = (
+        case(
+            (ProductVariant.full_sku.ilike(f"{clean_q}%"), 100.0),
+            (ProductVariant.variant_name.ilike(f"{clean_q}%"), 50.0),
+            (ProductFamily.base_name.ilike(f"{clean_q}%"), 30.0),
+            else_=0.0,
+        )
+        + func.greatest(
+            func.ts_rank_cd(family_vector, ts_query),
+            func.ts_rank_cd(sku_vector, ts_query),
+            func.ts_rank_cd(variant_name_vector, ts_query),
+        )
     ).label("rank")
 
     stmt = (
@@ -293,11 +362,7 @@ async def search_variants(
         )
         .join(ProductIdentity, ProductVariant.identity_id == ProductIdentity.id)
         .join(ProductFamily, ProductIdentity.product_id == ProductFamily.product_id)
-        .where(
-            family_vector.op("@@")(ts_query)
-            | sku_vector.op("@@")(ts_query)
-            | variant_name_vector.op("@@")(ts_query)
-        )
+        .where(where_match)
         .where(ProductVariant.is_active == True)
     )
 

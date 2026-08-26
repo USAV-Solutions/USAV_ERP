@@ -48,6 +48,30 @@ def _parse_identity_types(raw_value: str | None, field_name: str) -> list[Identi
     return parsed or None
 
 
+import re
+from sqlalchemy import or_, and_, case
+
+AUDIO_ERP_SYNONYMS = {
+    "sys": "system",
+    "spkr": "speaker",
+    "spk": "speaker",
+    "sub": "subwoofer",
+    "subw": "subwoofer",
+    "bt": "bluetooth",
+    "rem": "remote",
+    "ser": "series",
+    "sr": "series",
+    "adpt": "adapter",
+    "adapt": "adapter",
+    "pwr": "power",
+    "batt": "battery",
+    "doc": "dock",
+    "dck": "dock",
+    "mnt": "mount",
+    "brkt": "bracket",
+}
+
+
 @router.get("/search", summary="Search identities by UPIS-H, name, or family")
 async def search_identities(
     q: Annotated[str, Query(min_length=1, description="Search term for UPIS-H, identity name, or family name")],
@@ -62,7 +86,7 @@ async def search_identities(
     ] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Return compact identity search rows for autocomplete UIs."""
+    """Return compact identity search rows for autocomplete UIs (Strategy 1)."""
     included = _parse_identity_types(include_types, "include_types")
     excluded = _parse_identity_types(exclude_types, "exclude_types")
 
@@ -72,16 +96,63 @@ async def search_identities(
             detail="include_types and exclude_types cannot overlap.",
         )
 
-    ts_query = func.websearch_to_tsquery("simple", q)
+    clean_q = q.strip()
+    raw_tokens = [w for w in re.split(r'[\s\-_\/]+', clean_q) if w]
+
+    # Build prefix-aware wildcard tsquery with synonym expansions
+    ts_terms = []
+    for t in raw_tokens:
+        clean = re.sub(r'[^a-zA-Z0-9]', '', t)
+        if clean:
+            syn = AUDIO_ERP_SYNONYMS.get(clean.lower())
+            if syn:
+                ts_terms.append(f"({clean}:* | {syn}:*)")
+            else:
+                ts_terms.append(f"{clean}:*")
+
+    ts_str = " & ".join(ts_terms) if ts_terms else clean_q
+    ts_query = func.to_tsquery("simple", ts_str)
+
     family_vector = func.to_tsvector("simple", func.coalesce(ProductFamily.base_name, ""))
     upis_vector = func.to_tsvector("simple", func.coalesce(ProductIdentity.generated_upis_h, ""))
     identity_name_vector = func.to_tsvector("simple", func.coalesce(ProductIdentity.identity_name, ""))
     product_id_vector = func.to_tsvector("simple", cast(ProductIdentity.product_id, String))
-    rank = func.greatest(
-        func.ts_rank_cd(family_vector, ts_query),
-        func.ts_rank_cd(upis_vector, ts_query),
-        func.ts_rank_cd(identity_name_vector, ts_query),
-        func.ts_rank_cd(product_id_vector, ts_query),
+
+    ts_match = (
+        family_vector.op("@@")(ts_query)
+        | upis_vector.op("@@")(ts_query)
+        | identity_name_vector.op("@@")(ts_query)
+        | product_id_vector.op("@@")(ts_query)
+    )
+
+    ilike_token_conditions = [
+        or_(
+            ProductIdentity.generated_upis_h.ilike(f"%{tok}%"),
+            ProductIdentity.identity_name.ilike(f"%{tok}%"),
+            ProductFamily.base_name.ilike(f"%{tok}%"),
+            cast(ProductIdentity.product_id, String).ilike(f"%{tok}%"),
+        )
+        for tok in raw_tokens
+        if len(tok) >= 2
+    ]
+
+    where_match = ts_match
+    if ilike_token_conditions:
+        where_match = or_(where_match, and_(*ilike_token_conditions))
+
+    rank = (
+        case(
+            (ProductIdentity.generated_upis_h.ilike(f"{clean_q}%"), 100.0),
+            (ProductIdentity.identity_name.ilike(f"{clean_q}%"), 50.0),
+            (ProductFamily.base_name.ilike(f"{clean_q}%"), 30.0),
+            else_=0.0,
+        )
+        + func.greatest(
+            func.ts_rank_cd(family_vector, ts_query),
+            func.ts_rank_cd(upis_vector, ts_query),
+            func.ts_rank_cd(identity_name_vector, ts_query),
+            func.ts_rank_cd(product_id_vector, ts_query),
+        )
     ).label("rank")
 
     stmt = (
@@ -97,12 +168,7 @@ async def search_identities(
             rank,
         )
         .join(ProductFamily, ProductIdentity.product_id == ProductFamily.product_id)
-        .where(
-            family_vector.op("@@")(ts_query)
-            | upis_vector.op("@@")(ts_query)
-            | identity_name_vector.op("@@")(ts_query)
-            | product_id_vector.op("@@")(ts_query)
-        )
+        .where(where_match)
     )
 
     if included:
