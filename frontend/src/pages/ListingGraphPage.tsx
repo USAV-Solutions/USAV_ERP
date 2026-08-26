@@ -2122,25 +2122,83 @@ export default function ListingGraphPage() {
         }}
         onChangeRelationship={(relType) => {
           if (!contextMenuTarget) return
-          const numericId = contextMenuTarget.numericId || parseInt(
-            contextMenuTarget.id.replace('listing-', '').replace('ai-', '').replace('edge-listing-', '').replace('related-product-', ''),
-            10
-          )
+          let targetType: 'listing' | 'component' = 'listing'
+          let targetId = contextMenuTarget.numericId || 0
+
+          if (
+            contextMenuTarget.nodeType === 'related_product' ||
+            contextMenuTarget.id.startsWith('related-product-') ||
+            contextMenuTarget.id.startsWith('bundle-')
+          ) {
+            targetType = 'component'
+            targetId =
+              contextMenuTarget.numericId ||
+              parseInt(
+                contextMenuTarget.id
+                  .replace('related-product-', '')
+                  .replace('bundle-sib-', '')
+                  .replace('bundle-parent-', ''),
+                10,
+              )
+          } else if (contextMenuTarget.type === 'edge') {
+            if (contextMenuTarget.id.startsWith('edge-listing-') || contextMenuTarget.id.startsWith('edge-hub-')) {
+              targetType = 'listing'
+              targetId = parseInt(contextMenuTarget.id.split('-').pop() || '0', 10)
+            } else {
+              targetType = 'component'
+              targetId = parseInt(contextMenuTarget.id.split('-').pop() || '0', 10)
+            }
+          } else {
+            targetType = 'listing'
+            targetId =
+              contextMenuTarget.numericId ||
+              parseInt(contextMenuTarget.id.replace('listing-', '').replace('ai-', ''), 10)
+          }
+
           updateRelMutation.mutate({
-            targetType: 'listing',
-            targetId: numericId,
+            targetType,
+            targetId,
             relType,
           })
         }}
         onUnlink={() => {
           if (!contextMenuTarget) return
-          const numericId = contextMenuTarget.numericId || parseInt(
-            contextMenuTarget.id.replace('listing-', '').replace('ai-', '').replace('edge-listing-', '').replace('related-product-', ''),
-            10
-          )
+          let targetType: 'listing' | 'component' = 'listing'
+          let targetId = contextMenuTarget.numericId || 0
+
+          if (
+            contextMenuTarget.nodeType === 'related_product' ||
+            contextMenuTarget.id.startsWith('related-product-') ||
+            contextMenuTarget.id.startsWith('bundle-')
+          ) {
+            targetType = 'component'
+            targetId =
+              contextMenuTarget.numericId ||
+              parseInt(
+                contextMenuTarget.id
+                  .replace('related-product-', '')
+                  .replace('bundle-sib-', '')
+                  .replace('bundle-parent-', ''),
+                10,
+              )
+          } else if (contextMenuTarget.type === 'edge') {
+            if (contextMenuTarget.id.startsWith('edge-listing-') || contextMenuTarget.id.startsWith('edge-hub-')) {
+              targetType = 'listing'
+              targetId = parseInt(contextMenuTarget.id.split('-').pop() || '0', 10)
+            } else {
+              targetType = 'component'
+              targetId = parseInt(contextMenuTarget.id.split('-').pop() || '0', 10)
+            }
+          } else {
+            targetType = 'listing'
+            targetId =
+              contextMenuTarget.numericId ||
+              parseInt(contextMenuTarget.id.replace('listing-', '').replace('ai-', ''), 10)
+          }
+
           unlinkMutation.mutate({
-            targetType: 'listing',
-            targetId: numericId,
+            targetType,
+            targetId,
           })
         }}
         onCreateVariant={() => setVariantModalOpen(true)}
