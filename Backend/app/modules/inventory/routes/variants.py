@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from app.api.deps import AdminOrSalesUser
 from app.core.database import get_db
 from app.models import IdentityType, ZohoSyncStatus
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, update, or_, and_, case
 from sqlalchemy import inspect
 from sqlalchemy.orm import selectinload
 
@@ -291,7 +291,7 @@ async def search_variants(
         )
 
     clean_q = q.strip()
-    raw_tokens = [w for w in re.split(r'[\s\-_\/]+', clean_q) if w]
+    raw_tokens = [w for w in re.split(r'[\s\-_\/&+,.]+', clean_q) if w]
 
     # Build prefix-aware wildcard tsquery with audio/ERP synonym expansions
     ts_terms = []
@@ -332,14 +332,23 @@ async def search_variants(
     if ilike_token_conditions:
         where_match = or_(where_match, and_(*ilike_token_conditions))
 
-    # Priority Ranking (Prefix match bonus + FTS relevance)
+    # Priority Ranking (Exact match + Whole units > Accessories + FTS relevance)
+    type_priority = case(
+        (ProductIdentity.type == IdentityType.PRODUCT, 25.0),
+        (ProductIdentity.type == IdentityType.K, 20.0),
+        (ProductIdentity.type == IdentityType.B, 15.0),
+        (ProductIdentity.type == IdentityType.P, 5.0),
+        else_=0.0,
+    )
+
     rank = (
         case(
             (ProductVariant.full_sku.ilike(f"{clean_q}%"), 100.0),
-            (ProductVariant.variant_name.ilike(f"{clean_q}%"), 50.0),
-            (ProductFamily.base_name.ilike(f"{clean_q}%"), 30.0),
+            (ProductVariant.variant_name.ilike(f"{clean_q}%"), 60.0),
+            (ProductFamily.base_name.ilike(f"{clean_q}%"), 40.0),
             else_=0.0,
         )
+        + type_priority
         + func.greatest(
             func.ts_rank_cd(family_vector, ts_query),
             func.ts_rank_cd(sku_vector, ts_query),
