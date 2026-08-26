@@ -69,6 +69,7 @@ export const ORBIT = {
   CONVERT_TYPE: '/orbit/convert-type',
   DEEP_CLASSIFY: '/orbit/ai/deep-classify',
   BUNDLES: (variantId: number) => `/orbit/bundles/${variantId}`,
+  UNIVERSE: '/orbit/universe',
 }
 
 export const EBAY_LISTING = {

@@ -314,3 +314,48 @@ class BundleDiscoveryResponse(BaseModel):
     variant_id: int
     full_sku: str
     participations: List[BundleParticipation] = Field(default_factory=list)
+
+
+# ============================================================================
+# 3D GALAXY UNIVERSE SCHEMAS
+# ============================================================================
+
+class UniverseProductNode(BaseModel):
+    variant_id: int
+    full_sku: str
+    variant_name: Optional[str] = None
+    identity_type: str = "Product"
+    family_id: int
+
+
+class UniverseFamilyNode(BaseModel):
+    product_id: int
+    family_code: str
+    base_name: str
+    brand_id: Optional[int] = None
+    brand_name: Optional[str] = None
+    products: List[UniverseProductNode] = Field(default_factory=list)
+
+
+class UniverseBrandNode(BaseModel):
+    brand_id: int
+    name: str
+    color: str = "#38bdf8"
+    families: List[UniverseFamilyNode] = Field(default_factory=list)
+
+
+class UniverseEdge(BaseModel):
+    source_sku: str
+    target_sku: str
+    relationship_type: str
+    color: str = "#f59e0b"
+
+
+class UniverseTopologyResponse(BaseModel):
+    brands: List[UniverseBrandNode] = Field(default_factory=list)
+    unassigned_families: List[UniverseFamilyNode] = Field(default_factory=list)
+    cross_links: List[UniverseEdge] = Field(default_factory=list)
+    total_brands: int = 0
+    total_families: int = 0
+    total_products: int = 0
+

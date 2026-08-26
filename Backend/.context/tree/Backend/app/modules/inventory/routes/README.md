@@ -36,6 +36,7 @@ Inventory route handlers split by feature surface (variants, listings, images, e
   - `POST /orbit/relationship/unlink`: Unlinks listing from variant or severs component tether.
   - `POST /orbit/ai/deep-classify`: Two-stage AI product classification. Stage 1 sends product name/brand to Gemini to infer real-world product type (`Product`, `K`, `B`, `P`) and expected components. Stage 2 executes local SQL fuzzy matching across catalog to link existing database variants with zero additional AI token cost.
   - `GET /orbit/bundles/{variant_id}`: Discovers parent bundles/kits that this product participates in, along with other sibling components.
+  - `GET /orbit/universe`: Returns the complete 3D macro universe topology (Brands as Big Stars, Product Families as Small Planets, Products/Units as Moons, and Cross-family bundle/kit tethers).
 
 ## Child Folders
 - (No child folders)
