@@ -505,6 +505,11 @@ async def get_variant_graph_topology(
 
     listing_nodes = []
     edges = []
+    # Track hub membership for listings and products
+    variant_hub_children: list[str] = []
+    accessory_hub_children: list[str] = []
+    component_hub_children: list[str] = []
+
     for listing in listings:
         meta_rel = None
         if listing.platform_metadata and isinstance(listing.platform_metadata, dict):
@@ -522,6 +527,7 @@ async def get_variant_graph_topology(
             else:
                 rel_type = RelationshipType.EXACT
 
+        node_id = f"listing-{listing.id}"
         listing_nodes.append(ListingNode(
             listing_id=listing.id,
             variant_id=listing.variant_id,
@@ -536,9 +542,18 @@ async def get_variant_graph_topology(
             last_synced_at=listing.last_synced_at,
             sync_error_message=listing.sync_error_message,
         ))
+        
+        # Categorize listing into hub if not EXACT
+        if rel_type == RelationshipType.ACCESSORY:
+            accessory_hub_children.append(node_id)
+        elif rel_type == RelationshipType.KIT_COMPONENT:
+            component_hub_children.append(node_id)
+        elif rel_type in [RelationshipType.BUNDLE, RelationshipType.BUNDLE_COMPONENT]:
+            variant_hub_children.append(node_id)
+
         edges.append(GraphEdge(
             source="product",
-            target=f"listing-{listing.id}",
+            target=node_id,
             relationship=rel_type.value.lower(),
             relationship_type=rel_type,
         ))
@@ -546,11 +561,6 @@ async def get_variant_graph_topology(
     # Query related products within same family (accessories, parts, bundles, sibling variants)
     related_products_nodes = []
     hubs: list[GroupHub] = []
-
-    # Track hub membership
-    variant_hub_children: list[str] = []
-    accessory_hub_children: list[str] = []
-    component_hub_children: list[str] = []
 
     if variant.identity and variant.identity.product_id:
         family_id = variant.identity.product_id
