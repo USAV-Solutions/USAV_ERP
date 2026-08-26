@@ -43,6 +43,7 @@ import {
   LightMode,
   ChangeCircle,
   Workspaces,
+  Explore,
 } from '@mui/icons-material'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -56,6 +57,7 @@ import OrbitConvertTypeModal from '../components/orbit/OrbitConvertTypeModal'
 import OrbitDeepClassifyPanel, {
   type AIDeepClassifyResponse,
 } from '../components/orbit/OrbitDeepClassifyPanel'
+import OrbitGalaxy3D from '../components/orbit/OrbitGalaxy3D'
 import type { VariantSearchResult } from '../types/orders'
 import type {
   GraphTopologyResponse,
@@ -68,6 +70,7 @@ import type {
   Platform,
   RelationshipType,
   OrbitAnalyticsResponse,
+  UniverseTopologyResponse,
 } from '../types/inventory'
 
 export interface BundleParticipation {
@@ -208,6 +211,12 @@ export default function ListingGraphPage() {
   const [isPanning, setIsPanning] = useState(false)
   const [panStart, setPanStart] = useState({ x: 0, y: 0 })
 
+  // View Mode: 'universe' (3D Macro Galaxy) vs 'single' (Single-Product Orbit)
+  const [viewMode, setViewMode] = useState<'universe' | 'single'>(
+    activeVariantId ? 'single' : 'universe',
+  )
+  const [highlightSku, setHighlightSku] = useState<string | null>(null)
+
   // Feature states
   const [compareOpen, setCompareOpen] = useState(false)
   const [bundleKitModalOpen, setBundleKitModalOpen] = useState(false)
@@ -224,6 +233,16 @@ export default function ListingGraphPage() {
   // Context Menu State
   const [contextMenuAnchor, setContextMenuAnchor] = useState<{ mouseX: number; mouseY: number } | null>(null)
   const [contextMenuTarget, setContextMenuTarget] = useState<ContextMenuTarget | null>(null)
+
+  // 0. Fetch 3D Universe Topology (Whole Database)
+  const { data: universeData, isLoading: isUniverseLoading } = useQuery<UniverseTopologyResponse>({
+    queryKey: ['orbit-universe'],
+    queryFn: async () => {
+      const resp = await axiosClient.get(ORBIT.UNIVERSE)
+      return resp.data
+    },
+    staleTime: 5 * 60 * 1000,
+  })
 
   // 1. Fetch graph topology
   const {
@@ -1350,14 +1369,14 @@ export default function ListingGraphPage() {
         const l = clickedNode.data as ListingNode
         title = l.listed_name || l.merchant_sku || 'Listing'
         subtitle = l.platform
-        price = l.listing_price
+        price = l.listing_price ?? null
         platform = l.platform
         numericId = l.listing_id
       } else if (clickedNode.type === 'ai_candidate') {
         const a = clickedNode.data as AISuggestion
         title = a.listed_name || a.merchant_sku || 'AI Candidate'
         subtitle = a.platform
-        price = a.listing_price
+        price = a.listing_price ?? null
         platform = a.platform
         numericId = a.listing_id
       } else {
@@ -1411,11 +1430,13 @@ export default function ListingGraphPage() {
   }
 
   // Focus a related product as central master core
-  const handleFocusProduct = (variantId: number) => {
+  const handleFocusProduct = (variantId: number, sku?: string) => {
     setSearchParams({ variantId: variantId.toString() })
     setSelectedVariant(null)
     setAiSuggestions([])
     setSelectedNodeIds([])
+    if (sku) setHighlightSku(sku)
+    setViewMode('single')
   }
 
   // Selected node for floating bar
@@ -1467,8 +1488,37 @@ export default function ListingGraphPage() {
           zIndex: 10,
         }}
       >
-        <Stack direction="row" alignItems="center" spacing={2} sx={{ flex: 1, maxWidth: 650 }}>
-          <Hub sx={{ color: '#38bdf8', fontSize: 28 }} />
+        <Stack direction="row" alignItems="center" spacing={1.5} sx={{ flex: 1, maxWidth: 720 }}>
+          <Tooltip title={viewMode === 'universe' ? 'Currently in 3D Galaxy Universe' : 'Return to 3D Database Galaxy'}>
+            <Button
+              variant={viewMode === 'universe' ? 'contained' : 'outlined'}
+              size="small"
+              startIcon={<Explore />}
+              onClick={() => {
+                if (viewMode === 'universe' && activeVariantId) {
+                  setViewMode('single')
+                } else {
+                  setViewMode('universe')
+                }
+              }}
+              sx={{
+                borderColor: '#38bdf8',
+                bgcolor: viewMode === 'universe' ? '#38bdf8' : 'transparent',
+                color: viewMode === 'universe' ? '#0f172a' : '#38bdf8',
+                fontWeight: 700,
+                textTransform: 'none',
+                minWidth: 150,
+                fontSize: 12,
+                boxShadow: viewMode === 'universe' ? '0 0 16px rgba(56, 189, 248, 0.4)' : 'none',
+                '&:hover': {
+                  bgcolor: viewMode === 'universe' ? '#0284c7' : 'rgba(56, 189, 248, 0.1)',
+                },
+              }}
+            >
+              {viewMode === 'universe' ? '🌌 Universe 3D' : '🪐 Single Orbit'}
+            </Button>
+          </Tooltip>
+
           <Box sx={{ flex: 1 }}>
             <VariantSearchAutocomplete
               value={selectedVariant}
@@ -1478,8 +1528,11 @@ export default function ListingGraphPage() {
                   setSearchParams({ variantId: result.id.toString() })
                   setAiSuggestions([])
                   setSelectedNodeIds([])
+                  setHighlightSku(result.full_sku)
+                  setViewMode('single')
                 } else {
                   setSearchParams({})
+                  setViewMode('universe')
                 }
               }}
               placeholder="Query product by SKU, Name, or UPIS..."
@@ -1726,60 +1779,81 @@ export default function ListingGraphPage() {
             : 'radial-gradient(ellipse at center, #ffffff 0%, #f1f5f9 100%)',
         }}
       >
-        {isGraphLoading && (
-          <Box
-            sx={{
-              position: 'absolute',
-              top: '50%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              zIndex: 5,
-              textAlign: 'center',
-            }}
-          >
-            <CircularProgress size={40} sx={{ color: '#38bdf8' }} />
-            <Typography variant="body2" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', mt: 1.5 }}>
-              Loading Orbit Galaxy...
-            </Typography>
-          </Box>
-        )}
+        {viewMode === 'universe' ? (
+          <OrbitGalaxy3D
+            data={universeData || null}
+            loading={isUniverseLoading}
+            isDarkMode={isDarkMode}
+            highlightSku={highlightSku}
+            onSelectProduct={(vId, sku) => handleFocusProduct(vId, sku)}
+          />
+        ) : (
+          <>
+            {isGraphLoading && (
+              <Box
+                sx={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  zIndex: 5,
+                  textAlign: 'center',
+                }}
+              >
+                <CircularProgress size={40} sx={{ color: '#38bdf8' }} />
+                <Typography variant="body2" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', mt: 1.5 }}>
+                  Loading Orbit System...
+                </Typography>
+              </Box>
+            )}
 
-        {!activeVariantId && !isGraphLoading && (
-          <Box
-            sx={{
-              position: 'absolute',
-              top: '50%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              textAlign: 'center',
-              maxWidth: 440,
-              p: 4,
-              bgcolor: isDarkMode ? 'rgba(15, 23, 42, 0.85)' : '#ffffff',
-              backdropFilter: 'blur(10px)',
-              borderRadius: 3,
-              border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid #e2e8f0',
-              boxShadow: isDarkMode ? 'none' : '0 10px 30px rgba(0,0,0,0.08)',
-            }}
-          >
-            <Search sx={{ fontSize: 48, color: '#38bdf8', mb: 1 }} />
-            <Typography variant="h6" sx={{ fontWeight: 600, color: isDarkMode ? '#f8fafc' : '#0f172a' }}>
-              Search for an ERP Product
-            </Typography>
-            <Typography variant="body2" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', mt: 1 }}>
-              Type any SKU (e.g. <code>00005-BK</code>, <code>00738</code>) above to open its full Orbit View with live sales velocity, kits, bundles, and channel sync.
-            </Typography>
-          </Box>
-        )}
+            {!activeVariantId && !isGraphLoading && (
+              <Box
+                sx={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  textAlign: 'center',
+                  maxWidth: 440,
+                  p: 4,
+                  bgcolor: isDarkMode ? 'rgba(15, 23, 42, 0.85)' : '#ffffff',
+                  backdropFilter: 'blur(10px)',
+                  borderRadius: 3,
+                  border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid #e2e8f0',
+                  boxShadow: isDarkMode ? 'none' : '0 10px 30px rgba(0,0,0,0.08)',
+                  zIndex: 5,
+                }}
+              >
+                <Search sx={{ fontSize: 48, color: '#38bdf8', mb: 1 }} />
+                <Typography variant="h6" sx={{ fontWeight: 600, color: isDarkMode ? '#f8fafc' : '#0f172a' }}>
+                  Search for an ERP Product
+                </Typography>
+                <Typography variant="body2" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', mt: 1, mb: 2 }}>
+                  Type any SKU (e.g. <code>00005-BK</code>, <code>00738</code>) or explore the 3D Database Universe.
+                </Typography>
+                <Button
+                  variant="contained"
+                  startIcon={<Explore />}
+                  onClick={() => setViewMode('universe')}
+                  sx={{ bgcolor: '#38bdf8', color: '#0f172a', fontWeight: 700, textTransform: 'none' }}
+                >
+                  Explore 3D Universe
+                </Button>
+              </Box>
+            )}
 
-        <canvas
-          ref={canvasRef}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onWheel={handleWheel}
-          onContextMenu={handleContextMenu}
-          style={{ width: '100%', height: '100%', display: 'block' }}
-        />
+            <canvas
+              ref={canvasRef}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onWheel={handleWheel}
+              onContextMenu={handleContextMenu}
+              style={{ width: '100%', height: '100%', display: 'block' }}
+            />
+          </>
+        )}
 
         {/* Hover Tooltip Card */}
         {hoveredNode && hoverPos && (

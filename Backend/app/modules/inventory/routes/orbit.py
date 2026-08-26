@@ -25,6 +25,7 @@ from app.models.entities import (
     PlatformListing,
     BundleComponent,
     InventoryItem,
+    Brand,
 )
 from app.modules.orders.models import Order, OrderItem
 from app.modules.inventory.schemas.graph import (
@@ -46,6 +47,11 @@ from app.modules.inventory.schemas.graph import (
     AIClassifiedParent,
     BundleDiscoveryResponse,
     BundleParticipation,
+    UniverseProductNode,
+    UniverseFamilyNode,
+    UniverseBrandNode,
+    UniverseEdge,
+    UniverseTopologyResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -1059,3 +1065,162 @@ async def get_bundle_participations(
         full_sku=variant.full_sku,
         participations=participations,
     )
+
+
+# ============================================================================
+# 3D GALAXY UNIVERSE TOPOLOGY
+# ============================================================================
+
+BRAND_STELLAR_COLORS = [
+    "#38bdf8",  # Sky Cyan
+    "#fbbf24",  # Amber Gold
+    "#ec4899",  # Rose Pink
+    "#a855f7",  # Purple
+    "#10b981",  # Emerald Green
+    "#f97316",  # Bright Orange
+    "#06b6d4",  # Turquoise
+    "#e11d48",  # Crimson
+]
+
+
+@router.get("/universe", response_model=UniverseTopologyResponse)
+async def get_universe_topology(
+    _user: AdminOrSalesUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Returns the complete 3D Universe topology:
+    - Brands (Big Stars)
+    - Product Families (Small Planets)
+    - Products & Variants (Moons)
+    - Cross-system Bundle/Kit & Duplication Tethers
+    """
+    # 1. Fetch all Brands
+    b_stmt = select(Brand).order_by(Brand.name)
+    brands = (await db.execute(b_stmt)).scalars().all()
+
+    # 2. Fetch all ProductFamilies with identities and variants
+    fam_stmt = (
+        select(ProductFamily)
+        .options(
+            selectinload(ProductFamily.identities).selectinload(ProductIdentity.variants),
+            selectinload(ProductFamily.brand),
+        )
+        .order_by(ProductFamily.family_code)
+    )
+    families = (await db.execute(fam_stmt)).scalars().all()
+
+    # Known brand name keywords to auto-group unlinked families
+    known_brands = [
+        "bose", "sony", "apple", "yamaha", "sonos", "denon", "jbl",
+        "samsung", "lg", "klipsch", "polk", "pioneer", "harman"
+    ]
+
+    brand_nodes_map: dict[str, UniverseBrandNode] = {}
+    for idx, b in enumerate(brands):
+        brand_nodes_map[b.name.lower()] = UniverseBrandNode(
+            brand_id=b.id,
+            name=b.name,
+            color=BRAND_STELLAR_COLORS[idx % len(BRAND_STELLAR_COLORS)],
+            families=[],
+        )
+
+    unassigned_fams: list[UniverseFamilyNode] = []
+    total_products = 0
+
+    for fam in families:
+        # Collect products for this family
+        fam_products: list[UniverseProductNode] = []
+        idents = fam.identities if isinstance(fam.identities, list) else ([fam.identities] if fam.identities else [])
+        for ident in idents:
+            if not ident:
+                continue
+            itype = ident.type.value if ident.type and hasattr(ident.type, "value") else str(ident.type or "Product")
+            vars_list = ident.variants if isinstance(ident.variants, list) else ([ident.variants] if ident.variants else [])
+            for v in vars_list:
+                if not v:
+                    continue
+                fam_products.append(UniverseProductNode(
+                    variant_id=v.id,
+                    full_sku=v.full_sku,
+                    variant_name=v.variant_name or ident.identity_name,
+                    identity_type=itype,
+                    family_id=fam.product_id,
+                ))
+                total_products += 1
+
+        fam_node = UniverseFamilyNode(
+            product_id=fam.product_id,
+            family_code=fam.family_code,
+            base_name=fam.base_name,
+            brand_id=fam.brand_id,
+            brand_name=fam.brand.name if fam.brand else None,
+            products=fam_products,
+        )
+
+        # Match to brand
+        matched_brand_name = None
+        if fam.brand:
+            matched_brand_name = fam.brand.name.lower()
+        else:
+            base_lower = fam.base_name.lower()
+            for kb in known_brands:
+                if kb in base_lower:
+                    matched_brand_name = kb
+                    break
+
+        if matched_brand_name:
+            if matched_brand_name not in brand_nodes_map:
+                brand_nodes_map[matched_brand_name] = UniverseBrandNode(
+                    brand_id=len(brand_nodes_map) + 100,
+                    name=matched_brand_name.title(),
+                    color=BRAND_STELLAR_COLORS[len(brand_nodes_map) % len(BRAND_STELLAR_COLORS)],
+                    families=[],
+                )
+            brand_nodes_map[matched_brand_name].families.append(fam_node)
+        else:
+            unassigned_fams.append(fam_node)
+
+    # Filter out empty brands
+    active_brands = [b for b in brand_nodes_map.values() if b.families]
+
+    # If unassigned families exist, group them into a "Specialty & Audio" Star
+    if unassigned_fams:
+        active_brands.append(UniverseBrandNode(
+            brand_id=999,
+            name="Specialty & Audio",
+            color="#818cf8",
+            families=unassigned_fams,
+        ))
+
+    # 3. Cross-family Bundle / Kit Component Tethers
+    bc_stmt = (
+        select(BundleComponent)
+        .options(
+            selectinload(BundleComponent.parent).selectinload(ProductIdentity.variants),
+            selectinload(BundleComponent.child).selectinload(ProductIdentity.variants),
+        )
+        .limit(200)
+    )
+    bc_links = (await db.execute(bc_stmt)).scalars().all()
+    cross_links: list[UniverseEdge] = []
+    for link in bc_links:
+        if link.parent and link.parent.variants and link.child and link.child.variants:
+            pv = link.parent.variants[0]
+            cv = link.child.variants[0]
+            cross_links.append(UniverseEdge(
+                source_sku=pv.full_sku,
+                target_sku=cv.full_sku,
+                relationship_type=link.role.value if link.role else "BUNDLE_COMPONENT",
+                color="#f59e0b",
+            ))
+
+    return UniverseTopologyResponse(
+        brands=active_brands,
+        unassigned_families=[],
+        cross_links=cross_links,
+        total_brands=len(active_brands),
+        total_families=len(families),
+        total_products=total_products,
+    )
+

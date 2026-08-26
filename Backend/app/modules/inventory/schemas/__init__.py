@@ -47,6 +47,11 @@ from app.modules.inventory.schemas.graph import (
     OrbitUpdateRelationshipRequest,
     OrbitUnlinkRequest,
     OrbitConvertTypeRequest,
+    UniverseProductNode,
+    UniverseFamilyNode,
+    UniverseBrandNode,
+    UniverseEdge,
+    UniverseTopologyResponse,
 )
 from app.modules.inventory.schemas.identities import (
     ProductIdentityCreate,

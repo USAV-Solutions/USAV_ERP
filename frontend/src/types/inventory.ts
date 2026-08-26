@@ -414,4 +414,45 @@ export interface CompareResponse {
   comparison_fields: CompareField[]
 }
 
+export interface UniverseProductNode {
+  variant_id: number
+  full_sku: string
+  variant_name?: string | null
+  identity_type: string
+  family_id: number
+}
+
+export interface UniverseFamilyNode {
+  product_id: number
+  family_code: string
+  base_name: string
+  brand_id?: number | null
+  brand_name?: string | null
+  products: UniverseProductNode[]
+}
+
+export interface UniverseBrandNode {
+  brand_id: number
+  name: string
+  color: string
+  families: UniverseFamilyNode[]
+}
+
+export interface UniverseEdge {
+  source_sku: string
+  target_sku: string
+  relationship_type: string
+  color: string
+}
+
+export interface UniverseTopologyResponse {
+  brands: UniverseBrandNode[]
+  unassigned_families: UniverseFamilyNode[]
+  cross_links: UniverseEdge[]
+  total_brands: number
+  total_families: number
+  total_products: number
+}
+
+
 
