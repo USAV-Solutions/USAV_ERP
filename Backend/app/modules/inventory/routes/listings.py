@@ -24,7 +24,7 @@ from app.core.database import get_db
 from app.integrations.ebay.client import EbayClient
 from app.integrations.shopify.client import ShopifyClient
 from app.models import Platform, PlatformSyncStatus
-from app.models.entities import ProductVariant, ProductIdentity, ProductFamily, PlatformListing
+from app.models.entities import ProductVariant, ProductIdentity, ProductFamily, PlatformListing, BundleComponent
 from app.repositories import PlatformListingRepository, ProductVariantRepository
 from app.modules.inventory.schemas import (
     AISuggestRequest,
@@ -35,6 +35,7 @@ from app.modules.inventory.schemas import (
     CompareResponse,
     GraphEdge,
     GraphTopologyResponse,
+    GroupHub,
     ListingNode,
     LockRelationshipRequest,
     LockRelationshipResponse,
@@ -544,8 +545,17 @@ async def get_variant_graph_topology(
 
     # Query related products within same family (accessories, parts, bundles, sibling variants)
     related_products_nodes = []
+    hubs: list[GroupHub] = []
+
+    # Track hub membership
+    variant_hub_children: list[str] = []
+    accessory_hub_children: list[str] = []
+    component_hub_children: list[str] = []
+
     if variant.identity and variant.identity.product_id:
         family_id = variant.identity.product_id
+
+        # 1. Fetch sibling variants (same family, different identity or color/condition)
         rel_stmt = (
             select(ProductVariant)
             .join(ProductIdentity, ProductVariant.identity_id == ProductIdentity.id)
@@ -554,20 +564,16 @@ async def get_variant_graph_topology(
                 ProductIdentity.product_id == family_id,
                 ProductVariant.id != variant.id,
             )
-            .limit(10)
+            .limit(15)
         )
         rel_res = await db.execute(rel_stmt)
         rel_variants = rel_res.scalars().all()
+
         for rv in rel_variants:
             rv_type = rv.identity.type.value if rv.identity and rv.identity.type else "Product"
-            if rv_type in ["P", "A"]:
-                rv_rel = RelationshipType.ACCESSORY
-            elif rv_type in ["B", "K"]:
-                rv_rel = RelationshipType.BUNDLE
-            else:
-                rv_rel = RelationshipType.RELATED_PRODUCT
+            node_id = f"related-product-{rv.id}"
 
-            related_products_nodes.append(ProductNode(
+            node = ProductNode(
                 variant_id=rv.id,
                 full_sku=rv.full_sku,
                 variant_name=rv.variant_name,
@@ -578,19 +584,101 @@ async def get_variant_graph_topology(
                 condition_code=rv.condition_code.value if rv.condition_code else None,
                 color_code=rv.color_code,
                 identity_type=rv_type,
-            ))
+            )
+            related_products_nodes.append(node)
+
+            # Classify into hub groups
+            if rv_type in ["P"]:
+                accessory_hub_children.append(node_id)
+                rv_rel = RelationshipType.ACCESSORY
+            elif rv_type in ["B", "K"]:
+                # Bundles/Kits in same family → they are sibling products
+                variant_hub_children.append(node_id)
+                rv_rel = RelationshipType.SIBLING_VARIANT
+            else:
+                # Standard sibling variants (same product, different color/condition)
+                variant_hub_children.append(node_id)
+                rv_rel = RelationshipType.SIBLING_VARIANT
+
             edges.append(GraphEdge(
                 source="product",
-                target=f"related-product-{rv.id}",
+                target=node_id,
                 relationship=rv_rel.value.lower(),
                 relationship_type=rv_rel,
             ))
+
+        # 2. Fetch Kit/Bundle components (children of this product's identity)
+        if variant.identity_id:
+            comp_stmt = (
+                select(BundleComponent)
+                .options(
+                    selectinload(BundleComponent.child).selectinload(ProductIdentity.variants),
+                    selectinload(BundleComponent.child).selectinload(ProductIdentity.family),
+                )
+                .where(BundleComponent.parent_identity_id == variant.identity_id)
+            )
+            comp_res = await db.execute(comp_stmt)
+            components = comp_res.scalars().all()
+
+            seen_ids = {rv.id for rv in rel_variants}
+            for comp in components:
+                child_identity = comp.child
+                if not child_identity or not child_identity.variants:
+                    continue
+                cv = child_identity.variants[0]
+                if cv.id in seen_ids or cv.id == variant.id:
+                    continue
+                seen_ids.add(cv.id)
+
+                node_id = f"related-product-{cv.id}"
+                cv_type = child_identity.type.value if child_identity.type else "Product"
+
+                related_products_nodes.append(ProductNode(
+                    variant_id=cv.id,
+                    full_sku=cv.full_sku,
+                    variant_name=cv.variant_name,
+                    identity_name=child_identity.identity_name,
+                    family_name=child_identity.family.base_name if child_identity.family else None,
+                    family_code=child_identity.family.family_code if child_identity.family else None,
+                    identity_type=cv_type,
+                ))
+                component_hub_children.append(node_id)
+                edges.append(GraphEdge(
+                    source="product",
+                    target=node_id,
+                    relationship="kit_component" if variant.identity.type and variant.identity.type.value == "K" else "bundle_component",
+                    relationship_type=RelationshipType.KIT_COMPONENT if variant.identity.type and variant.identity.type.value == "K" else RelationshipType.BUNDLE_COMPONENT,
+                ))
+
+    # Build hub nodes (only if they have children)
+    if variant_hub_children:
+        hubs.append(GroupHub(
+            hub_id="hub-variants",
+            hub_label="Variants",
+            hub_type="variants",
+            children_ids=variant_hub_children,
+        ))
+    if accessory_hub_children:
+        hubs.append(GroupHub(
+            hub_id="hub-accessory",
+            hub_label="Accessory",
+            hub_type="accessory",
+            children_ids=accessory_hub_children,
+        ))
+    if component_hub_children:
+        hubs.append(GroupHub(
+            hub_id="hub-component",
+            hub_label="Component",
+            hub_type="component",
+            children_ids=component_hub_children,
+        ))
 
     return GraphTopologyResponse(
         product=product_node,
         listings=listing_nodes,
         related_products=related_products_nodes,
         edges=edges,
+        hubs=hubs,
     )
 
 

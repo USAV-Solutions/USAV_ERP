@@ -67,6 +67,8 @@ export const ORBIT = {
   UPDATE_RELATIONSHIP: '/orbit/relationship/update',
   UNLINK: '/orbit/relationship/unlink',
   CONVERT_TYPE: '/orbit/convert-type',
+  DEEP_CLASSIFY: '/orbit/ai/deep-classify',
+  BUNDLES: (variantId: number) => `/orbit/bundles/${variantId}`,
 }
 
 export const EBAY_LISTING = {

@@ -43,6 +43,7 @@ import {
   LightMode,
   CenterFocusStrong,
   ChangeCircle,
+  Workspaces,
 } from '@mui/icons-material'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -53,6 +54,10 @@ import OrbitContextMenu, { type ContextMenuTarget } from '../components/orbit/Or
 import OrbitBundleKitModal from '../components/orbit/OrbitBundleKitModal'
 import OrbitVariantModal from '../components/orbit/OrbitVariantModal'
 import OrbitConvertTypeModal from '../components/orbit/OrbitConvertTypeModal'
+import OrbitDeepClassifyPanel, {
+  type AIDeepClassifyResponse,
+  type AIClassifiedComponent,
+} from '../components/orbit/OrbitDeepClassifyPanel'
 import type { VariantSearchResult } from '../types/orders'
 import type {
   GraphTopologyResponse,
@@ -66,6 +71,22 @@ import type {
   RelationshipType,
   OrbitAnalyticsResponse,
 } from '../types/inventory'
+
+export interface BundleParticipation {
+  parent_variant_id: number
+  parent_sku: string
+  parent_name?: string
+  parent_type: string
+  role: string
+  quantity_required: number
+  sibling_components: ProductNode[]
+}
+
+export interface BundleDiscoveryResponse {
+  variant_id: number
+  full_sku: string
+  participations: BundleParticipation[]
+}
 
 const PLATFORM_META: Record<string, { label: string; color: string; bgColor: string; icon: string }> = {
   ECWID: { label: 'Ecwid', color: '#0064d2', bgColor: '#e8f0fe', icon: '🛒' },
@@ -91,9 +112,18 @@ const RELATIONSHIP_META: Record<string, { label: string; color: string; icon: st
   RELATED_PRODUCT: { label: 'Sibling Variant', color: '#a855f7', icon: '🔗', borderStyle: 'solid' },
 }
 
+export interface HubData {
+  hubId: string
+  label: string
+  hubType: 'variants' | 'accessory' | 'component' | 'bundle'
+  icon: string
+  color: string
+  count: number
+}
+
 interface CanvasNode {
   id: string
-  type: 'product' | 'listing' | 'related_product' | 'ai_candidate'
+  type: 'product' | 'listing' | 'related_product' | 'ai_candidate' | 'hub'
   x: number
   y: number
   baseX: number
@@ -101,7 +131,7 @@ interface CanvasNode {
   radius: number
   orbitRing: number
   relationship_type: RelationshipType
-  data: ProductNode | ListingNode | (AISuggestion & { platform: Platform })
+  data: ProductNode | ListingNode | (AISuggestion & { platform: Platform }) | HubData | any
   confidence?: number
   reasons?: string[]
   phase: number
@@ -186,6 +216,9 @@ export default function ListingGraphPage() {
   const [variantModalOpen, setVariantModalOpen] = useState(false)
   const [convertTypeModalOpen, setConvertTypeModalOpen] = useState(false)
   const [analyticsModalOpen, setAnalyticsModalOpen] = useState(false)
+  const [bundleViewEnabled, setBundleViewEnabled] = useState(false)
+  const [deepClassifyResult, setDeepClassifyResult] = useState<AIDeepClassifyResponse | null>(null)
+  const [deepClassifyLoading, setDeepClassifyLoading] = useState(false)
   const [aiScanning, setAiScanning] = useState(false)
   const [aiSuggestions, setAiSuggestions] = useState<AISuggestion[]>([])
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null)
@@ -217,6 +250,16 @@ export default function ListingGraphPage() {
     enabled: !!activeVariantId,
     refetchInterval: 60000,
     retry: 1,
+  })
+
+  // 2b. Fetch Participating Bundles (when Bundle View is toggled ON)
+  const { data: bundleData } = useQuery<BundleDiscoveryResponse>({
+    queryKey: ['orbit-bundles', activeVariantId],
+    queryFn: async () => {
+      const resp = await axiosClient.get(ORBIT.BUNDLES(activeVariantId!))
+      return resp.data
+    },
+    enabled: !!activeVariantId && bundleViewEnabled,
   })
 
   // 3. Lock relationship mutation
@@ -323,12 +366,14 @@ export default function ListingGraphPage() {
     enabled: compareOpen && selectedNodeIds.length >= 2,
   })
 
-  // 7. Scan AI Matches function (Priority Queue)
+  // 7. Scan AI Matches function (Phase 1 Listing Match + Auto Phase 2 Deep Classification)
   const handleScanAI = async () => {
     if (!activeVariantId) return
     setAiScanning(true)
+    setDeepClassifyLoading(true)
     setActionMessage(null)
     try {
+      // Phase 1: Listing Match Suggestions
       const resp = await axiosClient.post<AISuggestResponse>(LISTINGS.SUGGEST, {
         variant_id: activeVariantId,
         limit: 8,
@@ -336,15 +381,32 @@ export default function ListingGraphPage() {
       })
       const suggestions = resp.data.suggestions || []
       setAiSuggestions(suggestions)
-      if (suggestions.length === 0) {
-        setActionMessage({
-          type: 'success',
-          text: 'AI Scan complete: No unlinked candidate listings or components found for this product.',
+
+      // Phase 2: Auto-trigger Deep Product Classification
+      try {
+        const deepResp = await axiosClient.post<AIDeepClassifyResponse>(ORBIT.DEEP_CLASSIFY, {
+          variant_id: activeVariantId,
         })
-      } else {
+        setDeepClassifyResult(deepResp.data)
+        const typeLabels: Record<string, string> = {
+          Product: 'Standalone Item',
+          K: 'Kit (K)',
+          B: 'Bundle (B)',
+          P: 'Part (P)',
+        }
+        const sType = typeLabels[deepResp.data.suggested_type] || deepResp.data.suggested_type
+        const conf = (deepResp.data.type_confidence * 100).toFixed(0)
         setActionMessage({
           type: 'success',
-          text: `AI Scan complete: Discovered ${suggestions.length} candidate listings & components!`,
+          text: `AI Scan complete: ${suggestions.length} candidate listing(s) found. Classified as ${sType} (${conf}% confidence).`,
+        })
+      } catch (deepErr: any) {
+        console.warn('Deep classification warning:', deepErr)
+        setActionMessage({
+          type: 'success',
+          text: `Phase 1 scan complete: Discovered ${suggestions.length} candidate listings. (Deep classify: ${
+            deepErr?.response?.data?.detail || 'unavailable'
+          })`,
         })
       }
     } catch (err: any) {
@@ -354,10 +416,11 @@ export default function ListingGraphPage() {
       })
     } finally {
       setAiScanning(false)
+      setDeepClassifyLoading(false)
     }
   }
 
-  // 8. Concentric Planetary Orbit Layout Calculation
+  // 8. Grouped Hub Orbit Layout Calculation
   useEffect(() => {
     if (!graphData && !selectedVariant) {
       nodesRef.current = []
@@ -374,7 +437,7 @@ export default function ListingGraphPage() {
     const newNodes: CanvasNode[] = []
     const newEdges: CanvasEdge[] = []
 
-    // Center Master Product Core
+    // 1. Center Master Product Core
     const centerProduct = graphData?.product || {
       variant_id: selectedVariant!.id,
       full_sku: selectedVariant!.full_sku,
@@ -397,11 +460,12 @@ export default function ListingGraphPage() {
       phase: 0,
     })
 
-    // Orbit Ring 1 (Listings): Radius 175
+    // 2. Direct Marketplace Listings (Ebay, Amazon, Shopify, etc.)
     const listings = graphData?.listings || []
+    const listingBaseAngles = [-Math.PI * 0.65, Math.PI * 0.9, -Math.PI * 0.85, Math.PI * 0.55, -Math.PI * 0.4]
     listings.forEach((listing, idx) => {
-      const angle = (idx / (listings.length || 1)) * Math.PI * 2 - Math.PI / 2
-      const radiusDist = 175 + (idx % 2) * 20
+      const angle = listingBaseAngles[idx % listingBaseAngles.length] + Math.floor(idx / listingBaseAngles.length) * 0.3
+      const radiusDist = 160 + (idx % 2) * 25
       const lx = cx + Math.cos(angle) * radiusDist
       const ly = cy + Math.sin(angle) * radiusDist
       const relType = listing.relationship_type || 'EXACT'
@@ -429,54 +493,221 @@ export default function ListingGraphPage() {
       })
     })
 
-    // Orbit Ring 2 & 3 (Related Accessories, Bundles, Kits, Siblings)
+    // 3. Partition Related Products into Groups
     const relatedProducts = graphData?.related_products || []
-    relatedProducts.forEach((relProd, idx) => {
-      const isAcc = relProd.identity_type === 'P' || relProd.identity_type === 'A'
-      const isBun = relProd.identity_type === 'B'
-      const isKit = relProd.identity_type === 'K'
-      const relType: RelationshipType = isAcc
-        ? 'ACCESSORY'
-        : isBun
-        ? 'BUNDLE_COMPONENT'
-        : isKit
-        ? 'KIT_COMPONENT'
-        : 'SIBLING_VARIANT'
+    const variantItems: ProductNode[] = []
+    const accessoryItems: ProductNode[] = []
+    const componentItems: ProductNode[] = []
 
-      const ring = isAcc ? 2 : isBun || isKit ? 3 : 4
-      const ringRadius = isAcc ? 250 : isBun || isKit ? 320 : 380
+    relatedProducts.forEach((relProd) => {
+      const edge = graphData?.edges?.find((e) => e.target === `related-product-${relProd.variant_id}`)
+      const relType =
+        edge?.relationship_type ||
+        (relProd.identity_type === 'P' || relProd.identity_type === 'A' ? 'ACCESSORY' : 'SIBLING_VARIANT')
 
-      const angle = (idx / (relatedProducts.length || 1)) * Math.PI * 2 - Math.PI / 3
-      const rx = cx + Math.cos(angle) * (ringRadius + (idx % 2) * 25)
-      const ry = cy + Math.sin(angle) * (ringRadius + (idx % 2) * 25)
-
-      newNodes.push({
-        id: `related-product-${relProd.variant_id}`,
-        type: 'related_product',
-        x: rx,
-        y: ry,
-        baseX: rx,
-        baseY: ry,
-        radius: 28,
-        orbitRing: ring,
-        relationship_type: relType,
-        data: relProd,
-        phase: (idx + 5) * 0.8,
-      })
-
-      newEdges.push({
-        id: `edge-rel-${relProd.variant_id}`,
-        source: 'product',
-        target: `related-product-${relProd.variant_id}`,
-        type: 'related',
-        relationship_type: relType,
-      })
+      if (relType === 'KIT_COMPONENT' || relType === 'BUNDLE_COMPONENT') {
+        componentItems.push(relProd)
+      } else if (relType === 'ACCESSORY' || relProd.identity_type === 'P' || relProd.identity_type === 'A') {
+        accessoryItems.push(relProd)
+      } else {
+        variantItems.push(relProd)
+      }
     })
 
-    // AI Suggestions (Purple Candidate Nodes)
+    // Helper to position Hub + its children
+    const layoutHubGroup = (
+      hubId: string,
+      hubLabel: string,
+      hubType: 'variants' | 'accessory' | 'component',
+      hubIcon: string,
+      hubColor: string,
+      hubAngle: number,
+      hubDist: number,
+      items: ProductNode[],
+      childRelType: RelationshipType,
+    ) => {
+      if (items.length === 0) return
+
+      const hx = cx + Math.cos(hubAngle) * hubDist
+      const hy = cy + Math.sin(hubAngle) * hubDist
+
+      // Add Hub Node
+      newNodes.push({
+        id: hubId,
+        type: 'hub',
+        x: hx,
+        y: hy,
+        baseX: hx,
+        baseY: hy,
+        radius: 34,
+        orbitRing: 2,
+        relationship_type: childRelType,
+        data: {
+          hubId,
+          label: hubLabel,
+          hubType,
+          icon: hubIcon,
+          color: hubColor,
+          count: items.length,
+        } as HubData,
+        phase: hubAngle,
+      })
+
+      // Tether ERP MASTER -> Hub
+      newEdges.push({
+        id: `edge-master-${hubId}`,
+        source: 'product',
+        target: hubId,
+        type: 'locked',
+        relationship_type: childRelType,
+      })
+
+      // Fan out children from the Hub
+      items.forEach((item, idx) => {
+        const span = Math.min(Math.PI * 0.8, (items.length - 1) * 0.45)
+        const startAngle = hubAngle - span / 2
+        const childAngle = items.length === 1 ? hubAngle : startAngle + (idx / (items.length - 1)) * span
+        const childDist = 110 + (idx % 2) * 18
+        const cx_child = hx + Math.cos(childAngle) * childDist
+        const cy_child = hy + Math.sin(childAngle) * childDist
+
+        newNodes.push({
+          id: `related-product-${item.variant_id}`,
+          type: 'related_product',
+          x: cx_child,
+          y: cy_child,
+          baseX: cx_child,
+          baseY: cy_child,
+          radius: 28,
+          orbitRing: 3,
+          relationship_type: childRelType,
+          data: item,
+          phase: (idx + 3) * 0.8,
+        })
+
+        // Tether Hub -> Child Node
+        newEdges.push({
+          id: `edge-hub-${hubId}-${item.variant_id}`,
+          source: hubId,
+          target: `related-product-${item.variant_id}`,
+          type: 'related',
+          relationship_type: childRelType,
+        })
+      })
+    }
+
+    // A. Variants Hub (Lower-Left: 135 deg / ~2.35 rad)
+    layoutHubGroup(
+      'hub-variants',
+      'Variants',
+      'variants',
+      '🔗',
+      '#a855f7',
+      Math.PI * 0.75,
+      190,
+      variantItems,
+      'SIBLING_VARIANT',
+    )
+
+    // B. Accessory Hub (Upper-Right: -45 deg / ~ -0.78 rad)
+    layoutHubGroup(
+      'hub-accessory',
+      'Accessory',
+      'accessory',
+      '🔌',
+      '#10b981',
+      -Math.PI * 0.25,
+      195,
+      accessoryItems,
+      'ACCESSORY',
+    )
+
+    // C. Component Hub (Lower-Right: 45 deg / ~ 0.78 rad) - for Kits and Bundles
+    layoutHubGroup(
+      'hub-component',
+      'Component',
+      'component',
+      '🧰',
+      '#818cf8',
+      Math.PI * 0.25,
+      205,
+      componentItems,
+      'KIT_COMPONENT',
+    )
+
+    // 4. Bundle View Layer (When Toggle is ON)
+    if (bundleViewEnabled && bundleData?.participations?.length) {
+      bundleData.participations.forEach((part, bIdx) => {
+        const bAngle = -Math.PI * 0.72 + bIdx * 0.5
+        const bDist = 230
+        const bx = cx + Math.cos(bAngle) * bDist
+        const by = cy + Math.sin(bAngle) * bDist
+
+        const parentNodeId = `bundle-parent-${part.parent_variant_id}`
+        newNodes.push({
+          id: parentNodeId,
+          type: 'related_product',
+          x: bx,
+          y: by,
+          baseX: bx,
+          baseY: by,
+          radius: 32,
+          orbitRing: 2,
+          relationship_type: 'BUNDLE_COMPONENT',
+          data: {
+            variant_id: part.parent_variant_id,
+            full_sku: part.parent_sku,
+            variant_name: part.parent_name,
+            identity_type: part.parent_type,
+          } as ProductNode,
+          phase: bIdx * 1.2,
+        })
+
+        // Edge: ERP MASTER -> Bundle Parent
+        newEdges.push({
+          id: `edge-bundle-${part.parent_variant_id}`,
+          source: 'product',
+          target: parentNodeId,
+          type: 'suggested',
+          relationship_type: 'BUNDLE_COMPONENT',
+        })
+
+        // Sibling components in this bundle
+        part.sibling_components.forEach((sib, sIdx) => {
+          const sibAngle = bAngle - 0.4 + sIdx * 0.45
+          const sx = bx + Math.cos(sibAngle) * 95
+          const sy = by + Math.sin(sibAngle) * 95
+
+          const sibNodeId = `bundle-sib-${part.parent_variant_id}-${sib.variant_id}`
+          newNodes.push({
+            id: sibNodeId,
+            type: 'related_product',
+            x: sx,
+            y: sy,
+            baseX: sx,
+            baseY: sy,
+            radius: 26,
+            orbitRing: 3,
+            relationship_type: 'BUNDLE_COMPONENT',
+            data: sib,
+            phase: sIdx * 0.9,
+          })
+
+          newEdges.push({
+            id: `edge-sib-${part.parent_variant_id}-${sib.variant_id}`,
+            source: parentNodeId,
+            target: sibNodeId,
+            type: 'related',
+            relationship_type: 'BUNDLE_COMPONENT',
+          })
+        })
+      })
+    }
+
+    // 5. AI Suggestions (Purple Candidate Nodes)
     aiSuggestions.forEach((sug, idx) => {
-      const angle = (idx / (aiSuggestions.length || 1)) * Math.PI * 2 + Math.PI / 4
-      const radiusDist = 220 + (idx % 2) * 45
+      const angle = Math.PI * 0.05 + idx * 0.22
+      const radiusDist = 205 + (idx % 2) * 35
       const sx = cx + Math.cos(angle) * radiusDist
       const sy = cy + Math.sin(angle) * radiusDist
       const relType = sug.relationship_type || 'EXACT'
@@ -509,7 +740,7 @@ export default function ListingGraphPage() {
 
     nodesRef.current = newNodes
     edgesRef.current = newEdges
-  }, [graphData, selectedVariant, aiSuggestions])
+  }, [graphData, selectedVariant, aiSuggestions, bundleViewEnabled, bundleData])
 
   // 9. Animation & Celestial Orbit Rendering Loop (requestAnimationFrame)
   useEffect(() => {
@@ -748,6 +979,30 @@ export default function ListingGraphPage() {
           ctx.font = '8px monospace'
           const rSku = pData.full_sku || ''
           ctx.fillText(rSku.length > 10 ? rSku.substring(0, 8) + '..' : rSku, node.x, node.y + 7)
+        } else if (node.type === 'hub') {
+          const hData = node.data as HubData
+          const grad = ctx.createRadialGradient(node.x, node.y, 4, node.x, node.y, node.radius)
+          grad.addColorStop(0, isDarkMode ? '#1e293b' : '#ffffff')
+          grad.addColorStop(1, isDarkMode ? '#0f172a' : '#f1f5f9')
+          ctx.fillStyle = grad
+          ctx.fill()
+
+          ctx.strokeStyle = hData.color || '#8b5cf6'
+          ctx.lineWidth = 3
+          ctx.shadowColor = hData.color || '#8b5cf6'
+          ctx.shadowBlur = 12
+          ctx.stroke()
+          ctx.shadowBlur = 0
+
+          ctx.fillStyle = hData.color || '#8b5cf6'
+          ctx.font = 'bold 11px Inter, sans-serif'
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillText(`${hData.icon || '🪐'} ${hData.label}`, node.x, node.y - 6)
+
+          ctx.fillStyle = isDarkMode ? '#cbd5e1' : '#64748b'
+          ctx.font = 'bold 9px Inter, sans-serif'
+          ctx.fillText(`${hData.count} item${hData.count === 1 ? '' : 's'}`, node.x, node.y + 8)
         } else if (node.type === 'ai_candidate') {
           const aiData = node.data as AISuggestion
           const pMeta = PLATFORM_META[aiData.platform] || { label: aiData.platform, color: '#c084fc', icon: '✨' }
@@ -1187,6 +1442,28 @@ export default function ListingGraphPage() {
               Compare ({selectedNodeIds.length})
             </Button>
           )}
+
+          {/* Bundle View Toggle */}
+          <Button
+            variant={bundleViewEnabled ? 'contained' : 'outlined'}
+            size="small"
+            startIcon={<Workspaces />}
+            disabled={!activeVariantId}
+            onClick={() => setBundleViewEnabled((prev) => !prev)}
+            sx={{
+              borderColor: '#f59e0b',
+              bgcolor: bundleViewEnabled ? '#f59e0b' : 'transparent',
+              color: bundleViewEnabled ? '#ffffff' : '#f59e0b',
+              textTransform: 'none',
+              fontWeight: 600,
+              '&:hover': {
+                bgcolor: bundleViewEnabled ? '#d97706' : 'rgba(245, 158, 11, 0.1)',
+                borderColor: '#d97706',
+              },
+            }}
+          >
+            Bundle View {bundleViewEnabled ? 'ON' : 'OFF'}
+          </Button>
 
           <Button
             variant="contained"
@@ -1646,6 +1923,17 @@ export default function ListingGraphPage() {
           }}
         />
       )}
+
+      {/* AI Deep Classification Results Panel */}
+      <OrbitDeepClassifyPanel
+        result={deepClassifyResult}
+        loading={deepClassifyLoading}
+        isDarkMode={isDarkMode}
+        onConvertType={() => {
+          setConvertTypeModalOpen(true)
+        }}
+        onFocusProduct={handleFocusProduct}
+      />
 
       {/* Bundle / Kit Creator Modal */}
       {bundleKitModalOpen && (

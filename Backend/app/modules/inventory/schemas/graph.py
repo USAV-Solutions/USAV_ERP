@@ -73,12 +73,21 @@ class GraphEdge(BaseModel):
     confidence: Optional[float] = None
 
 
+class GroupHub(BaseModel):
+    """A logical group hub node (Variants, Accessory, Component, Bundle)."""
+    hub_id: str           # e.g. "hub-variants", "hub-accessory", "hub-component"
+    hub_label: str        # "Variants", "Accessory", "Component"
+    hub_type: str         # "variants", "accessory", "component", "bundle"
+    children_ids: List[str] = Field(default_factory=list)
+
+
 class GraphTopologyResponse(BaseModel):
     """Full graph topology for visualizer canvas."""
     product: ProductNode
     listings: List[ListingNode] = Field(default_factory=list)
     related_products: List[ProductNode] = Field(default_factory=list)
     edges: List[GraphEdge] = Field(default_factory=list)
+    hubs: List[GroupHub] = Field(default_factory=list)
 
 
 class AISuggestRequest(BaseModel):
@@ -230,3 +239,63 @@ class OrbitConvertTypeRequest(BaseModel):
     variant_id: int = Field(..., description="Target variant ID to convert")
     target_type: str = Field(..., description="'K' (Predefined Kit), 'B' (USAV Bundle), or 'Product' (Base)")
     components: Optional[List[BundleComponentInput]] = Field(default_factory=list, description="Optional initial components")
+
+
+# ============================================================================
+# AI DEEP CLASSIFICATION SCHEMAS
+# ============================================================================
+
+class AIDeepClassifyRequest(BaseModel):
+    """Request for AI deep product classification."""
+    variant_id: int = Field(..., ge=1)
+
+
+class AIClassifiedComponent(BaseModel):
+    """A component suggested by AI, optionally matched to existing catalog."""
+    component_name: str
+    suggested_quantity: int = 1
+    suggested_role: str = "PRIMARY"
+    matched_variant_id: Optional[int] = None
+    matched_sku: Optional[str] = None
+    matched_name: Optional[str] = None
+    match_confidence: float = 0.0
+
+
+class AIClassifiedParent(BaseModel):
+    """A parent product this item may be a component of."""
+    parent_name: str
+    matched_variant_id: Optional[int] = None
+    matched_sku: Optional[str] = None
+    matched_name: Optional[str] = None
+    match_confidence: float = 0.0
+
+
+class AIDeepClassifyResponse(BaseModel):
+    """Response from AI deep product classification."""
+    variant_id: int
+    full_sku: str
+    current_type: str
+    suggested_type: str = Field(..., description="'Product', 'K', 'B', 'P'")
+    type_confidence: float = Field(..., ge=0.0, le=1.0)
+    type_reasoning: str
+    suggested_components: List[AIClassifiedComponent] = Field(default_factory=list)
+    suggested_parents: List[AIClassifiedParent] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
+
+class BundleParticipation(BaseModel):
+    """A bundle/kit that this product participates in."""
+    parent_variant_id: int
+    parent_sku: str
+    parent_name: Optional[str] = None
+    parent_type: str  # 'K' or 'B'
+    role: str
+    quantity_required: int = 1
+    sibling_components: List[ProductNode] = Field(default_factory=list)
+
+
+class BundleDiscoveryResponse(BaseModel):
+    """All bundles/kits this product participates in."""
+    variant_id: int
+    full_sku: str
+    participations: List[BundleParticipation] = Field(default_factory=list)
