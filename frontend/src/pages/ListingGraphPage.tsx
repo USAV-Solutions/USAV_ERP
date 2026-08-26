@@ -57,7 +57,7 @@ import OrbitConvertTypeModal from '../components/orbit/OrbitConvertTypeModal'
 import OrbitDeepClassifyPanel, {
   type AIDeepClassifyResponse,
 } from '../components/orbit/OrbitDeepClassifyPanel'
-import OrbitGalaxy3D from '../components/orbit/OrbitGalaxy3D'
+import OrbitObsidianGraph from '../components/orbit/OrbitObsidianGraph'
 import type { VariantSearchResult } from '../types/orders'
 import type {
   GraphTopologyResponse,
@@ -1489,11 +1489,11 @@ export default function ListingGraphPage() {
         }}
       >
         <Stack direction="row" alignItems="center" spacing={1.5} sx={{ flex: 1, maxWidth: 720 }}>
-          <Tooltip title={viewMode === 'universe' ? 'Currently in 3D Galaxy Universe' : 'Return to 3D Database Galaxy'}>
+          <Tooltip title={viewMode === 'universe' ? 'Currently in Obsidian Graph View' : 'Explore Database Knowledge Graph'}>
             <Button
               variant={viewMode === 'universe' ? 'contained' : 'outlined'}
               size="small"
-              startIcon={<Explore />}
+              startIcon={<Hub />}
               onClick={() => {
                 if (viewMode === 'universe' && activeVariantId) {
                   setViewMode('single')
@@ -1515,7 +1515,7 @@ export default function ListingGraphPage() {
                 },
               }}
             >
-              {viewMode === 'universe' ? '🌌 Universe 3D' : '🪐 Single Orbit'}
+              {viewMode === 'universe' ? '🕸️ Database Graph' : '🪐 Single Orbit'}
             </Button>
           </Tooltip>
 
@@ -1780,7 +1780,7 @@ export default function ListingGraphPage() {
         }}
       >
         {viewMode === 'universe' ? (
-          <OrbitGalaxy3D
+          <OrbitObsidianGraph
             data={universeData || null}
             loading={isUniverseLoading}
             isDarkMode={isDarkMode}
