@@ -458,7 +458,7 @@ export default function ListingGraphPage() {
       phase: 0,
     })
 
-    // 2. Direct Marketplace Listings (ONLY EXACT matches stay in Ring 1 around ERP Master)
+    // 2. Direct Marketplace Listings (Concentric multi-ring distribution arranged by line length)
     const listings = graphData?.listings || []
     const exactListings = listings.filter((l) => !l.relationship_type || l.relationship_type === 'EXACT')
     const accessoryListings = listings.filter((l) => l.relationship_type === 'ACCESSORY')
@@ -467,40 +467,71 @@ export default function ListingGraphPage() {
       (l) => l.relationship_type === 'BUNDLE' || l.relationship_type === 'BUNDLE_COMPONENT',
     )
 
-    const startListingAngle = -Math.PI * 0.75
-    const endListingAngle = Math.PI * 0.65
-    exactListings.forEach((listing, idx) => {
-      const angle =
-        exactListings.length === 1
-          ? Math.PI
-          : startListingAngle + (idx / (exactListings.length - 1)) * (endListingAngle - startListingAngle)
-      const radiusDist = 180 + (idx % 2) * 28
-      const lx = cx + Math.cos(angle) * radiusDist
-      const ly = cy + Math.sin(angle) * radiusDist
-      const relType = listing.relationship_type || 'EXACT'
+    // Check if hubs are present to determine arc boundaries
+    const hasRightHubs =
+      accessoryListings.length > 0 ||
+      componentListings.length > 0 ||
+      (graphData?.related_products || []).some(
+        (rp) => rp.identity_type === 'P' || rp.identity_type === 'A' || rp.identity_type === 'K',
+      )
 
-      newNodes.push({
-        id: `listing-${listing.listing_id}`,
-        type: 'listing',
-        x: lx,
-        y: ly,
-        baseX: lx,
-        baseY: ly,
-        radius: 32,
-        orbitRing: 1,
-        relationship_type: relType,
-        data: listing,
-        phase: idx * 0.9,
-      })
+    // If no hubs on the right, use an expanded wide circle arc (up to 320 deg); if hubs exist, use the Western arc
+    const startListingAngle = hasRightHubs ? -Math.PI * 0.75 : -Math.PI * 0.92
+    const endListingAngle = hasRightHubs ? Math.PI * 0.65 : Math.PI * 0.92
+    const listingArcSpan = endListingAngle - startListingAngle
 
-      newEdges.push({
-        id: `edge-listing-${listing.listing_id}`,
-        source: 'product',
-        target: `listing-${listing.listing_id}`,
-        type: 'locked',
-        relationship_type: relType,
-      })
-    })
+    // Multi-tier concentric orbits for exact listings to arrange line lengths and eliminate collisions
+    const listingRingCapacities = [6, 8, 10, 13, 16, 20]
+    const listingRingDistances = [175, 255, 335, 415, 495, 575]
+
+    let processedListings = 0
+    let ringIdx = 0
+
+    while (processedListings < exactListings.length) {
+      const cap = listingRingCapacities[Math.min(ringIdx, listingRingCapacities.length - 1)]
+      const baseDist = listingRingDistances[Math.min(ringIdx, listingRingDistances.length - 1)]
+      const countInRing = Math.min(cap, exactListings.length - processedListings)
+
+      for (let i = 0; i < countInRing; i++) {
+        const listing = exactListings[processedListings + i]
+        const fraction = countInRing === 1 ? 0.5 : i / (countInRing - 1)
+        // Stagger alternating rings so outer nodes sit between inner nodes
+        const staggerShift =
+          ringIdx % 2 === 1 && countInRing > 1 ? (0.5 / (countInRing - 1)) * listingArcSpan * 0.4 : 0
+        const angle = startListingAngle + fraction * listingArcSpan + staggerShift
+
+        // Micro-alternating radius for line length variety
+        const radiusDist = baseDist + (i % 2 === 1 ? 12 : -6)
+        const lx = cx + Math.cos(angle) * radiusDist
+        const ly = cy + Math.sin(angle) * radiusDist
+        const relType = listing.relationship_type || 'EXACT'
+
+        newNodes.push({
+          id: `listing-${listing.listing_id}`,
+          type: 'listing',
+          x: lx,
+          y: ly,
+          baseX: lx,
+          baseY: ly,
+          radius: 32,
+          orbitRing: ringIdx + 1,
+          relationship_type: relType,
+          data: listing,
+          phase: (processedListings + i) * 0.9,
+        })
+
+        newEdges.push({
+          id: `edge-listing-${listing.listing_id}`,
+          source: 'product',
+          target: `listing-${listing.listing_id}`,
+          type: 'locked',
+          relationship_type: relType,
+        })
+      }
+
+      processedListings += countInRing
+      ringIdx++
+    }
 
     // 3. Partition Related Products into Groups
     const relatedProducts = graphData?.related_products || []
@@ -833,7 +864,7 @@ export default function ListingGraphPage() {
       const cy = canvas.clientHeight / 2
 
       // Draw Celestial Orbit Guide Rings
-      const orbitRings = [175, 250, 325, 390]
+      const orbitRings = [175, 255, 335, 415, 495, 575]
       orbitRings.forEach((r, idx) => {
         ctx.beginPath()
         ctx.arc(cx, cy, r, 0, Math.PI * 2)
