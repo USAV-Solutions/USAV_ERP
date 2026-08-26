@@ -179,8 +179,22 @@ class ChannelSalesMetric(BaseModel):
     revenue_90d: float = 0.0
 
 
+class SalesTransactionItem(BaseModel):
+    """Recent order sales transaction for a product."""
+    order_id: int
+    external_order_id: Optional[str] = None
+    external_order_number: Optional[str] = None
+    platform: str
+    quantity: int = 1
+    unit_price: Optional[float] = None
+    total_price: Optional[float] = None
+    currency: str = "USD"
+    ordered_at: Optional[datetime] = None
+    status: Optional[str] = None
+
+
 class OrbitAnalyticsResponse(BaseModel):
-    """Sales velocity, order metrics, stock runway, and price mismatch alert."""
+    """Sales velocity, order metrics, stock runway, price mismatch alert, and recent transaction history."""
     variant_id: int
     full_sku: str
     units_sold_30d: int = 0
@@ -193,6 +207,7 @@ class OrbitAnalyticsResponse(BaseModel):
     stock_warning: StockWarningStatus = StockWarningStatus.HEALTHY
     price_mismatch: PriceMismatchAlert = Field(default_factory=PriceMismatchAlert)
     channel_metrics: List[ChannelSalesMetric] = Field(default_factory=list)
+    recent_transactions: List[SalesTransactionItem] = Field(default_factory=list)
 
 
 class BundleComponentInput(BaseModel):

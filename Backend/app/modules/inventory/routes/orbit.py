@@ -32,6 +32,7 @@ from app.modules.inventory.schemas.graph import (
     StockWarningStatus,
     PriceMismatchAlert,
     ChannelSalesMetric,
+    SalesTransactionItem,
     OrbitCreateBundleKitRequest,
     OrbitCreateVariantRequest,
     OrbitUpdateRelationshipRequest,
@@ -177,6 +178,49 @@ async def get_orbit_variant_analytics(
                 message=f"Price divergence detected: Ecwid (${ecwid_price:.2f}) vs Shopify (${shopify_price:.2f}). Difference: ${abs(diff):.2f}",
             )
 
+    # 5. Fetch Recent Sales Transactions (Last 10 Orders)
+    recent_stmt = (
+        select(
+            Order.id,
+            Order.external_order_id,
+            Order.external_order_number,
+            Order.platform,
+            OrderItem.quantity,
+            OrderItem.unit_price,
+            OrderItem.total_price,
+            Order.currency,
+            Order.ordered_at,
+            Order.status,
+        )
+        .join(Order, Order.id == OrderItem.order_id)
+        .where(
+            or_(
+                OrderItem.variant_id == variant.id,
+                OrderItem.external_sku == variant.full_sku,
+            )
+        )
+        .order_by(Order.ordered_at.desc().nullslast(), Order.id.desc())
+        .limit(10)
+    )
+    recent_res = await db.execute(recent_stmt)
+    recent_rows = recent_res.all()
+
+    recent_transactions = [
+        SalesTransactionItem(
+            order_id=r[0],
+            external_order_id=r[1],
+            external_order_number=r[2],
+            platform=r[3].value if hasattr(r[3], "value") else str(r[3]),
+            quantity=int(r[4] or 1),
+            unit_price=float(r[5]) if r[5] is not None else None,
+            total_price=float(r[6]) if r[6] is not None else None,
+            currency=str(r[7] or "USD"),
+            ordered_at=r[8],
+            status=r[9].value if hasattr(r[9], "value") else str(r[9]) if r[9] else None,
+        )
+        for r in recent_rows
+    ]
+
     return OrbitAnalyticsResponse(
         variant_id=variant.id,
         full_sku=variant.full_sku,
@@ -190,6 +234,7 @@ async def get_orbit_variant_analytics(
         stock_warning=stock_warning,
         price_mismatch=price_alert,
         channel_metrics=channel_metrics,
+        recent_transactions=recent_transactions,
     )
 
 

@@ -28,7 +28,7 @@ Inventory route handlers split by feature surface (variants, listings, images, e
   - `POST /listings/lock-relationship`: locks a platform listing to a product variant and enriches missing variant master metadata.
   - `POST /listings/compare`: compares 2 to 10 listing nodes side-by-side across all channel metrics.
 - Orbit View & USAV UPIS Specification Endpoints (`/orbit/*`):
-  - `GET /orbit/analytics/{variant_id}`: Computes real-time sales order velocity, 30d/90d revenue, warehouse available inventory, stock runway days, and automated Ecwid ↔ Shopify price mismatch detection.
+  - `GET /orbit/analytics/{variant_id}`: Computes real-time sales order velocity, 30d/90d revenue, warehouse available inventory, stock runway days, automated Ecwid ↔ Shopify price mismatch detection, and 10 most recent order sales transactions (`platform`, `order_id`, `quantity`, `unit_price`, `ordered_at`, `status`).
   - `POST /orbit/bundle-kit/create`: Dual creator for USAV Bundles (Type `B` - dynamic assembly) and Predefined Manufacturer Kits (Type `K` - fixed unit with roles `MAIN_UNIT`, `SATELLITE_SPEAKER`, `SUBWOOFER`, `ACCESSORY`) adhering to USAV UPIS Layer 1 syntax (`[ProductID]-[Type]`).
   - `POST /orbit/convert-type`: Instant product classification converter (Type `Product`, `B`, `K`) with automated recipe updates and UPIS SKU re-evaluation.
   - `POST /orbit/variant/create`: Rapid variant generator adhering to USAV UPIS Layer 2 (UML: `[UPIS-H]-[Color]-[Condition]`).

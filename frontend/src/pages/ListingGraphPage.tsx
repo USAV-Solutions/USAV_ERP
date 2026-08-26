@@ -41,7 +41,6 @@ import {
   Warning,
   DarkMode,
   LightMode,
-  CenterFocusStrong,
   ChangeCircle,
   Workspaces,
 } from '@mui/icons-material'
@@ -56,7 +55,6 @@ import OrbitVariantModal from '../components/orbit/OrbitVariantModal'
 import OrbitConvertTypeModal from '../components/orbit/OrbitConvertTypeModal'
 import OrbitDeepClassifyPanel, {
   type AIDeepClassifyResponse,
-  type AIClassifiedComponent,
 } from '../components/orbit/OrbitDeepClassifyPanel'
 import type { VariantSearchResult } from '../types/orders'
 import type {
@@ -1721,17 +1719,18 @@ export default function ListingGraphPage() {
               position: 'absolute',
               left: hoverPos.x,
               top: hoverPos.y,
-              maxWidth: 340,
+              maxWidth: hoveredNode.type === 'product' ? 440 : 340,
+              minWidth: hoveredNode.type === 'product' ? 360 : 'auto',
               bgcolor: isDarkMode ? 'rgba(15, 23, 42, 0.96)' : 'rgba(255, 255, 255, 0.98)',
               backdropFilter: 'blur(14px)',
               border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid #cbd5e1',
-              borderRadius: 2,
-              boxShadow: isDarkMode ? '0 8px 32px rgba(0, 0, 0, 0.7)' : '0 8px 32px rgba(0, 0, 0, 0.15)',
+              borderRadius: 2.5,
+              boxShadow: isDarkMode ? '0 12px 36px rgba(0, 0, 0, 0.8)' : '0 12px 36px rgba(0, 0, 0, 0.15)',
               pointerEvents: 'none',
-              zIndex: 20,
+              zIndex: 25,
             }}
           >
-            <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
+            <CardContent sx={{ p: 1.75, '&:last-child': { pb: 1.75 } }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
                 {hoveredNode.type === 'ai_candidate' ? (
                   <Chip
@@ -1750,13 +1749,125 @@ export default function ListingGraphPage() {
                     fontSize: 10,
                   }}
                 />
+                {hoveredNode.type === 'product' && (
+                  <Chip
+                    size="small"
+                    label="ERP MASTER"
+                    sx={{
+                      bgcolor: 'rgba(56, 189, 248, 0.15)',
+                      color: '#38bdf8',
+                      fontWeight: 700,
+                      fontSize: 10,
+                      border: '1px solid rgba(56, 189, 248, 0.3)',
+                    }}
+                  />
+                )}
               </Stack>
 
-              <Typography variant="body2" sx={{ fontWeight: 600, color: isDarkMode ? '#f8fafc' : '#0f172a', fontSize: 12 }}>
+              <Typography variant="body2" sx={{ fontWeight: 700, color: isDarkMode ? '#f8fafc' : '#0f172a', fontSize: 13, mb: 0.5 }}>
                 {'listed_name' in hoveredNode.data
                   ? (hoveredNode.data as ListingNode).listed_name || (hoveredNode.data as ListingNode).merchant_sku
                   : (hoveredNode.data as ProductNode).variant_name || (hoveredNode.data as ProductNode).full_sku}
               </Typography>
+
+              {/* ERP Master Sales Velocity & Inventory Summary */}
+              {hoveredNode.type === 'product' && analyticsData && (
+                <Box sx={{ mt: 1, p: 1.2, borderRadius: 1.5, bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.04)' : '#f8fafc', border: isDarkMode ? '1px solid rgba(255,255,255,0.06)' : '1px solid #e2e8f0' }}>
+                  <Stack direction="row" spacing={2} justifyContent="space-between" alignItems="center">
+                    <Box>
+                      <Typography variant="caption" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', display: 'block', fontSize: 10 }}>
+                        🔥 30D Velocity
+                      </Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 700, color: '#38bdf8', fontSize: 12 }}>
+                        {analyticsData.units_sold_30d} sold <span style={{ fontSize: 10, color: isDarkMode ? '#cbd5e1' : '#475569', fontWeight: 500 }}>(${analyticsData.revenue_30d.toLocaleString()})</span>
+                      </Typography>
+                    </Box>
+                    <Box sx={{ textAlign: 'right' }}>
+                      <Typography variant="caption" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', display: 'block', fontSize: 10 }}>
+                        📦 Available Stock
+                      </Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 700, color: analyticsData.available_stock > 0 ? '#10b981' : '#f43f5e', fontSize: 12 }}>
+                        {analyticsData.available_stock} in stock <span style={{ fontSize: 10, color: isDarkMode ? '#cbd5e1' : '#475569', fontWeight: 500 }}>({analyticsData.runway_days ?? '—'}d runway)</span>
+                      </Typography>
+                    </Box>
+                  </Stack>
+                </Box>
+              )}
+
+              {/* Sales Transaction History Table (Platform · Order ID · Qty · Timestamp) */}
+              {hoveredNode.type === 'product' && (
+                <Box sx={{ mt: 1.2, pt: 1, borderTop: isDarkMode ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid #e2e8f0' }}>
+                  <Typography variant="caption" sx={{ color: isDarkMode ? '#38bdf8' : '#0284c7', fontWeight: 700, display: 'block', mb: 0.75, letterSpacing: 0.3 }}>
+                    🛒 TRANSACTION HISTORY (ORDERS MODULE)
+                  </Typography>
+
+                  {analyticsData?.recent_transactions && analyticsData.recent_transactions.length > 0 ? (
+                    <Stack spacing={0.6} sx={{ maxHeight: 220, overflowY: 'auto', pr: 0.5 }}>
+                      {analyticsData.recent_transactions.map((tx) => {
+                        const pMeta = PLATFORM_META[tx.platform] || { label: tx.platform, color: '#38bdf8', icon: '🛒', bgColor: 'rgba(56,189,248,0.1)' }
+                        const orderNum = tx.external_order_number || tx.external_order_id || `#${tx.order_id}`
+                        const formattedDate = tx.ordered_at
+                          ? new Date(tx.ordered_at).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                          : '—'
+
+                        return (
+                          <Box
+                            key={tx.order_id}
+                            sx={{
+                              p: 0.75,
+                              px: 1,
+                              borderRadius: 1.2,
+                              bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.03)' : '#f8fafc',
+                              border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.05)' : '1px solid #f1f5f9',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: 1,
+                            }}
+                          >
+                            <Stack direction="row" alignItems="center" spacing={0.8} sx={{ minWidth: 0, flex: 1 }}>
+                              <Chip
+                                size="small"
+                                label={`${pMeta.icon} ${pMeta.label}`}
+                                sx={{
+                                  height: 18,
+                                  fontSize: 9.5,
+                                  fontWeight: 600,
+                                  color: pMeta.color,
+                                  bgcolor: isDarkMode ? 'rgba(255,255,255,0.06)' : pMeta.bgColor,
+                                  border: `1px solid ${pMeta.color}33`,
+                                  '& .MuiChip-label': { px: 0.6 },
+                                }}
+                              />
+                              <Typography variant="caption" sx={{ fontWeight: 600, color: isDarkMode ? '#e2e8f0' : '#1e293b', fontSize: 11, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                                {orderNum}
+                              </Typography>
+                            </Stack>
+
+                            <Stack direction="row" alignItems="center" spacing={1} sx={{ flexShrink: 0 }}>
+                              <Typography variant="caption" sx={{ fontWeight: 700, color: '#f59e0b', fontSize: 11 }}>
+                                ×{tx.quantity}
+                              </Typography>
+                              {tx.unit_price !== null && tx.unit_price !== undefined && (
+                                <Typography variant="caption" sx={{ fontWeight: 600, color: isDarkMode ? '#cbd5e1' : '#334155', fontSize: 10.5 }}>
+                                  ${tx.unit_price.toFixed(2)}
+                                </Typography>
+                              )}
+                              <Typography variant="caption" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', fontSize: 10 }}>
+                                {formattedDate}
+                              </Typography>
+                            </Stack>
+                          </Box>
+                        )
+                      })}
+                    </Stack>
+                  ) : (
+                    <Typography variant="caption" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', fontStyle: 'italic', display: 'block', py: 0.5 }}>
+                      No order transactions recorded for this SKU yet.
+                    </Typography>
+                  )}
+                </Box>
+              )}
 
               {hoveredNode.reasons && hoveredNode.reasons.length > 0 && (
                 <Box sx={{ mt: 1, pt: 1, borderTop: isDarkMode ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid #e2e8f0' }}>

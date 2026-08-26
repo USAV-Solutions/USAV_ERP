@@ -39,6 +39,7 @@ from app.modules.inventory.schemas.graph import (
     StockWarningStatus,
     PriceMismatchAlert,
     ChannelSalesMetric,
+    SalesTransactionItem,
     OrbitAnalyticsResponse,
     BundleComponentInput,
     OrbitCreateBundleKitRequest,
