@@ -730,9 +730,17 @@ export default function ListingGraphPage() {
 
     // 4. Bundle View Layer (When Toggle is ON)
     if (bundleViewEnabled && bundleData?.participations?.length) {
+      // Find the outermost listing radius or use standard 460px
+      const maxListingR =
+        exactListings.length > 0
+          ? listingRingDistances[Math.min(ringIdx - 1, listingRingDistances.length - 1)] || 335
+          : 250
+      const bBaseDist = Math.max(380, maxListingR + 100)
+
       bundleData.participations.forEach((part, bIdx) => {
-        const bAngle = -Math.PI * 0.72 + bIdx * 0.5
-        const bDist = 230
+        // Place in top-left quadrant (-135 deg / ~ -0.75pi) with comfortable spread
+        const bAngle = -Math.PI * 0.75 + (bIdx - (bundleData.participations.length - 1) / 2) * 0.45
+        const bDist = bBaseDist + (bIdx % 2) * 40
         const bx = cx + Math.cos(bAngle) * bDist
         const by = cy + Math.sin(bAngle) * bDist
 
@@ -744,8 +752,8 @@ export default function ListingGraphPage() {
           y: by,
           baseX: bx,
           baseY: by,
-          radius: 32,
-          orbitRing: 2,
+          radius: 34,
+          orbitRing: 4,
           relationship_type: 'BUNDLE_COMPONENT',
           data: {
             variant_id: part.parent_variant_id,
@@ -756,7 +764,7 @@ export default function ListingGraphPage() {
           phase: bIdx * 1.2,
         })
 
-        // Edge: ERP MASTER -> Bundle Parent
+        // Edge: ERP MASTER -> Bundle Parent (dashed amber tether)
         newEdges.push({
           id: `edge-bundle-${part.parent_variant_id}`,
           source: 'product',
@@ -765,11 +773,12 @@ export default function ListingGraphPage() {
           relationship_type: 'BUNDLE_COMPONENT',
         })
 
-        // Sibling components in this bundle
+        // Sibling components in this bundle (Product P, etc.)
         part.sibling_components.forEach((sib, sIdx) => {
-          const sibAngle = bAngle - 0.4 + sIdx * 0.45
-          const sx = bx + Math.cos(sibAngle) * 95
-          const sy = by + Math.sin(sibAngle) * 95
+          // Angle fanning outward away from center (top-left direction)
+          const sibAngle = bAngle + (sIdx === 0 ? -0.38 : 0.38) * (sIdx + 1) * 0.5
+          const sx = bx + Math.cos(sibAngle) * 135
+          const sy = by + Math.sin(sibAngle) * 135
 
           const sibNodeId = `bundle-sib-${part.parent_variant_id}-${sib.variant_id}`
           newNodes.push({
@@ -779,13 +788,14 @@ export default function ListingGraphPage() {
             y: sy,
             baseX: sx,
             baseY: sy,
-            radius: 26,
-            orbitRing: 3,
+            radius: 28,
+            orbitRing: 5,
             relationship_type: 'BUNDLE_COMPONENT',
             data: sib,
             phase: sIdx * 0.9,
           })
 
+          // Edge: Bundle Parent -> Sibling Product P (solid line)
           newEdges.push({
             id: `edge-sib-${part.parent_variant_id}-${sib.variant_id}`,
             source: parentNodeId,
@@ -1050,28 +1060,56 @@ export default function ListingGraphPage() {
           }
         } else if (node.type === 'related_product') {
           const pData = node.data as ProductNode
+          const isBundleParent = node.id.startsWith('bundle-parent') || pData.identity_type === 'B'
+          const isBundleSib = node.id.startsWith('bundle-sib')
+
           const grad = ctx.createRadialGradient(node.x, node.y, 2, node.x, node.y, node.radius)
-          grad.addColorStop(0, isDarkMode ? '#1e293b' : '#ffffff')
-          grad.addColorStop(1, isDarkMode ? '#0f172a' : '#f1f5f9')
+          if (isBundleParent) {
+            grad.addColorStop(0, isDarkMode ? '#451a03' : '#fffbeb')
+            grad.addColorStop(1, isDarkMode ? '#1e1b4b' : '#fef3c7')
+          } else {
+            grad.addColorStop(0, isDarkMode ? '#1e293b' : '#ffffff')
+            grad.addColorStop(1, isDarkMode ? '#0f172a' : '#f1f5f9')
+          }
           ctx.fillStyle = grad
           ctx.fill()
 
-          ctx.strokeStyle = relMeta.color
-          ctx.lineWidth = 2
-          ctx.setLineDash([3, 3])
-          ctx.stroke()
-          ctx.setLineDash([])
+          if (isBundleParent) {
+            ctx.strokeStyle = '#f59e0b'
+            ctx.lineWidth = 2.5
+            ctx.shadowColor = '#f59e0b'
+            ctx.shadowBlur = 10
+            ctx.stroke()
+            ctx.shadowBlur = 0
 
-          ctx.fillStyle = isDarkMode ? '#f8fafc' : '#0f172a'
-          ctx.font = 'bold 9px Inter, sans-serif'
-          ctx.textAlign = 'center'
-          ctx.textBaseline = 'middle'
-          ctx.fillText(relMeta.icon, node.x, node.y - 6)
+            ctx.fillStyle = '#f59e0b'
+            ctx.font = 'bold 9px Inter, sans-serif'
+            ctx.textAlign = 'center'
+            ctx.textBaseline = 'middle'
+            ctx.fillText('📦 BUNDLE', node.x, node.y - 6)
 
-          ctx.fillStyle = isDarkMode ? '#cbd5e1' : '#334155'
-          ctx.font = '8px monospace'
-          const rSku = pData.full_sku || ''
-          ctx.fillText(rSku.length > 10 ? rSku.substring(0, 8) + '..' : rSku, node.x, node.y + 7)
+            ctx.fillStyle = isDarkMode ? '#fef3c7' : '#78350f'
+            ctx.font = 'bold 8px monospace'
+            const rSku = pData.full_sku || ''
+            ctx.fillText(rSku.length > 10 ? rSku.substring(0, 8) + '..' : rSku, node.x, node.y + 7)
+          } else {
+            ctx.strokeStyle = isBundleSib ? '#f59e0b' : relMeta.color
+            ctx.lineWidth = 2
+            ctx.setLineDash(isBundleSib ? [] : [3, 3])
+            ctx.stroke()
+            ctx.setLineDash([])
+
+            ctx.fillStyle = isDarkMode ? '#f8fafc' : '#0f172a'
+            ctx.font = 'bold 9px Inter, sans-serif'
+            ctx.textAlign = 'center'
+            ctx.textBaseline = 'middle'
+            ctx.fillText(isBundleSib ? '📦' : relMeta.icon, node.x, node.y - 6)
+
+            ctx.fillStyle = isDarkMode ? '#cbd5e1' : '#334155'
+            ctx.font = '8px monospace'
+            const rSku = pData.full_sku || ''
+            ctx.fillText(rSku.length > 10 ? rSku.substring(0, 8) + '..' : rSku, node.x, node.y + 7)
+          }
         } else if (node.type === 'hub') {
           const hData = node.data as HubData
           const grad = ctx.createRadialGradient(node.x, node.y, 4, node.x, node.y, node.radius)
