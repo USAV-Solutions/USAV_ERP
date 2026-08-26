@@ -462,10 +462,14 @@ export default function ListingGraphPage() {
 
     // 2. Direct Marketplace Listings (Ebay, Amazon, Shopify, etc.)
     const listings = graphData?.listings || []
-    const listingBaseAngles = [-Math.PI * 0.65, Math.PI * 0.9, -Math.PI * 0.85, Math.PI * 0.55, -Math.PI * 0.4]
+    const startListingAngle = -Math.PI * 0.75
+    const endListingAngle = Math.PI * 0.65
     listings.forEach((listing, idx) => {
-      const angle = listingBaseAngles[idx % listingBaseAngles.length] + Math.floor(idx / listingBaseAngles.length) * 0.3
-      const radiusDist = 160 + (idx % 2) * 25
+      const angle =
+        listings.length === 1
+          ? Math.PI
+          : startListingAngle + (idx / (listings.length - 1)) * (endListingAngle - startListingAngle)
+      const radiusDist = 180 + (idx % 2) * 28
       const lx = cx + Math.cos(angle) * radiusDist
       const ly = cy + Math.sin(angle) * radiusDist
       const relType = listing.relationship_type || 'EXACT'
@@ -514,7 +518,7 @@ export default function ListingGraphPage() {
       }
     })
 
-    // Helper to position Hub + its children
+    // Helper to position Hub + its children with multi-tier collision-free spacing
     const layoutHubGroup = (
       hubId: string,
       hubLabel: string,
@@ -539,7 +543,7 @@ export default function ListingGraphPage() {
         y: hy,
         baseX: hx,
         baseY: hy,
-        radius: 34,
+        radius: 36,
         orbitRing: 2,
         relationship_type: childRelType,
         data: {
@@ -562,62 +566,79 @@ export default function ListingGraphPage() {
         relationship_type: childRelType,
       })
 
-      // Fan out children from the Hub
-      items.forEach((item, idx) => {
-        const span = Math.min(Math.PI * 0.8, (items.length - 1) * 0.45)
-        const startAngle = hubAngle - span / 2
-        const childAngle = items.length === 1 ? hubAngle : startAngle + (idx / (items.length - 1)) * span
-        const childDist = 110 + (idx % 2) * 18
-        const cx_child = hx + Math.cos(childAngle) * childDist
-        const cy_child = hy + Math.sin(childAngle) * childDist
+      // Multi-tier fan out for children to ensure zero overlap even for 15+ items
+      const tierCapacities = [4, 5, 6, 7]
+      const tierDistances = [120, 195, 270, 345]
+      const tierSpans = [Math.PI * 0.45, Math.PI * 0.60, Math.PI * 0.75, Math.PI * 0.90]
 
-        newNodes.push({
-          id: `related-product-${item.variant_id}`,
-          type: 'related_product',
-          x: cx_child,
-          y: cy_child,
-          baseX: cx_child,
-          baseY: cy_child,
-          radius: 28,
-          orbitRing: 3,
-          relationship_type: childRelType,
-          data: item,
-          phase: (idx + 3) * 0.8,
-        })
+      let processed = 0
+      let tierIdx = 0
 
-        // Tether Hub -> Child Node
-        newEdges.push({
-          id: `edge-hub-${hubId}-${item.variant_id}`,
-          source: hubId,
-          target: `related-product-${item.variant_id}`,
-          type: 'related',
-          relationship_type: childRelType,
-        })
-      })
+      while (processed < items.length) {
+        const cap = tierCapacities[Math.min(tierIdx, tierCapacities.length - 1)]
+        const tierDist = tierDistances[Math.min(tierIdx, tierDistances.length - 1)]
+        const tierSpan = tierSpans[Math.min(tierIdx, tierSpans.length - 1)]
+        const countInTier = Math.min(cap, items.length - processed)
+
+        for (let i = 0; i < countInTier; i++) {
+          const item = items[processed + i]
+          const fraction = countInTier === 1 ? 0.5 : i / (countInTier - 1)
+          const angleOffset = (fraction - 0.5) * tierSpan
+          const childAngle = hubAngle + angleOffset
+          const cx_child = hx + Math.cos(childAngle) * tierDist
+          const cy_child = hy + Math.sin(childAngle) * tierDist
+
+          newNodes.push({
+            id: `related-product-${item.variant_id}`,
+            type: 'related_product',
+            x: cx_child,
+            y: cy_child,
+            baseX: cx_child,
+            baseY: cy_child,
+            radius: 28,
+            orbitRing: 3,
+            relationship_type: childRelType,
+            data: item,
+            phase: (processed + i + 3) * 0.8,
+          })
+
+          // Tether Hub -> Child Node
+          newEdges.push({
+            id: `edge-hub-${hubId}-${item.variant_id}`,
+            source: hubId,
+            target: `related-product-${item.variant_id}`,
+            type: 'related',
+            relationship_type: childRelType,
+          })
+        }
+
+        processed += countInTier
+        tierIdx++
+      }
     }
 
-    // A. Variants Hub (Lower-Left: 135 deg / ~2.35 rad)
+    // A. Variants Hub (Lower-Left: 140 deg / ~2.44 rad)
     layoutHubGroup(
       'hub-variants',
       'Variants',
       'variants',
       '🔗',
       '#a855f7',
-      Math.PI * 0.75,
-      190,
+      Math.PI * 0.78,
+      250,
       variantItems,
       'SIBLING_VARIANT',
     )
 
-    // B. Accessory Hub (Upper-Right: -45 deg / ~ -0.78 rad)
+    // B. Accessory Hub (Upper-Right: -35 deg / ~ -0.61 rad)
     layoutHubGroup(
       'hub-accessory',
       'Accessory',
       'accessory',
       '🔌',
       '#10b981',
-      -Math.PI * 0.25,
-      195,
+      -Math.PI * 0.20,
+      260,
       accessoryItems,
       'ACCESSORY',
     )
@@ -630,7 +651,7 @@ export default function ListingGraphPage() {
       '🧰',
       '#818cf8',
       Math.PI * 0.25,
-      205,
+      270,
       componentItems,
       'KIT_COMPONENT',
     )
@@ -864,7 +885,7 @@ export default function ListingGraphPage() {
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
           ctx.fillText(confText, midX, midY)
-        } else if (edge.relationship_type !== 'EXACT') {
+        } else if (edge.relationship_type !== 'EXACT' && !edge.id.startsWith('edge-hub-')) {
           const badgeText = `${relMeta.icon} ${relMeta.label}`
           ctx.font = 'bold 8.5px Inter, sans-serif'
           const tw = ctx.measureText(badgeText).width + 12
