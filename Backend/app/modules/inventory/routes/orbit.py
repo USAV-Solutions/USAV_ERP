@@ -3,6 +3,7 @@ Orbit View API Endpoints.
 Provides interactive catalog management, dual Bundle (B) & Kit (K) creation per USAV UPIS spec,
 rapid variant generation (UML Layer 2), sales velocity metrics, and automated Ecwid-Shopify price mismatch alerting.
 """
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -14,8 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import AdminOrSalesUser
+from app.core.config import settings
 from app.core.database import get_db
-from app.models import Platform, PlatformSyncStatus, ConditionCode, IdentityType, InventoryStatus
+from app.models import Platform, PlatformSyncStatus, ConditionCode, IdentityType, InventoryStatus, BundleRole
 from app.models.entities import (
     ProductVariant,
     ProductIdentity,
@@ -37,6 +39,12 @@ from app.modules.inventory.schemas.graph import (
     OrbitConvertTypeRequest,
     ProductNode,
     RelationshipType,
+    AIDeepClassifyRequest,
+    AIDeepClassifyResponse,
+    AIClassifiedComponent,
+    AIClassifiedParent,
+    BundleDiscoveryResponse,
+    BundleParticipation,
 )
 
 logger = logging.getLogger(__name__)
@@ -506,3 +514,348 @@ async def unlink_orbit_relationship(
         return {"success": True, "message": f"Unlinked listing #{listing.id}"}
 
     return {"success": True, "message": "Unlinked"}
+
+
+# ============================================================================
+# AI DEEP CLASSIFICATION
+# ============================================================================
+
+def _fuzzy_score(query_tokens: set[str], candidate_text: str) -> float:
+    """Simple token overlap scoring for local DB matching."""
+    cand_tokens = set(candidate_text.lower().split())
+    if not query_tokens or not cand_tokens:
+        return 0.0
+    overlap = len(query_tokens & cand_tokens)
+    return overlap / max(len(query_tokens), 1)
+
+
+@router.post("/ai/deep-classify", response_model=AIDeepClassifyResponse)
+async def deep_classify_product(
+    request: AIDeepClassifyRequest,
+    _user: AdminOrSalesUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    AI Deep Product Classification (Two-Stage).
+    Stage 1: Gemini classifies product type from name + brand (minimal tokens).
+    Stage 2: Local DB fuzzy match for suggested components.
+    """
+    if not settings.gemini_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="GEMINI_API_KEY is not configured. Deep classification requires AI.",
+        )
+
+    # 1. Fetch target variant
+    stmt = (
+        select(ProductVariant)
+        .options(
+            selectinload(ProductVariant.identity).selectinload(ProductIdentity.family)
+        )
+        .where(ProductVariant.id == request.variant_id)
+    )
+    res = await db.execute(stmt)
+    variant = res.scalar_one_or_none()
+    if not variant:
+        raise HTTPException(status_code=404, detail=f"Variant {request.variant_id} not found")
+
+    identity = variant.identity
+    current_type = identity.type.value if identity and identity.type else "Product"
+    full_sku = variant.full_sku
+    identity_name = identity.identity_name if identity else (variant.variant_name or "")
+    family_name = (identity.family.base_name if identity and identity.family else "") or ""
+
+    # Stage 1: Gemini classification (token-minimal — no catalog dump)
+    try:
+        from google import genai
+        client = genai.Client(api_key=settings.gemini_api_key)
+
+        prompt = f"""You are an expert product catalog classifier for consumer electronics and audio equipment.
+Given a product name and brand, determine its classification and real-world composition.
+
+Product: "{identity_name}"
+Brand/Family: "{family_name}"
+Current SKU: "{full_sku}"
+
+Classify this product as one of:
+- "Product": A standalone individual item (single speaker, single remote, single adapter, etc.)
+- "K": A predefined manufacturer Kit — sold as a complete set by the manufacturer (e.g. Bose Companion 3 = subwoofer + 2 satellites + control pod)
+- "B": A reseller-assembled Bundle — items packaged together by the seller, not officially sold as a set by the manufacturer
+- "P": A Part/Component — this is a sub-part or replacement component of a larger product
+
+If type is K or B: list the expected components with name, quantity, and role (PRIMARY, SATELLITE, SUBWOOFER, ACCESSORY, MAIN_UNIT, CONTROL_POD, POWER_SUPPLY, CABLE, REMOTE).
+If type is P: list the parent product(s) this part belongs to.
+
+Use your knowledge of the product brand and product line to determine the real composition.
+
+Return ONLY valid JSON with no markdown fences:
+{{"suggested_type": "K"|"B"|"Product"|"P", "confidence": 0.0-1.0, "reasoning": "brief explanation", "expected_components": [{{"name": "component name", "quantity": 1, "role": "PRIMARY"}}], "parent_products": [{{"name": "parent product name"}}]}}"""
+
+        response = client.models.generate_content(
+            model=settings.gemini_model_name,
+            contents=prompt,
+        )
+        raw_text = (response.text or "").strip()
+        if raw_text.startswith("```"):
+            lines = raw_text.splitlines()
+            raw_text = "\n".join(lines[1:-1] if lines[-1].startswith("```") else lines[1:])
+
+        ai_result = json.loads(raw_text)
+    except Exception as e:
+        logger.error("Gemini deep classification failed: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"AI classification failed: {str(e)}",
+        )
+
+    suggested_type = ai_result.get("suggested_type", "Product")
+    type_confidence = max(0.0, min(1.0, float(ai_result.get("confidence", 0.5))))
+    type_reasoning = ai_result.get("reasoning", "")
+    raw_components = ai_result.get("expected_components", [])
+    raw_parents = ai_result.get("parent_products", [])
+
+    # Stage 2: Local DB fuzzy match for components
+    family_id = identity.product_id if identity else None
+    matched_components: list[AIClassifiedComponent] = []
+
+    for comp in raw_components:
+        comp_name = comp.get("name", "")
+        comp_qty = int(comp.get("quantity", 1))
+        comp_role = comp.get("role", "PRIMARY")
+        query_tokens = set(comp_name.lower().split())
+
+        matched_variant_id = None
+        matched_sku = None
+        matched_name = None
+        match_confidence = 0.0
+
+        # First: search within same product family
+        if family_id:
+            fam_stmt = (
+                select(ProductVariant)
+                .join(ProductIdentity, ProductVariant.identity_id == ProductIdentity.id)
+                .where(
+                    ProductIdentity.product_id == family_id,
+                    ProductVariant.id != request.variant_id,
+                )
+                .limit(20)
+            )
+            fam_res = await db.execute(fam_stmt)
+            fam_variants = fam_res.scalars().all()
+
+            best_score = 0.0
+            for fv in fam_variants:
+                text = f"{fv.variant_name or ''} {fv.full_sku}"
+                score = _fuzzy_score(query_tokens, text)
+                if score > best_score:
+                    best_score = score
+                    matched_variant_id = fv.id
+                    matched_sku = fv.full_sku
+                    matched_name = fv.variant_name
+                    match_confidence = round(score, 2)
+
+        # Second: if no good family match, widen to full catalog
+        if match_confidence < 0.3:
+            # Build ILIKE patterns from the component name tokens (top 3 keywords)
+            keywords = [t for t in query_tokens if len(t) > 2][:3]
+            if keywords:
+                like_conditions = [ProductVariant.variant_name.ilike(f"%{kw}%") for kw in keywords]
+                wide_stmt = (
+                    select(ProductVariant)
+                    .where(
+                        and_(*like_conditions),
+                        ProductVariant.id != request.variant_id,
+                    )
+                    .limit(10)
+                )
+                wide_res = await db.execute(wide_stmt)
+                wide_variants = wide_res.scalars().all()
+
+                best_score = match_confidence
+                for wv in wide_variants:
+                    text = f"{wv.variant_name or ''} {wv.full_sku}"
+                    score = _fuzzy_score(query_tokens, text)
+                    if score > best_score:
+                        best_score = score
+                        matched_variant_id = wv.id
+                        matched_sku = wv.full_sku
+                        matched_name = wv.variant_name
+                        match_confidence = round(score, 2)
+
+        matched_components.append(AIClassifiedComponent(
+            component_name=comp_name,
+            suggested_quantity=comp_qty,
+            suggested_role=comp_role,
+            matched_variant_id=matched_variant_id,
+            matched_sku=matched_sku,
+            matched_name=matched_name,
+            match_confidence=match_confidence,
+        ))
+
+    # Stage 2b: Local DB fuzzy match for parents
+    matched_parents: list[AIClassifiedParent] = []
+    for parent in raw_parents:
+        parent_name = parent.get("name", "")
+        query_tokens = set(parent_name.lower().split())
+
+        matched_variant_id = None
+        matched_sku = None
+        matched_name = None
+        match_confidence = 0.0
+
+        keywords = [t for t in query_tokens if len(t) > 2][:3]
+        if keywords:
+            like_conditions = [ProductVariant.variant_name.ilike(f"%{kw}%") for kw in keywords]
+            parent_stmt = (
+                select(ProductVariant)
+                .where(
+                    and_(*like_conditions),
+                    ProductVariant.id != request.variant_id,
+                )
+                .limit(10)
+            )
+            parent_res = await db.execute(parent_stmt)
+            parent_variants = parent_res.scalars().all()
+
+            best_score = 0.0
+            for pv in parent_variants:
+                text = f"{pv.variant_name or ''} {pv.full_sku}"
+                score = _fuzzy_score(query_tokens, text)
+                if score > best_score:
+                    best_score = score
+                    matched_variant_id = pv.id
+                    matched_sku = pv.full_sku
+                    matched_name = pv.variant_name
+                    match_confidence = round(score, 2)
+
+        matched_parents.append(AIClassifiedParent(
+            parent_name=parent_name,
+            matched_variant_id=matched_variant_id,
+            matched_sku=matched_sku,
+            matched_name=matched_name,
+            match_confidence=match_confidence,
+        ))
+
+    # Generate warnings
+    warnings: list[str] = []
+    if suggested_type != current_type:
+        type_labels = {"Product": "Standalone Item", "K": "Kit", "B": "Bundle", "P": "Part/Component"}
+        warnings.append(
+            f"Type mismatch: currently classified as '{type_labels.get(current_type, current_type)}' "
+            f"but AI suggests '{type_labels.get(suggested_type, suggested_type)}' "
+            f"({int(type_confidence * 100)}% confidence)"
+        )
+
+    return AIDeepClassifyResponse(
+        variant_id=request.variant_id,
+        full_sku=full_sku,
+        current_type=current_type,
+        suggested_type=suggested_type,
+        type_confidence=type_confidence,
+        type_reasoning=type_reasoning,
+        suggested_components=matched_components,
+        suggested_parents=matched_parents,
+        warnings=warnings,
+    )
+
+
+# ============================================================================
+# BUNDLE DISCOVERY
+# ============================================================================
+
+@router.get("/bundles/{variant_id}", response_model=BundleDiscoveryResponse)
+async def get_bundle_participations(
+    variant_id: int,
+    _user: AdminOrSalesUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Discover all bundles/kits this product participates in (as a child component).
+    Returns parent bundle/kit identities with their sibling components.
+    """
+    # Fetch the variant's identity
+    stmt = (
+        select(ProductVariant)
+        .options(selectinload(ProductVariant.identity))
+        .where(ProductVariant.id == variant_id)
+    )
+    res = await db.execute(stmt)
+    variant = res.scalar_one_or_none()
+    if not variant:
+        raise HTTPException(status_code=404, detail=f"Variant {variant_id} not found")
+
+    identity_id = variant.identity_id
+    if not identity_id:
+        return BundleDiscoveryResponse(
+            variant_id=variant_id,
+            full_sku=variant.full_sku,
+            participations=[],
+        )
+
+    # Find all bundle_component rows where this identity is a child
+    bc_stmt = (
+        select(BundleComponent)
+        .options(
+            selectinload(BundleComponent.parent).selectinload(ProductIdentity.family),
+            selectinload(BundleComponent.parent).selectinload(ProductIdentity.variants),
+        )
+        .where(BundleComponent.child_identity_id == identity_id)
+    )
+    bc_res = await db.execute(bc_stmt)
+    parent_links = bc_res.scalars().all()
+
+    participations: list[BundleParticipation] = []
+    for link in parent_links:
+        parent_identity = link.parent
+        if not parent_identity:
+            continue
+
+        parent_type = parent_identity.type.value if parent_identity.type else "B"
+        parent_variant = parent_identity.variants[0] if parent_identity.variants else None
+        if not parent_variant:
+            continue
+
+        # Fetch sibling components (other children of the same parent)
+        sibling_stmt = (
+            select(BundleComponent)
+            .options(
+                selectinload(BundleComponent.child).selectinload(ProductIdentity.variants),
+                selectinload(BundleComponent.child).selectinload(ProductIdentity.family),
+            )
+            .where(
+                BundleComponent.parent_identity_id == parent_identity.id,
+                BundleComponent.child_identity_id != identity_id,
+            )
+        )
+        sibling_res = await db.execute(sibling_stmt)
+        sibling_links = sibling_res.scalars().all()
+
+        sibling_nodes: list[ProductNode] = []
+        for sib in sibling_links:
+            sib_identity = sib.child
+            if sib_identity and sib_identity.variants:
+                sv = sib_identity.variants[0]
+                sibling_nodes.append(ProductNode(
+                    variant_id=sv.id,
+                    full_sku=sv.full_sku,
+                    variant_name=sv.variant_name,
+                    identity_name=sib_identity.identity_name,
+                    family_name=sib_identity.family.base_name if sib_identity.family else None,
+                    identity_type=sib_identity.type.value if sib_identity.type else None,
+                ))
+
+        participations.append(BundleParticipation(
+            parent_variant_id=parent_variant.id,
+            parent_sku=parent_variant.full_sku,
+            parent_name=parent_variant.variant_name or parent_identity.identity_name,
+            parent_type=parent_type,
+            role=link.role.value if link.role else "PRIMARY",
+            quantity_required=link.quantity_required,
+            sibling_components=sibling_nodes,
+        ))
+
+    return BundleDiscoveryResponse(
+        variant_id=variant_id,
+        full_sku=variant.full_sku,
+        participations=participations,
+    )

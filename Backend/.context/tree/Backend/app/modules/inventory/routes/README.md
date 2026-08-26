@@ -23,16 +23,19 @@ Inventory route handlers split by feature surface (variants, listings, images, e
 - eBay Listing flow is handled under `/listings/ebay/*` (e.g., `/accounts`, `/categories`, `/ai/*`, `/publish`). It uses the Inventory API (`put_inventory_item`, `create_offer`, `publish_offer`) and Gemini for AI suggestions. The store-specific configurations (policy IDs) are read from `ebay-accounts.json` external file.
 - Active Listings now supports Shopify catalog import via `POST /listings/import/shopify` (Admin/Sales): queries Shopify GraphQL `products` and auto-links to ERP variants by matching SKU against `ProductVariant.full_sku` or Ecwid `PlatformListing.merchant_sku`.
 - Active Listings Knowledge Graph and AI match endpoints added:
-  - `GET /listings/graph/{variant_id}`: returns central ProductVariant node, linked PlatformListing nodes, and topology edges for canvas visualization.
+  - `GET /listings/graph/{variant_id}`: returns central ProductVariant node, linked PlatformListing nodes, hub group nodes (`Variants`, `Accessory`, `Component`), and topology edges for grouped orbit visualization.
   - `POST /listings/suggest`: AI listing matcher combining string heuristic pre-filtering with Gemini AI confidence scoring (0.0 to 1.0) and semantic relationship classification (`EXACT`, `ACCESSORY`, `BUNDLE_COMPONENT`, `KIT_COMPONENT`, `PART_LCI`).
   - `POST /listings/lock-relationship`: locks a platform listing to a product variant and enriches missing variant master metadata.
   - `POST /listings/compare`: compares 2 to 10 listing nodes side-by-side across all channel metrics.
 - Orbit View & USAV UPIS Specification Endpoints (`/orbit/*`):
   - `GET /orbit/analytics/{variant_id}`: Computes real-time sales order velocity, 30d/90d revenue, warehouse available inventory, stock runway days, and automated Ecwid ↔ Shopify price mismatch detection.
   - `POST /orbit/bundle-kit/create`: Dual creator for USAV Bundles (Type `B` - dynamic assembly) and Predefined Manufacturer Kits (Type `K` - fixed unit with roles `MAIN_UNIT`, `SATELLITE_SPEAKER`, `SUBWOOFER`, `ACCESSORY`) adhering to USAV UPIS Layer 1 syntax (`[ProductID]-[Type]`).
+  - `POST /orbit/convert-type`: Instant product classification converter (Type `Product`, `B`, `K`) with automated recipe updates and UPIS SKU re-evaluation.
   - `POST /orbit/variant/create`: Rapid variant generator adhering to USAV UPIS Layer 2 (UML: `[UPIS-H]-[Color]-[Condition]`).
   - `POST /orbit/relationship/update`: Updates semantic relationship tether type (`EXACT`, `ACCESSORY`, `BUNDLE_COMPONENT`, `KIT_COMPONENT`, `PART_LCI`, `SIBLING_VARIANT`).
   - `POST /orbit/relationship/unlink`: Unlinks listing from variant or severs component tether.
+  - `POST /orbit/ai/deep-classify`: Two-stage AI product classification. Stage 1 sends product name/brand to Gemini to infer real-world product type (`Product`, `K`, `B`, `P`) and expected components. Stage 2 executes local SQL fuzzy matching across catalog to link existing database variants with zero additional AI token cost.
+  - `GET /orbit/bundles/{variant_id}`: Discovers parent bundles/kits that this product participates in, along with other sibling components.
 
 ## Child Folders
 - (No child folders)
