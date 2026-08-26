@@ -899,6 +899,111 @@ async def get_bundle_participations(
             sibling_components=sibling_nodes,
         ))
 
+    # If no explicit DB recipe exists yet, discover possible bundle combinations in same family
+    if not participations and variant.identity and variant.identity.product_id:
+        family_id = variant.identity.product_id
+
+        # 1. Search for existing B or K identities in the same family
+        cand_stmt = (
+            select(ProductIdentity)
+            .options(
+                selectinload(ProductIdentity.variants),
+                selectinload(ProductIdentity.family),
+            )
+            .where(
+                ProductIdentity.product_id == family_id,
+                ProductIdentity.type.in_([IdentityType.B, IdentityType.K]),
+            )
+        )
+        cand_res = await db.execute(cand_stmt)
+        cand_identities = cand_res.scalars().all()
+
+        for ci in cand_identities:
+            if not ci.variants:
+                continue
+            cv = ci.variants[0]
+            # Fetch sibling accessories or parts in family
+            sibs_stmt = (
+                select(ProductVariant)
+                .join(ProductIdentity, ProductVariant.identity_id == ProductIdentity.id)
+                .options(selectinload(ProductVariant.identity).selectinload(ProductIdentity.family))
+                .where(
+                    ProductIdentity.product_id == family_id,
+                    ProductVariant.id != variant.id,
+                    ProductVariant.id != cv.id,
+                )
+                .limit(3)
+            )
+            sibs_res = await db.execute(sibs_stmt)
+            sibs_variants = sibs_res.scalars().all()
+
+            sibling_nodes = [
+                ProductNode(
+                    variant_id=sv.id,
+                    full_sku=sv.full_sku,
+                    variant_name=sv.variant_name,
+                    identity_name=sv.identity.identity_name if sv.identity else None,
+                    family_name=sv.identity.family.base_name if sv.identity and sv.identity.family else None,
+                    identity_type=sv.identity.type.value if sv.identity and sv.identity.type else "Product",
+                )
+                for sv in sibs_variants
+            ]
+
+            participations.append(BundleParticipation(
+                parent_variant_id=cv.id,
+                parent_sku=cv.full_sku,
+                parent_name=cv.variant_name or ci.identity_name or f"{variant.variant_name} Bundle Package",
+                parent_type=ci.type.value,
+                role="PRIMARY",
+                quantity_required=1,
+                sibling_components=sibling_nodes,
+            ))
+
+        # 2. If still none, synthesize a candidate possible bundle pairing with the top accessory
+        if not participations:
+            acc_stmt = (
+                select(ProductVariant)
+                .join(ProductIdentity, ProductVariant.identity_id == ProductIdentity.id)
+                .options(selectinload(ProductVariant.identity).selectinload(ProductIdentity.family))
+                .where(
+                    ProductIdentity.product_id == family_id,
+                    ProductVariant.id != variant.id,
+                )
+                .limit(2)
+            )
+            acc_res = await db.execute(acc_stmt)
+            acc_variants = acc_res.scalars().all()
+
+            if acc_variants:
+                sibling_nodes = [
+                    ProductNode(
+                        variant_id=av.id,
+                        full_sku=av.full_sku,
+                        variant_name=av.variant_name,
+                        identity_name=av.identity.identity_name if av.identity else None,
+                        family_name=av.identity.family.base_name if av.identity and av.identity.family else None,
+                        identity_type=av.identity.type.value if av.identity and av.identity.type else "P",
+                    )
+                    for av in acc_variants
+                ]
+
+                base_name = (
+                    variant.identity.family.base_name
+                    if variant.identity and variant.identity.family
+                    else variant.variant_name or "Product"
+                )
+                parent_sku_guess = f"{variant.full_sku.split('-')[0]}-B-01"
+
+                participations.append(BundleParticipation(
+                    parent_variant_id=variant.id * 10000 + 999,  # Synthetic candidate ID
+                    parent_sku=parent_sku_guess,
+                    parent_name=f"{base_name} Combo Bundle",
+                    parent_type="B",
+                    role="PRIMARY",
+                    quantity_required=1,
+                    sibling_components=sibling_nodes,
+                ))
+
     return BundleDiscoveryResponse(
         variant_id=variant_id,
         full_sku=variant.full_sku,
