@@ -28,7 +28,7 @@ import type { RelationshipType, Platform } from '../../types/inventory'
 
 export interface ContextMenuTarget {
   type: 'node' | 'edge'
-  nodeType?: 'product' | 'listing' | 'related_product' | 'ai_candidate'
+  nodeType?: 'product' | 'listing' | 'related_product' | 'ai_candidate' | 'hub'
   id: string
   numericId?: number
   title: string

@@ -249,6 +249,19 @@ export interface ChannelSalesMetric {
   revenue_90d: number
 }
 
+export interface SalesTransactionItem {
+  order_id: number
+  external_order_id?: string | null
+  external_order_number?: string | null
+  platform: string
+  quantity: number
+  unit_price?: number | null
+  total_price?: number | null
+  currency: string
+  ordered_at?: string | null
+  status?: string | null
+}
+
 export interface OrbitAnalyticsResponse {
   variant_id: number
   full_sku: string
@@ -262,6 +275,7 @@ export interface OrbitAnalyticsResponse {
   stock_warning: StockWarningStatus
   price_mismatch: PriceMismatchAlert
   channel_metrics: ChannelSalesMetric[]
+  recent_transactions: SalesTransactionItem[]
 }
 
 export interface BundleComponentInput {
