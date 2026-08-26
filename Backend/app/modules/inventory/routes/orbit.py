@@ -537,6 +537,42 @@ async def update_orbit_relationship(
         await db.commit()
         return {"success": True, "message": f"Updated listing #{listing.id} relationship to {request.relationship_type.value}"}
 
+    elif request.target_type == "component":
+        # Target is a ProductVariant ID being linked or updated relative to source_variant_id
+        target_var = await db.get(ProductVariant, request.target_id)
+        source_var = await db.get(ProductVariant, request.source_variant_id)
+        if not target_var or not source_var:
+            raise HTTPException(status_code=404, detail="Target or source variant not found")
+
+        if source_var.identity_id and target_var.identity_id:
+            # If changing to Kit/Bundle component
+            if request.relationship_type in [RelationshipType.KIT_COMPONENT, RelationshipType.BUNDLE_COMPONENT]:
+                bc_stmt = select(BundleComponent).where(
+                    BundleComponent.parent_identity_id == source_var.identity_id,
+                    BundleComponent.child_identity_id == target_var.identity_id,
+                )
+                bc_existing = (await db.execute(bc_stmt)).scalar_one_or_none()
+                if not bc_existing:
+                    bc = BundleComponent(
+                        parent_identity_id=source_var.identity_id,
+                        child_identity_id=target_var.identity_id,
+                        quantity_required=1,
+                    )
+                    db.add(bc)
+            elif request.relationship_type in [RelationshipType.ACCESSORY, RelationshipType.PART_LCI]:
+                # If target identity is in same family, ensure type is P
+                target_ident = await db.get(ProductIdentity, target_var.identity_id)
+                if target_ident and target_ident.type != IdentityType.P:
+                    target_ident.type = IdentityType.P
+            elif request.relationship_type == RelationshipType.SIBLING_VARIANT:
+                # Sibling variant in same family
+                target_ident = await db.get(ProductIdentity, target_var.identity_id)
+                if target_ident and target_ident.type != IdentityType.PRODUCT:
+                    target_ident.type = IdentityType.PRODUCT
+
+        await db.commit()
+        return {"success": True, "message": f"Updated component relationship to {request.relationship_type.value}"}
+
     return {"success": True, "message": "Updated relationship"}
 
 
@@ -557,6 +593,20 @@ async def unlink_orbit_relationship(
         listing.sync_status = PlatformSyncStatus.PENDING
         await db.commit()
         return {"success": True, "message": f"Unlinked listing #{listing.id}"}
+
+    elif request.target_type == "component" and request.source_variant_id:
+        target_var = await db.get(ProductVariant, request.target_id)
+        source_var = await db.get(ProductVariant, request.source_variant_id)
+        if target_var and source_var and target_var.identity_id and source_var.identity_id:
+            bc_stmt = select(BundleComponent).where(
+                BundleComponent.parent_identity_id == source_var.identity_id,
+                BundleComponent.child_identity_id == target_var.identity_id,
+            )
+            bc_existing = (await db.execute(bc_stmt)).scalar_one_or_none()
+            if bc_existing:
+                await db.delete(bc_existing)
+                await db.commit()
+                return {"success": True, "message": f"Severed component recipe between {source_var.full_sku} and {target_var.full_sku}"}
 
     return {"success": True, "message": "Unlinked"}
 
