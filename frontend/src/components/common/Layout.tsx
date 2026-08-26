@@ -53,6 +53,7 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
+  { title: 'Orbit', path: '/catalog/listings/graph', icon: <Hub />, roles: ['ADMIN', 'SALES_REP', 'WAREHOUSE_OP'] },
   { title: 'Dashboard', path: '/', icon: <Dashboard />, roles: ['ADMIN', 'WAREHOUSE_OP', 'SALES_REP', 'ACCOUNTANT'] },
   { title: 'Warehouse Operations', path: '/warehouse/ops', icon: <Search />, roles: ['ADMIN', 'WAREHOUSE_OP'] },
   {
@@ -72,7 +73,6 @@ const navItems: NavItem[] = [
     roles: ['ADMIN', 'SALES_REP'],
     children: [
       { title: 'Active Listings', path: '/catalog/listings/active', icon: <Storefront />, roles: ['ADMIN', 'SALES_REP'] },
-      { title: 'Knowledge Graph', path: '/catalog/listings/graph', icon: <Hub />, roles: ['ADMIN', 'SALES_REP'] },
       { title: 'Create New Listing', path: '/catalog/listings/create', icon: <AddIcon />, roles: ['ADMIN', 'SALES_REP'] },
     ],
   },
