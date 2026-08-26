@@ -460,15 +460,22 @@ export default function ListingGraphPage() {
       phase: 0,
     })
 
-    // 2. Direct Marketplace Listings (Ebay, Amazon, Shopify, etc.)
+    // 2. Direct Marketplace Listings (ONLY EXACT matches stay in Ring 1 around ERP Master)
     const listings = graphData?.listings || []
+    const exactListings = listings.filter((l) => !l.relationship_type || l.relationship_type === 'EXACT')
+    const accessoryListings = listings.filter((l) => l.relationship_type === 'ACCESSORY')
+    const componentListings = listings.filter((l) => l.relationship_type === 'KIT_COMPONENT')
+    const bundleListings = listings.filter(
+      (l) => l.relationship_type === 'BUNDLE' || l.relationship_type === 'BUNDLE_COMPONENT',
+    )
+
     const startListingAngle = -Math.PI * 0.75
     const endListingAngle = Math.PI * 0.65
-    listings.forEach((listing, idx) => {
+    exactListings.forEach((listing, idx) => {
       const angle =
-        listings.length === 1
+        exactListings.length === 1
           ? Math.PI
-          : startListingAngle + (idx / (listings.length - 1)) * (endListingAngle - startListingAngle)
+          : startListingAngle + (idx / (exactListings.length - 1)) * (endListingAngle - startListingAngle)
       const radiusDist = 180 + (idx % 2) * 28
       const lx = cx + Math.cos(angle) * radiusDist
       const ly = cy + Math.sin(angle) * radiusDist
@@ -527,10 +534,16 @@ export default function ListingGraphPage() {
       hubColor: string,
       hubAngle: number,
       hubDist: number,
-      items: ProductNode[],
+      productItems: ProductNode[],
+      listingItems: ListingNode[],
       childRelType: RelationshipType,
     ) => {
-      if (items.length === 0) return
+      const allElements: Array<{ kind: 'product' | 'listing'; data: ProductNode | ListingNode; id: string }> = [
+        ...listingItems.map((l) => ({ kind: 'listing' as const, data: l, id: `listing-${l.listing_id}` })),
+        ...productItems.map((p) => ({ kind: 'product' as const, data: p, id: `related-product-${p.variant_id}` })),
+      ]
+
+      if (allElements.length === 0) return
 
       const hx = cx + Math.cos(hubAngle) * hubDist
       const hy = cy + Math.sin(hubAngle) * hubDist
@@ -552,7 +565,7 @@ export default function ListingGraphPage() {
           hubType,
           icon: hubIcon,
           color: hubColor,
-          count: items.length,
+          count: allElements.length,
         } as HubData,
         phase: hubAngle,
       })
@@ -574,42 +587,69 @@ export default function ListingGraphPage() {
       let processed = 0
       let tierIdx = 0
 
-      while (processed < items.length) {
+      while (processed < allElements.length) {
         const cap = tierCapacities[Math.min(tierIdx, tierCapacities.length - 1)]
         const tierDist = tierDistances[Math.min(tierIdx, tierDistances.length - 1)]
         const tierSpan = tierSpans[Math.min(tierIdx, tierSpans.length - 1)]
-        const countInTier = Math.min(cap, items.length - processed)
+        const countInTier = Math.min(cap, allElements.length - processed)
 
         for (let i = 0; i < countInTier; i++) {
-          const item = items[processed + i]
+          const el = allElements[processed + i]
           const fraction = countInTier === 1 ? 0.5 : i / (countInTier - 1)
           const angleOffset = (fraction - 0.5) * tierSpan
           const childAngle = hubAngle + angleOffset
           const cx_child = hx + Math.cos(childAngle) * tierDist
           const cy_child = hy + Math.sin(childAngle) * tierDist
 
-          newNodes.push({
-            id: `related-product-${item.variant_id}`,
-            type: 'related_product',
-            x: cx_child,
-            y: cy_child,
-            baseX: cx_child,
-            baseY: cy_child,
-            radius: 28,
-            orbitRing: 3,
-            relationship_type: childRelType,
-            data: item,
-            phase: (processed + i + 3) * 0.8,
-          })
+          if (el.kind === 'listing') {
+            const lData = el.data as ListingNode
+            newNodes.push({
+              id: el.id,
+              type: 'listing',
+              x: cx_child,
+              y: cy_child,
+              baseX: cx_child,
+              baseY: cy_child,
+              radius: 32,
+              orbitRing: 3,
+              relationship_type: childRelType,
+              data: lData,
+              phase: (processed + i + 3) * 0.8,
+            })
 
-          // Tether Hub -> Child Node
-          newEdges.push({
-            id: `edge-hub-${hubId}-${item.variant_id}`,
-            source: hubId,
-            target: `related-product-${item.variant_id}`,
-            type: 'related',
-            relationship_type: childRelType,
-          })
+            // Tether Hub -> Listing
+            newEdges.push({
+              id: `edge-hub-${hubId}-${lData.listing_id}`,
+              source: hubId,
+              target: el.id,
+              type: 'locked',
+              relationship_type: childRelType,
+            })
+          } else {
+            const pData = el.data as ProductNode
+            newNodes.push({
+              id: el.id,
+              type: 'related_product',
+              x: cx_child,
+              y: cy_child,
+              baseX: cx_child,
+              baseY: cy_child,
+              radius: 28,
+              orbitRing: 3,
+              relationship_type: childRelType,
+              data: pData,
+              phase: (processed + i + 3) * 0.8,
+            })
+
+            // Tether Hub -> Product
+            newEdges.push({
+              id: `edge-hub-${hubId}-${pData.variant_id}`,
+              source: hubId,
+              target: el.id,
+              type: 'related',
+              relationship_type: childRelType,
+            })
+          }
         }
 
         processed += countInTier
@@ -627,6 +667,7 @@ export default function ListingGraphPage() {
       Math.PI * 0.78,
       250,
       variantItems,
+      bundleListings,
       'SIBLING_VARIANT',
     )
 
@@ -640,6 +681,7 @@ export default function ListingGraphPage() {
       -Math.PI * 0.20,
       260,
       accessoryItems,
+      accessoryListings,
       'ACCESSORY',
     )
 
@@ -653,6 +695,7 @@ export default function ListingGraphPage() {
       Math.PI * 0.25,
       270,
       componentItems,
+      componentListings,
       'KIT_COMPONENT',
     )
 
