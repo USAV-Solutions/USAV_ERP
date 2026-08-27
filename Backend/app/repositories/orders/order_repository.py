@@ -5,6 +5,7 @@ Provides database operations for order headers and line items, including
 deduplication-safe upserts and filtered queries for the dashboard.
 """
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional, Sequence
 
 from sqlalchemy import select, func, and_, desc, or_
@@ -89,6 +90,8 @@ class OrderRepository(BaseRepository[Order]):
         ordered_at_to: Optional[datetime] = None,
         zoho_sync_status: Optional[ZohoSyncStatus] = None,
         source: Optional[str] = None,
+        total_amount: Optional[Decimal] = None,
+        total_amount_range: Decimal = Decimal("0"),
         sort_by: str = "ordered_at",
         sort_dir: str = "desc",
         search: Optional[str] = None,
@@ -122,6 +125,10 @@ class OrderRepository(BaseRepository[Order]):
             stmt = stmt.where(Order.zoho_sync_status == zoho_sync_status)
         if source:
             stmt = stmt.where(Order.source.ilike(f"%{source.strip()}%"))
+        if total_amount is not None:
+            range_value = total_amount_range if total_amount_range >= 0 else Decimal("0")
+            stmt = stmt.where(Order.total_amount >= total_amount - range_value)
+            stmt = stmt.where(Order.total_amount <= total_amount + range_value)
         if search:
             pattern = f"%{search}%"
             stmt = stmt.where(

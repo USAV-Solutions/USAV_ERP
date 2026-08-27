@@ -188,6 +188,16 @@ export default function OrdersManagement() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [searchInput, setSearchInput] = useState('')
   const debouncedSearch = useDebouncedValue(searchInput, 250)
+  const [priceSearch, setPriceSearch] = useState('')
+  const [priceRange, setPriceRange] = useState('0')
+  const debouncedPriceSearch = useDebouncedValue(priceSearch, 250)
+  const debouncedPriceRange = useDebouncedValue(priceRange, 250)
+  const priceSearchValue =
+    debouncedPriceSearch.trim() !== '' && Number.isFinite(Number(debouncedPriceSearch))
+      ? Number(debouncedPriceSearch)
+      : undefined
+  const priceRangeValue =
+    priceSearchValue !== undefined ? Number(debouncedPriceRange || '0') || 0 : undefined
   const [filtersDialogOpen, setFiltersDialogOpen] = useState(false)
 
   // Expanded order rows
@@ -260,9 +270,13 @@ export default function OrdersManagement() {
       sortBy,
       sortDir,
       debouncedSearch,
+      priceSearchValue,
+      priceRangeValue,
     ],
     queryFn: () =>
       listOrders({
+        total_amount: priceSearchValue,
+        total_amount_range: priceRangeValue,
         skip: page * rowsPerPage,
         limit: rowsPerPage,
         platform: platformFilter || undefined,
@@ -291,9 +305,13 @@ export default function OrdersManagement() {
       orderedFromFilter,
       orderedToFilter,
       debouncedSearch,
+      priceSearchValue,
+      priceRangeValue,
     ],
     queryFn: async () => {
       const params = {
+        total_amount: priceSearchValue,
+        total_amount_range: priceRangeValue,
         fulfillment_channel: fulfillmentChannel,
         platform: platformFilter || undefined,
         status: statusFilter || undefined,
@@ -842,6 +860,8 @@ export default function OrdersManagement() {
     setSortBy('ordered_at')
     setSortDir('desc')
     setSearchInput('')
+    setPriceSearch('')
+    setPriceRange('0')
     setPage(0)
   }
 
@@ -866,6 +886,7 @@ export default function OrdersManagement() {
     !!orderedToFilter,
     sortBy !== 'ordered_at',
     sortDir !== 'desc',
+    priceSearch !== '',
   ].filter(Boolean).length
   const hasActiveFilters = activeFilterCount > 0 || !!searchInput
 
@@ -1048,6 +1069,30 @@ export default function OrdersManagement() {
               }}
             />
           </Box>
+          <TextField
+            size="small"
+            label="Price Search"
+            type="number"
+            value={priceSearch}
+            onChange={(e) => {
+              setPriceSearch(e.target.value)
+              setPage(0)
+            }}
+            inputProps={{ min: 0, step: 0.01 }}
+            sx={{ minWidth: 150 }}
+          />
+          <TextField
+            size="small"
+            label="Range +/-"
+            type="number"
+            value={priceRange}
+            onChange={(e) => {
+              setPriceRange(e.target.value)
+              setPage(0)
+            }}
+            inputProps={{ min: 0, step: 0.01 }}
+            sx={{ width: 120 }}
+          />
           <Button
             variant={activeFilterCount > 0 ? 'contained' : 'outlined'}
             startIcon={<FilterList />}
