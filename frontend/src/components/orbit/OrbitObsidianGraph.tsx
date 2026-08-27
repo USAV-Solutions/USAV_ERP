@@ -13,6 +13,8 @@ import {
   FormControlLabel,
   Collapse,
   Button,
+  Breadcrumbs,
+  Link,
 } from '@mui/material'
 import {
   RestartAlt,
@@ -21,10 +23,12 @@ import {
   Tune,
   Hub,
   Inventory2,
-  Category,
   AutoAwesome,
   Close,
   Explore,
+  UnfoldMore,
+  UnfoldLess,
+  NavigateNext,
 } from '@mui/icons-material'
 import {
   UniverseTopologyResponse,
@@ -52,7 +56,10 @@ interface GraphNode {
   color: string
   variantId?: number
   familyId?: number
+  brandId?: number
   brandName?: string
+  childCount?: number
+  isExpanded?: boolean
   x: number
   y: number
   vx: number
@@ -80,17 +87,20 @@ export default function OrbitObsidianGraph({
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
-  // Obsidian Graph Physics & Visual Controls
+  // Hierarchical Expansion State (Collapsible Drill-Down)
+  const [expandedBrandIds, setExpandedBrandIds] = useState<Set<number>>(new Set())
+  const [expandedFamilyIds, setExpandedFamilyIds] = useState<Set<number>>(new Set())
+
+  // Visual & Physics Controls
   const [controlsOpen, setControlsOpen] = useState(false)
   const [showLabels, setShowLabels] = useState(true)
   const [nodeScale, setNodeScale] = useState(1.0)
-  const [linkDistance, setLinkDistance] = useState(65)
-  const [repulsionStrength, setRepulsionStrength] = useState(350)
+  const [linkDistance, setLinkDistance] = useState(75)
+  const [repulsionStrength, setRepulsionStrength] = useState(300)
   const [centerGravity, setCenterGravity] = useState(0.04)
-  const [selectedBrandFilter, setSelectedBrandFilter] = useState<string>('ALL')
 
   // Pan & Zoom
-  const [zoom, setZoom] = useState(0.75)
+  const [zoom, setZoom] = useState(0.85)
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const isPanningRef = useRef(false)
   const panStartRef = useRef({ x: 0, y: 0 })
@@ -100,6 +110,7 @@ export default function OrbitObsidianGraph({
   const edgesRef = useRef<GraphEdge[]>([])
   const nodeMapRef = useRef<Map<string, GraphNode>>(new Map())
   const adjacencyRef = useRef<Map<string, Set<string>>>(new Map())
+  const prevPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map())
   const animationFrameRef = useRef<number | null>(null)
   const draggedNodeRef = useRef<GraphNode | null>(null)
   const hoveredNodeRef = useRef<GraphNode | null>(null)
@@ -118,7 +129,35 @@ export default function OrbitObsidianGraph({
     active: false,
   })
 
-  // 1. Build Graph Nodes & Edges from Universe Data
+  // Auto-Expand and Fly-To when a SKU is searched
+  useEffect(() => {
+    if (!highlightSku || !data?.brands) return
+
+    const lower = highlightSku.toLowerCase()
+    let foundBrandId: number | null = null
+    let foundFamilyId: number | null = null
+
+    for (const b of data.brands) {
+      for (const fam of b.families) {
+        for (const prod of fam.products) {
+          if (prod.full_sku.toLowerCase() === lower) {
+            foundBrandId = b.brand_id
+            foundFamilyId = fam.product_id
+            break
+          }
+        }
+        if (foundBrandId) break
+      }
+      if (foundBrandId) break
+    }
+
+    if (foundBrandId && foundFamilyId) {
+      setExpandedBrandIds((prev) => new Set([...prev, foundBrandId!]))
+      setExpandedFamilyIds((prev) => new Set([...prev, foundFamilyId!]))
+    }
+  }, [highlightSku, data])
+
+  // 1. Build Hierarchical Graph Nodes & Edges based on Expansion State
   useEffect(() => {
     if (!data || !data.brands) return
 
@@ -141,29 +180,34 @@ export default function OrbitObsidianGraph({
       adj.get(tgt)!.add(src)
     }
 
-    const filteredBrands =
-      selectedBrandFilter === 'ALL'
-        ? data.brands
-        : data.brands.filter((b) => b.name === selectedBrandFilter)
+    const totalBrands = data.brands.length
+    const brandSpread = Math.max(350, Math.sqrt(totalBrands) * 110)
 
-    const totalBrands = filteredBrands.length
-    const brandSpread = Math.max(400, totalBrands * 75)
-
-    filteredBrands.forEach((brand, bIdx) => {
-      const bAngle = (bIdx / Math.max(1, totalBrands)) * Math.PI * 2
-      const bDist = (bIdx % 2 === 0 ? 0.7 : 1.0) * brandSpread * 0.7
-      const bx = Math.cos(bAngle) * bDist + (Math.random() - 0.5) * 50
-      const by = Math.sin(bAngle) * bDist + (Math.random() - 0.5) * 50
+    data.brands.forEach((brand, bIdx) => {
+      // Golden ratio circle distribution for top-level Brands
+      const bAngle = bIdx * 2.39996 + 0.5
+      const bDist = Math.sqrt(bIdx / totalBrands) * brandSpread + 60
+      const defaultBx = Math.cos(bAngle) * bDist
+      const defaultBy = Math.sin(bAngle) * bDist
 
       const brandNodeId = `brand-${brand.brand_id}`
+      const isBrandExpanded = expandedBrandIds.has(brand.brand_id)
+
+      const prevPos = prevPositionsRef.current.get(brandNodeId)
+      const bx = prevPos?.x ?? defaultBx
+      const by = prevPos?.y ?? defaultBy
+
       const brandNode: GraphNode = {
         id: brandNodeId,
         label: brand.name,
         sublabel: `${brand.families.length} product lines`,
         type: 'brand',
-        radius: 22,
-        color: brand.color || '#38bdf8',
+        brandId: brand.brand_id,
         brandName: brand.name,
+        childCount: brand.families.length,
+        isExpanded: isBrandExpanded,
+        radius: 24,
+        color: brand.color || '#38bdf8',
         x: bx,
         y: by,
         vx: 0,
@@ -173,81 +217,100 @@ export default function OrbitObsidianGraph({
       nodes.push(brandNode)
       nodeMap.set(brandNodeId, brandNode)
 
-      // Product Families
-      brand.families.forEach((fam, fIdx) => {
-        const fAngle = bAngle + (fIdx / Math.max(1, brand.families.length)) * Math.PI * 2
-        const fDist = 70 + (fIdx % 3) * 30
-        const fx = bx + Math.cos(fAngle) * fDist
-        const fy = by + Math.sin(fAngle) * fDist
+      // If this Brand is expanded, render its Product Families
+      if (isBrandExpanded && brand.families.length > 0) {
+        brand.families.forEach((fam, fIdx) => {
+          const fAngle = (fIdx / brand.families.length) * Math.PI * 2 + bAngle
+          const fDist = 70 + (fIdx % 3) * 20
+          const defaultFx = bx + Math.cos(fAngle) * fDist
+          const defaultFy = by + Math.sin(fAngle) * fDist
 
-        const famNodeId = `fam-${fam.product_id}`
-        const famNode: GraphNode = {
-          id: famNodeId,
-          label: fam.base_name,
-          sublabel: `Family SKU: ${fam.family_code} · ${fam.products.length} units`,
-          sku: fam.family_code,
-          type: 'family',
-          radius: 12,
-          color: brand.color || '#38bdf8',
-          familyId: fam.product_id,
-          brandName: brand.name,
-          x: fx,
-          y: fy,
-          vx: 0,
-          vy: 0,
-          degree: 0,
-        }
-        nodes.push(famNode)
-        nodeMap.set(famNodeId, famNode)
-        addEdge(brandNodeId, famNodeId, brand.color || 'rgba(56, 189, 248, 0.4)')
+          const famNodeId = `fam-${fam.product_id}`
+          const isFamExpanded = expandedFamilyIds.has(fam.product_id)
 
-        // Products in Family
-        fam.products.forEach((prod, pIdx) => {
-          const pAngle = fAngle + (pIdx / Math.max(1, fam.products.length)) * Math.PI * 2
-          const pDist = 32 + (pIdx % 2) * 16
-          const px = fx + Math.cos(pAngle) * pDist
-          const py = fy + Math.sin(pAngle) * pDist
+          const famPrevPos = prevPositionsRef.current.get(famNodeId)
+          // If newly spawned, start from parent brand position and bloom outward
+          const fx = famPrevPos?.x ?? (bx + (Math.random() - 0.5) * 20)
+          const fy = famPrevPos?.y ?? (by + (Math.random() - 0.5) * 20)
 
-          let pColor = '#38bdf8'
-          let pRadius = 7
-          if (prod.identity_type === 'K') {
-            pColor = '#c084fc'
-            pRadius = 8.5
-          } else if (prod.identity_type === 'B') {
-            pColor = '#f59e0b'
-            pRadius = 8.5
-          } else if (prod.identity_type === 'P') {
-            pColor = '#10b981'
-            pRadius = 6
-          }
-
-          const prodNodeId = `prod-${prod.variant_id}`
-          const prodNode: GraphNode = {
-            id: prodNodeId,
-            label: prod.full_sku,
-            sublabel: prod.variant_name || 'Product Unit',
-            sku: prod.full_sku,
-            type: 'product',
-            identityType: prod.identity_type,
-            radius: pRadius,
-            color: pColor,
-            variantId: prod.variant_id,
+          const famNode: GraphNode = {
+            id: famNodeId,
+            label: fam.base_name,
+            sublabel: `Line: ${fam.family_code} · ${fam.products.length} units`,
+            sku: fam.family_code,
+            type: 'family',
             familyId: fam.product_id,
+            brandId: brand.brand_id,
             brandName: brand.name,
-            x: px,
-            y: py,
-            vx: 0,
-            vy: 0,
+            childCount: fam.products.length,
+            isExpanded: isFamExpanded,
+            radius: 14,
+            color: brand.color || '#38bdf8',
+            x: fx,
+            y: fy,
+            vx: (Math.random() - 0.5) * 2,
+            vy: (Math.random() - 0.5) * 2,
             degree: 0,
           }
-          nodes.push(prodNode)
-          nodeMap.set(prodNodeId, prodNode)
-          addEdge(famNodeId, prodNodeId, 'rgba(148, 163, 184, 0.25)')
+          nodes.push(famNode)
+          nodeMap.set(famNodeId, famNode)
+          addEdge(brandNodeId, famNodeId, brand.color || 'rgba(56, 189, 248, 0.5)')
+
+          // If this Family is expanded, render its Products
+          if (isFamExpanded && fam.products.length > 0) {
+            fam.products.forEach((prod, pIdx) => {
+              const pAngle = (pIdx / fam.products.length) * Math.PI * 2 + fAngle
+              const pDist = 34 + (pIdx % 2) * 14
+              const defaultPx = fx + Math.cos(pAngle) * pDist
+              const defaultPy = fy + Math.sin(pAngle) * pDist
+
+              const prodNodeId = `prod-${prod.variant_id}`
+              const prodPrevPos = prevPositionsRef.current.get(prodNodeId)
+              const px = prodPrevPos?.x ?? (fx + (Math.random() - 0.5) * 15)
+              const py = prodPrevPos?.y ?? (fy + (Math.random() - 0.5) * 15)
+
+              let pColor = '#38bdf8'
+              let pRadius = 8
+              if (prod.identity_type === 'K') {
+                pColor = '#c084fc'
+                pRadius = 9.5
+              } else if (prod.identity_type === 'B') {
+                pColor = '#f59e0b'
+                pRadius = 9.5
+              } else if (prod.identity_type === 'P') {
+                pColor = '#10b981'
+                pRadius = 7
+              }
+
+              const prodNode: GraphNode = {
+                id: prodNodeId,
+                label: prod.full_sku,
+                sublabel: prod.variant_name || 'Product Unit',
+                sku: prod.full_sku,
+                type: 'product',
+                identityType: prod.identity_type,
+                radius: pRadius,
+                color: pColor,
+                variantId: prod.variant_id,
+                familyId: fam.product_id,
+                brandId: brand.brand_id,
+                brandName: brand.name,
+                x: px,
+                y: py,
+                vx: (Math.random() - 0.5) * 2,
+                vy: (Math.random() - 0.5) * 2,
+                degree: 0,
+              }
+              nodes.push(prodNode)
+              nodeMap.set(prodNodeId, prodNode)
+              addEdge(famNodeId, prodNodeId, 'rgba(148, 163, 184, 0.35)')
+            })
+          }
         })
-      })
+      }
     })
 
-    // Compute node degrees
+    // Degrees
     nodes.forEach((n) => {
       n.degree = adj.get(n.id)?.size || 0
     })
@@ -256,7 +319,7 @@ export default function OrbitObsidianGraph({
     edgesRef.current = edges
     nodeMapRef.current = nodeMap
     adjacencyRef.current = adj
-  }, [data, selectedBrandFilter])
+  }, [data, expandedBrandIds, expandedFamilyIds])
 
   // Center pan initially
   useEffect(() => {
@@ -269,7 +332,7 @@ export default function OrbitObsidianGraph({
 
   // Smooth Fly-To Focus Animator
   const flyToNode = useCallback(
-    (targetNode: GraphNode, targetZoomLevel = 1.35, onDone?: () => void) => {
+    (targetNode: GraphNode, targetZoomLevel = 1.25, onDone?: () => void) => {
       if (!containerRef.current) return
       const w = containerRef.current.clientWidth
       const h = containerRef.current.clientHeight
@@ -286,21 +349,6 @@ export default function OrbitObsidianGraph({
     },
     [],
   )
-
-  // Handle Search Highlight Fly-To
-  useEffect(() => {
-    if (!highlightSku) return
-    const target = nodesRef.current.find(
-      (n) => n.sku?.toLowerCase() === highlightSku.toLowerCase() || n.label.toLowerCase() === highlightSku.toLowerCase(),
-    )
-    if (target) {
-      flyToNode(target, 1.4, () => {
-        if (target.variantId) {
-          onSelectProduct(target.variantId, target.sku)
-        }
-      })
-    }
-  }, [highlightSku, flyToNode, onSelectProduct])
 
   // 2. Physics Simulation Loop (Force-Directed Obsidian Graph)
   useEffect(() => {
@@ -330,7 +378,12 @@ export default function OrbitObsidianGraph({
       const hovered = hoveredNodeRef.current
       const adj = adjacencyRef.current
 
-      // Set of connected active nodes for hover highlight
+      // Record positions for smooth transitions
+      nodes.forEach((n) => {
+        prevPositionsRef.current.set(n.id, { x: n.x, y: n.y })
+      })
+
+      // Connected active nodes for hover highlight
       const connectedNodeIds = new Set<string>()
       if (hovered) {
         connectedNodeIds.add(hovered.id)
@@ -339,11 +392,11 @@ export default function OrbitObsidianGraph({
 
       // Physics Calculation Step
       const numNodes = nodes.length
-      const kRep = repulsionStrength * 25
+      const kRep = repulsionStrength * 22
       const kDist = linkDistance
-      const kSpring = 0.04
-      const kGrav = centerGravity * 0.08
-      const damping = 0.88
+      const kSpring = 0.045
+      const kGrav = centerGravity * 0.06
+      const damping = 0.86
 
       // 1. Repulsion between nearby nodes
       for (let i = 0; i < numNodes; i++) {
@@ -355,8 +408,8 @@ export default function OrbitObsidianGraph({
           const distSq = dx * dx + dy * dy || 1
           const dist = Math.sqrt(distSq)
 
-          if (dist < 400) {
-            const force = kRep / (distSq + 100)
+          if (dist < 350) {
+            const force = kRep / (distSq + 120)
             const fx = (dx / dist) * force
             const fy = (dy / dist) * force
 
@@ -406,30 +459,24 @@ export default function OrbitObsidianGraph({
           continue
         }
 
-        // Gravity pulling gently toward (0,0)
         n.vx -= n.x * kGrav
         n.vy -= n.y * kGrav
 
-        // Velocity Damping
         n.vx *= damping
         n.vy *= damping
 
-        // Position Step
         n.x += n.vx
         n.y += n.vy
       }
 
-      // Camera Animation Step (Smooth Fly-To)
+      // Camera Animation Step
       if (cameraAnimRef.current.active) {
         const { targetPan, targetZoom, onDone } = cameraAnimRef.current
         setPan((p) => ({
           x: p.x + (targetPan.x - p.x) * 0.08,
           y: p.y + (targetPan.y - p.y) * 0.08,
         }))
-        setZoom((z) => {
-          const nextZ = z + (targetZoom - z) * 0.08
-          return nextZ
-        })
+        setZoom((z) => z + (targetZoom - z) * 0.08)
 
         if (
           Math.abs(pan.x - targetPan.x) < 2 &&
@@ -491,9 +538,9 @@ export default function OrbitObsidianGraph({
           ctx.lineWidth = 0.8
           ctx.globalAlpha = 0.15
         } else {
-          ctx.strokeStyle = isDarkMode ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.12)'
-          ctx.lineWidth = 1
-          ctx.globalAlpha = 0.7
+          ctx.strokeStyle = isDarkMode ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.15)'
+          ctx.lineWidth = 1.2
+          ctx.globalAlpha = 0.75
         }
         ctx.stroke()
       })
@@ -512,10 +559,23 @@ export default function OrbitObsidianGraph({
           ctx.globalAlpha = 0.15
         }
 
-        // Node Glow Halo
+        // Glow Halo
         if (isHovered || isConnected || node.type === 'brand') {
           ctx.shadowColor = node.color
           ctx.shadowBlur = isHovered ? 20 : node.type === 'brand' ? 14 : 6
+        }
+
+        // Expandable Dotted Outer Ring (if node has unexpanded children)
+        if ((node.type === 'brand' || node.type === 'family') && node.childCount && node.childCount > 0) {
+          ctx.beginPath()
+          ctx.arc(node.x, node.y, r + 5, 0, Math.PI * 2)
+          ctx.setLineDash(node.isExpanded ? [] : [3, 3])
+          ctx.strokeStyle = node.color
+          ctx.lineWidth = 1.5
+          ctx.globalAlpha = node.isExpanded ? 0.9 : 0.6
+          ctx.stroke()
+          ctx.setLineDash([])
+          ctx.globalAlpha = isFaded ? 0.15 : 1.0
         }
 
         // Base Circle
@@ -530,14 +590,23 @@ export default function OrbitObsidianGraph({
         ctx.stroke()
         ctx.shadowBlur = 0
 
-        // Labels (Level of Detail based on zoom & node type)
+        // Center +/- Icon Indicator for Expandable Hubs
+        if (node.type === 'brand' || node.type === 'family') {
+          ctx.font = 'bold 11px Inter, sans-serif'
+          ctx.fillStyle = '#ffffff'
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillText(node.isExpanded ? '−' : '+', node.x, node.y)
+        }
+
+        // Labels
         const shouldShowLabel =
           showLabels &&
           (isHovered ||
             isConnected ||
             node.type === 'brand' ||
-            (node.type === 'family' && zoom > 0.6) ||
-            (node.type === 'product' && zoom > 1.1))
+            node.type === 'family' ||
+            zoom > 0.9)
 
         if (shouldShowLabel) {
           ctx.font =
@@ -550,10 +619,15 @@ export default function OrbitObsidianGraph({
           ctx.textAlign = 'center'
           ctx.textBaseline = 'top'
 
-          // Text pill background
-          const labelText = node.label
+          const labelText =
+            node.type === 'brand' && !node.isExpanded
+              ? `${node.label} (${node.childCount})`
+              : node.type === 'family' && !node.isExpanded
+              ? `${node.label} (${node.childCount})`
+              : node.label
+
           const textWidth = ctx.measureText(labelText).width
-          const pillY = node.y + r + 4
+          const pillY = node.y + r + 7
 
           ctx.fillStyle = isDarkMode ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.9)'
           ctx.fillRect(node.x - textWidth / 2 - 4, pillY - 1, textWidth + 8, 14)
@@ -589,14 +663,12 @@ export default function OrbitObsidianGraph({
   // Mouse / Touch Event Handlers
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (e.button === 1 || e.button === 2 || e.shiftKey) {
-      // Middle or Right click / Shift click: Pan
       isPanningRef.current = true
       panStartRef.current = { x: e.clientX - pan.x, y: e.clientY - pan.y }
       return
     }
 
     if (e.button === 0) {
-      // Left Click: Check Node Drag
       const canvas = canvasRef.current
       if (!canvas) return
       const rect = canvas.getBoundingClientRect()
@@ -606,7 +678,7 @@ export default function OrbitObsidianGraph({
       const clicked = nodesRef.current.find((n) => {
         const dx = n.x - mx
         const dy = n.y - my
-        return Math.sqrt(dx * dx + dy * dy) <= (n.radius * nodeScale + 6)
+        return Math.sqrt(dx * dx + dy * dy) <= (n.radius * nodeScale + 8)
       })
 
       if (clicked) {
@@ -614,7 +686,6 @@ export default function OrbitObsidianGraph({
         clicked.vx = 0
         clicked.vy = 0
       } else {
-        // Empty space: Pan canvas
         isPanningRef.current = true
         panStartRef.current = { x: e.clientX - pan.x, y: e.clientY - pan.y }
       }
@@ -648,7 +719,7 @@ export default function OrbitObsidianGraph({
     const hovered = nodesRef.current.find((n) => {
       const dx = n.x - mx
       const dy = n.y - my
-      return Math.sqrt(dx * dx + dy * dy) <= (n.radius * nodeScale + 6)
+      return Math.sqrt(dx * dx + dy * dy) <= (n.radius * nodeScale + 8)
     })
 
     hoveredNodeRef.current = hovered || null
@@ -673,7 +744,6 @@ export default function OrbitObsidianGraph({
     const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85
     const newZoom = Math.max(0.15, Math.min(3.5, zoom * zoomFactor))
 
-    // Zoom centered on cursor
     setPan({
       x: mouseX - (mouseX - pan.x) * (newZoom / zoom),
       y: mouseY - (mouseY - pan.y) * (newZoom / zoom),
@@ -682,6 +752,7 @@ export default function OrbitObsidianGraph({
     cameraAnimRef.current.active = false
   }
 
+  // Click Node: Toggle Expansion or Open Product Orbit
   const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -692,20 +763,61 @@ export default function OrbitObsidianGraph({
     const clicked = nodesRef.current.find((n) => {
       const dx = n.x - mx
       const dy = n.y - my
-      return Math.sqrt(dx * dx + dy * dy) <= (n.radius * nodeScale + 6)
+      return Math.sqrt(dx * dx + dy * dy) <= (n.radius * nodeScale + 8)
     })
 
     if (clicked) {
-      if (clicked.type === 'product' && clicked.variantId) {
-        // Smoothly fly in and open Single Orbit View
+      if (clicked.type === 'brand' && clicked.brandId) {
+        // Toggle Brand Expansion
+        setExpandedBrandIds((prev) => {
+          const next = new Set(prev)
+          if (next.has(clicked.brandId!)) {
+            next.delete(clicked.brandId!)
+          } else {
+            next.add(clicked.brandId!)
+          }
+          return next
+        })
+        flyToNode(clicked, 1.1)
+      } else if (clicked.type === 'family' && clicked.familyId) {
+        // Toggle Family Expansion
+        setExpandedFamilyIds((prev) => {
+          const next = new Set(prev)
+          if (next.has(clicked.familyId!)) {
+            next.delete(clicked.familyId!)
+          } else {
+            next.add(clicked.familyId!)
+          }
+          return next
+        })
+        flyToNode(clicked, 1.35)
+      } else if (clicked.type === 'product' && clicked.variantId) {
+        // Fly directly into Single Orbit View
         flyToNode(clicked, 1.5, () => {
           onSelectProduct(clicked.variantId!, clicked.sku)
         })
-      } else {
-        // Zoom in to Brand or Family cluster
-        flyToNode(clicked, clicked.type === 'brand' ? 1.1 : 1.35)
       }
     }
+  }
+
+  // Quick Action: Expand All Brands & Lines
+  const handleExpandAll = () => {
+    if (!data?.brands) return
+    const allB = new Set<number>()
+    const allF = new Set<number>()
+    data.brands.forEach((b) => {
+      allB.add(b.brand_id)
+      b.families.forEach((f) => allF.add(f.product_id))
+    })
+    setExpandedBrandIds(allB)
+    setExpandedFamilyIds(allF)
+  }
+
+  // Quick Action: Collapse All to clean Brand level
+  const handleCollapseAll = () => {
+    setExpandedBrandIds(new Set())
+    setExpandedFamilyIds(new Set())
+    handleResetView()
   }
 
   const handleResetView = () => {
@@ -713,7 +825,7 @@ export default function OrbitObsidianGraph({
     const w = containerRef.current.clientWidth
     const h = containerRef.current.clientHeight
     setPan({ x: w / 2, y: h / 2 })
-    setZoom(0.75)
+    setZoom(0.85)
     cameraAnimRef.current.active = false
   }
 
@@ -757,16 +869,16 @@ export default function OrbitObsidianGraph({
           <Stack spacing={2} alignItems="center">
             <CircularProgress size={48} sx={{ color: '#38bdf8' }} />
             <Typography variant="h6" sx={{ color: '#f8fafc', fontWeight: 600 }}>
-              Building Obsidian Knowledge Graph...
+              Building Knowledge Graph...
             </Typography>
             <Typography variant="body2" sx={{ color: '#94a3b8' }}>
-              Computing force-directed topology across brands, families, and units
+              Synthesizing brand clusters and catalog hierarchy
             </Typography>
           </Stack>
         </Box>
       )}
 
-      {/* Top Left Stats HUD */}
+      {/* Top Left Breadcrumb & Drill-Down State HUD */}
       {data && (
         <Paper
           elevation={3}
@@ -797,35 +909,52 @@ export default function OrbitObsidianGraph({
               label={`${data.total_brands} Brands`}
               sx={{ bgcolor: 'rgba(251, 191, 36, 0.12)', color: '#fbbf24', fontWeight: 600, fontSize: 11 }}
             />
-            <Chip
-              size="small"
-              icon={<Hub sx={{ fontSize: '12px !important', color: '#38bdf8 !important' }} />}
-              label={`${data.total_families} Product Lines`}
-              sx={{ bgcolor: 'rgba(56, 189, 248, 0.12)', color: '#38bdf8', fontWeight: 600, fontSize: 11 }}
-            />
-            <Chip
-              size="small"
-              icon={<Inventory2 sx={{ fontSize: '12px !important', color: '#a855f7 !important' }} />}
-              label={`${data.total_products} Units`}
-              sx={{ bgcolor: 'rgba(168, 85, 247, 0.12)', color: '#a855f7', fontWeight: 600, fontSize: 11 }}
-            />
+
+            {expandedBrandIds.size > 0 && (
+              <Chip
+                size="small"
+                icon={<Hub sx={{ fontSize: '12px !important', color: '#38bdf8 !important' }} />}
+                label={`${expandedBrandIds.size} Brand(s) Expanded`}
+                sx={{ bgcolor: 'rgba(56, 189, 248, 0.12)', color: '#38bdf8', fontWeight: 600, fontSize: 11 }}
+              />
+            )}
+
+            {expandedFamilyIds.size > 0 && (
+              <Chip
+                size="small"
+                icon={<Inventory2 sx={{ fontSize: '12px !important', color: '#a855f7 !important' }} />}
+                label={`${expandedFamilyIds.size} Line(s) Expanded`}
+                sx={{ bgcolor: 'rgba(168, 85, 247, 0.12)', color: '#a855f7', fontWeight: 600, fontSize: 11 }}
+              />
+            )}
           </Stack>
         </Paper>
       )}
 
-      {/* Top Right Obsidian Graph Controls Button */}
+      {/* Top Right Controls & Quick Expand/Collapse */}
       <Box sx={{ position: 'absolute', top: 20, right: 20, zIndex: 5 }}>
         <Paper
           elevation={3}
           sx={{
             p: 0.5,
+            px: 1,
             borderRadius: 2.5,
             bgcolor: isDarkMode ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.9)',
             backdropFilter: 'blur(12px)',
             border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid #cbd5e1',
           }}
         >
-          <Stack direction="row" spacing={0.5}>
+          <Stack direction="row" spacing={0.5} alignItems="center">
+            <Tooltip title="Collapse All to Brands Only">
+              <IconButton size="small" onClick={handleCollapseAll} sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}>
+                <UnfoldLess fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Expand All Brands & Lines">
+              <IconButton size="small" onClick={handleExpandAll} sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}>
+                <UnfoldMore fontSize="small" />
+              </IconButton>
+            </Tooltip>
             <Tooltip title="Graph Settings">
               <IconButton
                 size="small"
@@ -853,7 +982,7 @@ export default function OrbitObsidianGraph({
           </Stack>
         </Paper>
 
-        {/* Collapsible Obsidian-Style Settings Drawer */}
+        {/* Collapsible Settings Drawer */}
         <Collapse in={controlsOpen}>
           <Paper
             elevation={8}
@@ -963,7 +1092,7 @@ export default function OrbitObsidianGraph({
             top: hoverPos.y - 25,
             p: 1.5,
             minWidth: 200,
-            maxWidth: 300,
+            maxWidth: 320,
             borderRadius: 2.5,
             bgcolor: isDarkMode ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)',
             backdropFilter: 'blur(16px)',
@@ -986,9 +1115,15 @@ export default function OrbitObsidianGraph({
             </Typography>
           )}
           <Typography variant="caption" sx={{ color: '#38bdf8', fontWeight: 600, display: 'block', mt: 0.6 }}>
-            {hoveredNodeState.type === 'product'
-              ? '⚡ Click node to open single-product Orbit View'
-              : '⚡ Click node to zoom into cluster'}
+            {hoveredNodeState.type === 'brand'
+              ? hoveredNodeState.isExpanded
+                ? '⚡ Click to collapse product lines'
+                : `⚡ Click to expand ${hoveredNodeState.childCount} product lines`
+              : hoveredNodeState.type === 'family'
+              ? hoveredNodeState.isExpanded
+                ? '⚡ Click to collapse units'
+                : `⚡ Click to expand ${hoveredNodeState.childCount} units`
+              : '⚡ Click to open single-product Orbit View'}
           </Typography>
         </Paper>
       )}
