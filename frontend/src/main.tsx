@@ -6,6 +6,8 @@ import { ThemeProvider, CssBaseline } from '@mui/material'
 import App from './App'
 import { theme } from './theme'
 import { AuthProvider } from './hooks/useAuth'
+import { TrackingSyncProvider } from './context/TrackingSyncContext'
+import TrackingSyncPanel from './components/tracking/TrackingSyncPanel'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -23,7 +25,10 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <ThemeProvider theme={theme}>
           <CssBaseline />
           <AuthProvider>
-            <App />
+            <TrackingSyncProvider>
+              <App />
+              <TrackingSyncPanel />
+            </TrackingSyncProvider>
           </AuthProvider>
         </ThemeProvider>
       </BrowserRouter>

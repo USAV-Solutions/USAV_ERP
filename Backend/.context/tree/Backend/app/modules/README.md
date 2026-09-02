@@ -20,6 +20,7 @@ Domain modules grouping route + schema + service logic by business area, includi
 - `purchasing/`
 - `returns/`
 - `sync/`
+- `tracking/`
 
 ## Agent Navigation Hint
 - Read this file first.

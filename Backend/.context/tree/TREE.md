@@ -25,6 +25,7 @@ Backend
       - purchasing
         - schemas
       - sync
+      - tracking
     - repositories
       - inventory
       - orders

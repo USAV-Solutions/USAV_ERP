@@ -286,6 +286,10 @@ class Order(Base, ZohoSyncMixin, TimestampMixin):
     carrier: Mapped[Optional[str]] = mapped_column(
         String(50), nullable=True, comment="Shipping carrier (UPS, FedEx, USPS).",
     )
+    tracking_last_checked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="Last time the tracking status was checked against parcelsapp.",
+    )
 
     # ---- Verification ----
     verify_status: Mapped[Optional[str]] = mapped_column(
@@ -337,6 +341,7 @@ class Order(Base, ZohoSyncMixin, TimestampMixin):
         Index("ix_order_zoho_id", "zoho_id"),
         Index("ix_orders_zoho_sync_status", "zoho_sync_status"),
         Index("ix_orders_shipping_status", "shipping_status"),
+        Index("ix_orders_tracking_last_checked_at", "tracking_last_checked_at"),
     )
 
     def __repr__(self) -> str:
