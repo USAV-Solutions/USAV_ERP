@@ -21,6 +21,7 @@ from app.modules.returns.routes import router as returns_router
 from app.modules.accounting.routes import router as accounting_router
 from app.modules.dashboard.routes import router as dashboard_router
 from app.modules.sync.endpoints import router as sync_router
+from app.modules.tracking.routes import router as tracking_router
 from app.integrations.zoho.webhooks import (
     register_webhook_handler,
     router as zoho_webhooks_router,
@@ -201,6 +202,7 @@ app.include_router(returns_router, prefix=settings.api_prefix)
 app.include_router(accounting_router, prefix=settings.api_prefix)
 app.include_router(dashboard_router, prefix=settings.api_prefix)
 app.include_router(sync_router, prefix=settings.api_prefix)
+app.include_router(tracking_router, prefix=settings.api_prefix)
 
 # External webhooks live outside the API prefix so that static
 # webhook URL configs stay simple (e.g. https://domain.com/webhooks/zoho, /webhooks/ecwid).

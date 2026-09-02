@@ -41,6 +41,7 @@ import {
   Hub,
 } from '@mui/icons-material'
 import { useAuth } from '../../hooks/useAuth'
+import GlobalTrackingChip from '../tracking/GlobalTrackingChip'
 
 const DRAWER_WIDTH = 240
 
@@ -255,6 +256,7 @@ export default function Layout() {
           <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
             {getCurrentTitle()}
           </Typography>
+          <GlobalTrackingChip />
           <IconButton color="inherit" onClick={handleMenuOpen}>
             <Avatar sx={{ width: 32, height: 32, bgcolor: 'secondary.main' }}>
               {user?.username?.charAt(0).toUpperCase()}

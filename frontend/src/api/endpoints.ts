@@ -135,6 +135,17 @@ export const ORDERS = {
   SCANS: '/orders/scans',
 }
 
+// Tracking status scraper (parcelsapp.com) – Backend app/modules/tracking
+export const TRACKING = {
+  ELIGIBLE: '/tracking/eligible',
+  SYNC_START: '/tracking/sync/start',
+  SYNC_STATUS: '/tracking/sync/status',
+  SYNC_PROBE: '/tracking/sync/probe',
+  SYNC_RESUME: '/tracking/sync/resume',
+  SYNC_ABORT: '/tracking/sync/abort',
+  SYNC_AUTO_PROBE: '/tracking/sync/auto-probe',
+}
+
 export const RETURNS = {
   LIST: '/returns',
   RECORD: (id: number) => `/returns/${id}`,

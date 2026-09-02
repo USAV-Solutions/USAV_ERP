@@ -182,6 +182,24 @@ class Settings(BaseSettings):
     product_images_path: str = "/mnt/product_images"
     listing_public_base_url: str = ""
 
+    # Tracking status scraper (parcelsapp.com)
+    # parcelsapp blocks headless browsers — production runs headed inside a
+    # virtual X display (Xvfb via pyvirtualdisplay). Only set True for local
+    # debugging where you have a real display.
+    tracking_scraper_headless: bool = False
+    tracking_scraper_min_delay_seconds: float = 2.0
+    tracking_scraper_max_delay_seconds: float = 5.0
+    # Consecutive "information has not been found yet" hits before the job pauses.
+    tracking_rate_limit_threshold: int = 3
+    # Advisory cooldown shown after a rate-limit pause (minutes). Not enforced —
+    # resume is gated on a successful probe, not on this timer.
+    tracking_cooldown_minutes: int = 30
+    # How often auto-probe retries while paused, and its backoff ceiling.
+    tracking_auto_probe_interval_minutes: int = 15
+    tracking_auto_probe_max_interval_minutes: int = 90
+    # Orders checked more recently than this are skipped when (re)building the queue.
+    tracking_freshness_hours: int = 6
+
     @model_validator(mode="after")
     def _apply_dev_overrides(self) -> "Settings":
         """

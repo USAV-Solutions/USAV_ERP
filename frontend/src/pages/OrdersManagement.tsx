@@ -84,6 +84,7 @@ import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import LongPressTableRow from '../components/common/LongPressTableRow'
 import HoldActionPromptDialog from '../components/common/HoldActionPromptDialog'
 import ZohoSyncStatusChip from '../components/common/ZohoSyncStatusChip'
+import TrackingSyncButton from '../components/tracking/TrackingSyncButton'
 import TablePaginationWithPageJump from '../components/common/TablePaginationWithPageJump'
 
 // ── Label maps ───────────────────────────────────────────────────────
@@ -1021,6 +1022,7 @@ export default function OrdersManagement() {
                 ref={shippingStatusUploadInputRef}
                 onChange={handleShippingStatusFileUpload}
               />
+              {orderView === 'self' && <TrackingSyncButton />}
               <OrderImportButton fulfillmentChannel={fulfillmentChannel} />
             </>
           )}

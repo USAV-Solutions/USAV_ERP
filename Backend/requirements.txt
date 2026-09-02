@@ -53,3 +53,9 @@ pandas
 openpyxl
 pdfplumber
 google-genai
+# Tracking status scraper (app/modules/tracking). parcelsapp blocks headless,
+# so this runs a headed Chromium inside a virtual X display.
+#   Needs: playwright install chromium  +  Xvfb/xauth OS packages (see Dockerfile)
+playwright==1.55.0
+playwright-stealth==2.0.0
+pyvirtualdisplay==3.0

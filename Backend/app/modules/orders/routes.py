@@ -84,6 +84,7 @@ from app.modules.orders.schemas.sync import (
 )
 from app.models.entities import Customer, ProductVariant, ZohoSyncStatus
 from app.modules.orders.service import OrderSyncService
+from app.modules.tracking.status_mapping import map_scraped_status
 from app.repositories.orders.order_repository import OrderItemRepository, OrderRepository
 from app.repositories.orders.sync_repository import SyncRepository
 from app.api.deps import AdminOrSalesUser, AdminUser
@@ -1248,18 +1249,9 @@ async def import_orders_from_file(
             if order_number in processed_orders:
                 continue
                 
-            shipping_status = ShippingStatus.PENDING
-            if scraped_status == "DELIVERED":
-                shipping_status = ShippingStatus.DELIVERED
-            elif scraped_status in {"SHIPPED", "SHIPPING"}:
-                shipping_status = ShippingStatus.SHIPPING
-            elif scraped_status == "RETURNED":
-                shipping_status = ShippingStatus.RETURNED
-            elif scraped_status == "REFUNDED":
-                shipping_status = ShippingStatus.REFUNDED
-            elif scraped_status == "CANCELLED":
-                shipping_status = ShippingStatus.CANCELLED
-                
+            # Shared with the server-side tracking scraper (app/modules/tracking).
+            shipping_status = map_scraped_status(scraped_status) or ShippingStatus.PENDING
+
             stmt = select(Order).where(
                 (Order.external_order_id == order_number) | (Order.external_order_number == order_number)
             )
