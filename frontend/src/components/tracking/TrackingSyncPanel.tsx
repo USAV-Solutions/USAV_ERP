@@ -31,6 +31,7 @@ import { useTrackingSync } from '../../context/TrackingSyncContext'
 import { isTrackingJobActive, type TrackingItem, type TrackingJobStatus } from '../../types/tracking'
 import TrackingResultChip from './TrackingResultChip'
 import TrackingCooldownBanner from './TrackingCooldownBanner'
+import TrackingZohoSyncStep from './TrackingZohoSyncStep'
 
 const DRAWER_WIDTH = 560
 
@@ -190,6 +191,11 @@ export default function TrackingSyncPanel() {
             )}
 
             <TrackingCooldownBanner />
+
+            <TrackingZohoSyncStep
+              orderIds={job.changed_order_ids}
+              jobFinished={!active}
+            />
 
             <Box sx={{ height: 380, mb: 1 }}>
               <DataGrid

@@ -98,8 +98,9 @@ def _db_returning(rows):
     return db
 
 
-def _order(shipping=ShippingStatus.PENDING, zoho=ZohoSyncStatus.SYNCED):
+def _order(shipping=ShippingStatus.PENDING, zoho=ZohoSyncStatus.SYNCED, order_id=1):
     o = MagicMock(spec=Order)
+    o.id = order_id
     o.shipping_status = shipping
     o.zoho_sync_status = zoho
     o.tracking_last_checked_at = None
@@ -162,13 +163,13 @@ async def test_start_with_no_eligible_orders_completes_immediately():
 async def test_persists_delivered_and_marks_dirty(monkeypatch):
     monkeypatch.setattr(runner.settings, "tracking_scraper_min_delay_seconds", 0.0)
     monkeypatch.setattr(runner.settings, "tracking_scraper_max_delay_seconds", 0.0)
-    order = _order()
+    order = _order(order_id=42)
     monkeypatch.setattr(runner, "async_session_factory", lambda: FakeSession([order]))
     runner.set_scraper_factory(
         lambda **kw: FakeScraper(lambda tn, n: ScrapeResult(DELIVERED))
     )
 
-    rows = [(1, "SO-1", "SO-1", "1Z999")]
+    rows = [(42, "SO-1", "SO-1", "1Z999")]
     await runner.start_job(_db_returning(rows), auto_probe=False)
     await _drain()
 
@@ -178,6 +179,8 @@ async def test_persists_delivered_and_marks_dirty(monkeypatch):
     assert order.shipping_status is ShippingStatus.DELIVERED
     assert order.zoho_sync_status is ZohoSyncStatus.DIRTY
     assert FakeSession.commits == 1
+    assert job.items[0].changed_order_ids == [42]
+    assert job.changed_order_ids == [42]
 
 
 @pytest.mark.asyncio
