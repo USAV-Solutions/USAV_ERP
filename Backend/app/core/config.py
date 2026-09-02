@@ -200,6 +200,25 @@ class Settings(BaseSettings):
     # Orders checked more recently than this are skipped when (re)building the queue.
     tracking_freshness_hours: int = 6
 
+    # FBA order import (app/modules/fba)
+    # Server-side port of the local FBA/ pipeline: merge All-Orders + Fulfilment
+    # reports, scrape missing buyer names from Seller Central, feed the result
+    # through the existing AMAZON_FBA_CSV ingestion.
+    #
+    # The buyer-name scraper drives a *persistent* Chromium profile (Amazon needs
+    # a logged-in session). That profile lives on a mounted volume — never in the
+    # image, never under PLAYWRIGHT_BROWSERS_PATH. See Docs/FBA_Import_Handoff.md.
+    fba_chrome_profile_path: str = "/data/fba-profile"
+    fba_scraper_headless: bool = False
+    # Escape hatch for networks where Chromium's DNS resolver fails but the OS
+    # resolver works (some Docker/VPN setups). Passed verbatim as Chromium's
+    # --host-resolver-rules, e.g. "MAP * 1.2.3.4". Leave blank in production.
+    fba_scraper_host_resolver_rules: str = ""
+    fba_scraper_min_delay_seconds: float = 1.0
+    fba_scraper_max_delay_seconds: float = 10.0
+    # Give up scraping a single order's buyer name after this many page loads.
+    fba_scraper_max_attempts_per_order: int = 2
+
     @model_validator(mode="after")
     def _apply_dev_overrides(self) -> "Settings":
         """

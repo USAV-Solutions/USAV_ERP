@@ -8,6 +8,8 @@ import { theme } from './theme'
 import { AuthProvider } from './hooks/useAuth'
 import { TrackingSyncProvider } from './context/TrackingSyncContext'
 import TrackingSyncPanel from './components/tracking/TrackingSyncPanel'
+import { FbaImportProvider } from './context/FbaImportContext'
+import FbaImportPanel from './components/fba/FbaImportPanel'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -26,8 +28,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <CssBaseline />
           <AuthProvider>
             <TrackingSyncProvider>
-              <App />
-              <TrackingSyncPanel />
+              <FbaImportProvider>
+                <App />
+                <TrackingSyncPanel />
+                <FbaImportPanel />
+              </FbaImportProvider>
             </TrackingSyncProvider>
           </AuthProvider>
         </ThemeProvider>
