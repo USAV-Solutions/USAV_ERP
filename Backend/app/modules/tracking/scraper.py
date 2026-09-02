@@ -51,7 +51,8 @@ _USER_AGENT = (
 _LAUNCH_ARGS = ["--disable-blink-features=AutomationControlled"]
 
 _NAV_TIMEOUT_MS = 25_000
-_API_POLL_SECONDS = 30      # how long to wait for a non-RELOAD API payload
+_API_POLL_SECONDS = 30            # max wait for a usable API payload
+_API_BLOCKED_GIVEUP_SECONDS = 12  # ...but bail sooner once we've seen throttle responses
 _API_POLL_STEP = 1.5
 
 _RATE_LIMIT_MARKER = "information has not been found yet"
@@ -216,6 +217,7 @@ class TrackingScraper:
 
     async def scrape(self, tracking_number: str) -> ScrapeResult:
         import asyncio
+        import json
 
         tn = (tracking_number or "").strip()
         if not tn:
@@ -227,18 +229,25 @@ class TrackingScraper:
 
         page = self._page
         payloads: list[dict] = []
-        saw_reload = False
+        blocked = {"count": 0}  # RELOAD or empty/garbage 200 — both are throttle signals
 
         async def _on_response(resp):
-            nonlocal saw_reload
             if _API_PATH not in resp.url:
                 return
             try:
-                body = await resp.json()
+                text = (await resp.text()).strip()
             except Exception:  # noqa: BLE001
                 return
+            if not text:
+                blocked["count"] += 1
+                return
+            try:
+                body = json.loads(text)
+            except Exception:  # noqa: BLE001
+                blocked["count"] += 1
+                return
             if isinstance(body, dict) and str(body.get("error")).upper() == "RELOAD":
-                saw_reload = True
+                blocked["count"] += 1
             else:
                 payloads.append(body)
 
@@ -253,15 +262,22 @@ class TrackingScraper:
             except Exception:  # noqa: BLE001 — classify from whatever loads
                 pass
 
+            # Wait for a usable payload. parcelsapp's JS retries internally after a
+            # RELOAD, so keep waiting a bit even once we've seen throttle responses,
+            # then give up early rather than burning the full budget.
             waited = 0.0
             while waited < _API_POLL_SECONDS and not payloads:
                 await asyncio.sleep(_API_POLL_STEP)
                 waited += _API_POLL_STEP
+                if blocked["count"] and waited >= _API_BLOCKED_GIVEUP_SECONDS:
+                    break
 
             if payloads:
                 return classify_api(payloads[-1])
-            if saw_reload:
-                return ScrapeResult(RATE_LIMITED, "anti-bot challenge (RELOAD, no data)")
+            if blocked["count"]:
+                return ScrapeResult(
+                    RATE_LIMITED, f"throttled ({blocked['count']} empty/RELOAD API responses)"
+                )
 
             # API never answered — fall back to the DOM.
             try:
@@ -271,7 +287,7 @@ class TrackingScraper:
             except Exception:  # noqa: BLE001
                 body_text = (await page.locator("body").inner_text()).lower()
                 if _RATE_LIMIT_MARKER in body_text:
-                    return ScrapeResult(RATE_LIMITED, "DOM marker")
+                    return ScrapeResult(RATE_LIMITED, "DOM marker (not found yet)")
                 if "not found" in body_text:
                     return ScrapeResult(NOT_FOUND, "DOM: not found")
                 return ScrapeResult(UNKNOWN, "no API response and no DOM result")
