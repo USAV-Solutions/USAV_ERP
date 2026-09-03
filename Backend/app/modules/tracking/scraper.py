@@ -22,11 +22,24 @@ binaries (installed by the Dockerfile).
 from __future__ import annotations
 
 import logging
+import os
 import re
+import tempfile
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 logger = logging.getLogger(__name__)
+
+
+def _browser_env() -> dict[str, str]:
+    """Chrome writes its crashpad DB under $HOME and SIGTRAPs on launch if that
+    path isn't writable (the python base image bakes HOME=/root, unwritable by
+    the non-root app user). Hand Chrome a guaranteed-writable HOME."""
+    env = dict(os.environ)
+    home = env.get("HOME", "")
+    if not home or not os.access(home, os.W_OK):
+        env["HOME"] = tempfile.gettempdir()
+    return env
 
 # ── Result vocabulary ────────────────────────────────────────────────────────
 DELIVERED = "DELIVERED"
@@ -180,7 +193,7 @@ class TrackingScraper:
 
         self._pw = await async_playwright().start()
         self._browser = await self._pw.chromium.launch(
-            headless=self._headless, args=_LAUNCH_ARGS
+            headless=self._headless, args=_LAUNCH_ARGS, env=_browser_env()
         )
         # Ephemeral context — parcelsapp needs no login, so nothing persists.
         # A future integration that DOES need a persistent session (e.g. Amazon

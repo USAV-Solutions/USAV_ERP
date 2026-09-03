@@ -209,7 +209,11 @@ class Settings(BaseSettings):
     # a logged-in session). That profile lives on a mounted volume — never in the
     # image, never under PLAYWRIGHT_BROWSERS_PATH. See Docs/FBA_Import_Handoff.md.
     fba_chrome_profile_path: str = "/data/fba-profile"
-    fba_scraper_headless: bool = False
+    # Unlike parcelsapp, Amazon serves authenticated Seller Central order pages
+    # to a headless browser, so headless is the default (no Xvfb dependency, and
+    # it works on nested-container hosts where headed Chrome SIGTRAPs). Set False
+    # to force headed-in-Xvfb; the scraper falls back to headless if that fails.
+    fba_scraper_headless: bool = True
     # Escape hatch for networks where Chromium's DNS resolver fails but the OS
     # resolver works (some Docker/VPN setups). Passed verbatim as Chromium's
     # --host-resolver-rules, e.g. "MAP * 1.2.3.4". Leave blank in production.

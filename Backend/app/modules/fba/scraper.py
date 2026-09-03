@@ -16,11 +16,23 @@ If the profile's session has expired, ``scrape_buyer_name`` raises
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 logger = logging.getLogger(__name__)
+
+
+def _browser_env() -> dict[str, str]:
+    """Give Chrome a writable $HOME — it puts its crashpad DB there and SIGTRAPs
+    on launch otherwise (base image bakes HOME=/root, unwritable by appuser)."""
+    env = dict(os.environ)
+    home = env.get("HOME", "")
+    if not home or not os.access(home, os.W_OK):
+        env["HOME"] = tempfile.gettempdir()
+    return env
 
 ORDER_URL = "https://sellercentral.amazon.com/orders-v3/order/{order_id}"
 
@@ -128,42 +140,62 @@ class FbaBuyerNameScraper:
             except OSError:
                 pass
 
-        if not self._headless:
-            try:
-                from pyvirtualdisplay import Display
-
-                self._display = Display(visible=False, size=(1280, 720))
-                self._display.start()
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Virtual display unavailable (%s); running headless", exc)
-                self._headless = True
-
-        args = list(_LAUNCH_ARGS)
-        if self._host_resolver_rules:
-            args.append(f"--host-resolver-rules={self._host_resolver_rules}")
-
         self._pw = await async_playwright().start()
-        try:
-            self._context = await self._pw.chromium.launch_persistent_context(
-                user_data_dir=self._profile_path,
-                headless=self._headless,
-                args=args,
-                ignore_default_args=["--enable-automation"],
-            )
-        except Exception as exc:  # noqa: BLE001
-            msg = str(exc)
-            if "existing browser session" in msg:
-                raise FbaScraperUnavailable(
-                    "The Chromium profile is already in use by another browser."
-                ) from exc
-            # SIGTRAP / TargetClosedError on launch is almost always a profile
-            # written by a newer Chrome than this container's Chromium.
+
+        # Try headed (inside Xvfb) if asked, but fall back to headless on any
+        # launch failure. Amazon serves authenticated Seller Central order pages
+        # fine to a headless browser (unlike parcelsapp), and some hosts — nested
+        # LXC/containers — can't run a headed Chrome at all (SIGTRAP on launch).
+        attempts: list[bool] = [self._headless] if self._headless else [False, True]
+        last_exc: Exception | None = None
+        for want_headless in attempts:
+            self._headless = want_headless
+            if not want_headless and self._display is None:
+                try:
+                    from pyvirtualdisplay import Display
+
+                    self._display = Display(visible=False, size=(1280, 720))
+                    self._display.start()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Virtual display unavailable (%s); will run headless", exc)
+                    continue
+
+            args = list(_LAUNCH_ARGS)
+            if self._host_resolver_rules:
+                args.append(f"--host-resolver-rules={self._host_resolver_rules}")
+            try:
+                self._context = await self._pw.chromium.launch_persistent_context(
+                    user_data_dir=self._profile_path,
+                    headless=want_headless,
+                    args=args,
+                    ignore_default_args=["--enable-automation"],
+                    env=_browser_env(),
+                )
+                break
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                if "existing browser session" in str(exc):
+                    raise FbaScraperUnavailable(
+                        "The Chromium profile is already in use by another browser."
+                    ) from exc
+                logger.warning(
+                    "Chromium launch failed (headless=%s): %s", want_headless, str(exc)[:200]
+                )
+                self._stop_display()
+
+        if self._context is None:
             raise FbaScraperUnavailable(
-                "Chromium failed to open the profile — it was most likely seeded "
-                "from a newer Chrome than the container ships. Re-seed with just "
-                "the cookies (Backend/misc/fba_seed_profile.sh, Docs/FBA_Import_Handoff.md §7)."
-            ) from exc
+                f"Chromium could not be launched in this container: {str(last_exc)[:200]}"
+            ) from last_exc
         self._page = self._context.pages[0] if self._context.pages else await self._context.new_page()
+
+    def _stop_display(self) -> None:
+        try:
+            if self._display is not None:
+                self._display.stop()
+        except Exception:  # noqa: BLE001
+            pass
+        self._display = None
 
     async def close(self) -> None:
         try:

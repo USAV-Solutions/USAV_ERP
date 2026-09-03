@@ -21,10 +21,11 @@ module-level state — the exact pattern of the tracking scraper
 (`Docs/Tracking_Scraper_Handoff.md`) and the Zoho bulk sync. The operator can
 navigate away; a navbar chip + slide-out panel show progress.
 
-The buyer-name step drives a **real (headed) Chromium** with a **persistent
-profile** (Amazon needs a logged-in session), inside a virtual X display, the
-same way the tracking scraper drives parcelsapp. This document is mostly about
-that browser piece and how the login profile gets onto the server.
+The buyer-name step drives a **headless Chromium** with a **persistent profile**
+(Amazon needs a logged-in session). Unlike the tracking scraper (parcelsapp
+blocks headless), Amazon serves authenticated Seller Central pages to a headless
+browser, so no Xvfb is needed. This document is mostly about that browser piece
+and how the login profile gets onto the server.
 
 ---
 
@@ -71,12 +72,11 @@ context for the whole job:
 ```python
 scraper = FbaBuyerNameScraper(
     profile_path=settings.fba_chrome_profile_path,   # a MOUNTED volume
-    headless=settings.fba_scraper_headless,          # False in prod
+    headless=settings.fba_scraper_headless,          # True (default)
     host_resolver_rules=settings.fba_scraper_host_resolver_rules,  # "" in prod
 )
 await scraper.start()
-if not await scraper.check_auth():
-    raise FbaAuthExpired(...)
+state = await scraper.check_auth()                   # logged_in | signed_out | unverified
 res = await scraper.scrape_buyer_name(order_id)      # -> BuyerNameResult(buyer_name, detail)
 ```
 
@@ -84,9 +84,15 @@ res = await scraper.scrape_buyer_name(order_id)      # -> BuyerNameResult(buyer_
   `launch_persistent_context(user_data_dir=settings.fba_chrome_profile_path)`.
   That path is a **mounted volume** (`fba_profile`) — never baked into the image,
   never a path under `PLAYWRIGHT_BROWSERS_PATH`.
-* **Headed inside `Xvfb`** (`pyvirtualdisplay`), same as tracking. Falls back to
-  headless with a warning if `Xvfb` is missing (Amazon will then bounce to login
-  → job finishes `completed_with_warnings`, it does not crash).
+* **Headless by default.** Unlike parcelsapp, Amazon serves authenticated Seller
+  Central order pages fine to a headless browser — verified end-to-end from prod.
+  `fba_scraper_headless` defaults to `True`. Set it `False` to force headed-in-
+  Xvfb; `start()` then still **falls back to headless** if the headed launch
+  fails — which it does on nested-container hosts (LXC), where headed Chrome
+  `SIGTRAP`s on launch. No Xvfb dependency in the default path.
+* **The scraper's IP is not a factor.** Cookies minted on a workstation work
+  from the server's egress IP. (Amazon *session lifetime* is the thing that
+  matters — see §7.)
 * Buyer-name extraction is the 3-attempt strategy from `FBA/main.py`:
   `[data-test-id="buyer-name-with-link"]` → `shipping-section-contact-buyer-value`
   → a tree-walker that reads the text next to "Contact Buyer".
@@ -216,7 +222,7 @@ volumes:
 | Setting | Default | Notes |
 | :--- | :--- | :--- |
 | `fba_chrome_profile_path` | `/data/fba-profile` | the mounted volume |
-| `fba_scraper_headless` | `False` | **keep False** — Amazon fingerprints headless |
+| `fba_scraper_headless` | `True` | Amazon serves authenticated pages headless. `False` = headed-in-Xvfb, with auto-fallback to headless if that launch fails. |
 | `fba_scraper_host_resolver_rules` | `""` | escape hatch for networks where Chromium DNS fails but the OS resolver works (see §8). Passed as `--host-resolver-rules`. **Leave blank in production.** |
 | `fba_scraper_min/max_delay_seconds` | `1.0` / `10.0` | random sleep between orders |
 | `fba_scraper_max_attempts_per_order` | `2` | give up a single buyer name after N page loads |
@@ -230,7 +236,13 @@ The scraper needs a logged-in Seller Central session in
 `FBA/open_browser.py` uses — i.e. the directory named by
 **`chrome_profile_path` in `FBA/config.json`** (currently
 `/home/las/USAV/ZohoIntegration/FBA/data/chrome_profile`, *not*
-`FBA/data/chrome_profile`). Amazon sessions last weeks but do expire.
+`FBA/data/chrome_profile`, which is a stale copy from June).
+
+> **Tick "Keep me signed in" when you log in.** Without it the Seller Central
+> session dies in a few **hours** (`openid.pape.max_auth_age` bounces every page
+> to a password prompt). With it, it lasts **weeks** — the difference between
+> re-seeding constantly and once a month. This was the single cause of every
+> "signed out on prod" during bring-up: the cookies were simply hours old.
 
 > **Cookies only — never the whole profile.** A full-profile copy `SIGTRAP`-
 > crashes Chromium on launch whenever the workstation's Chrome is a newer major
@@ -241,19 +253,21 @@ The scraper needs a logged-in Seller Central session in
 ### 7a. First-time seed (once)
 
 ```bash
-# 1. Log in on a workstation (any Chrome version is fine now):
+# 1. Log in on a workstation:
 cd /home/las/USAV/FBA
-python3 open_browser.py          # sign in, clear OTP/2FA, reach the dashboard, Ctrl+C
+python3 open_browser.py     # sign in — TICK "Keep me signed in" — reach dashboard, Ctrl+C
 
-# 2. Seed the volume with just the cookies (run from the repo root):
+# 2. Seed the volume with just the cookies, right away (run from the repo root):
 cd ~/USAV_Inventory
 Backend/misc/fba_seed_profile.sh \
     /home/las/USAV/ZohoIntegration/FBA/data/chrome_profile prod
 #   (use 'dev' as the 2nd arg for the backend-dev container)
+#   If prod is a different host: scp .../Default/Cookies to it first, then run
+#   the script there against that copy (see 7b).
 
 # 3. Verify
 docker compose --profile prod exec -e PYTHONPATH=/app -w /app backend \
-    python -u misc/fba_scrape_smoke.py
+    python -u misc/fba_scrape_smoke.py --order-id <a-real-recent-FBA-order-id>
 #    -> "check_auth -> logged_in"
 ```
 
@@ -295,14 +309,19 @@ The import still worked — orders are in, just without the freshly-scraped buye
 names. To restore name scraping:
 
 ```bash
-# Same as 7a: re-login on a workstation, then re-run fba_seed_profile.sh.
-cd /home/las/USAV/FBA && python3 open_browser.py    # sign in, Ctrl+C
-cd ~/USAV_Inventory && Backend/misc/fba_seed_profile.sh \
-    /home/las/USAV/ZohoIntegration/FBA/data/chrome_profile prod
+# Same as 7a: re-login on a workstation (TICK "Keep me signed in"), re-seed.
+cd /home/las/USAV/FBA && python3 open_browser.py
+# prod is a different host → copy the cookies over, then seed there:
+scp /home/las/USAV/ZohoIntegration/FBA/data/chrome_profile/Default/Cookies \
+    usav@<server>:/tmp/fba-seed/Default/Cookies      # mkdir -p that dir first
+ssh usav@<server> 'cd ~/USAV_Inventory && Backend/misc/fba_seed_profile.sh /tmp/fba-seed prod && rm -rf /tmp/fba-seed'
 ```
 
-> **Do not** try to log in *inside* the container — it is headless (Xvfb) with no
-> way to type a password or pass 2FA. Always log in on a workstation.
+> **Do not** try to log in *inside* the container. Always log in on a
+> workstation and copy the cookies. The scraper's egress IP does **not** need to
+> match the workstation's — Amazon accepts the ported session (bring-up proved
+> this end-to-end). Only *freshness* matters, hence "Keep me signed in".
+> `/tmp/fba-seed` holds live session tokens — delete it after seeding.
 
 ### 7c. Notes
 
@@ -352,10 +371,16 @@ production (it pins every host to one IP). Getting `unverified` from
 `check_auth` while `curl https://sellercentral.amazon.com/` works from inside the
 container points at this.
 
-**"Signed out" when you think the profile is fine:** almost always the
-`max_auth_age` re-auth described in §2 — Amazon wants the password re-entered
-even though it still knows the account. Fix is the same as a real sign-out:
-§7b.
+**"Signed out" when you think the profile is fine:** the cookies are just
+**old**. Seller Central's `max_auth_age` bounces a session older than a few
+hours (if "Keep me signed in" wasn't ticked) to a password prompt. Re-login
+with the box ticked and re-seed (§7b). Not an IP problem, not a headless
+problem — both were ruled out during bring-up.
+
+**`FbaScraperUnavailable: Chromium could not be launched`** — the headed launch
+`SIGTRAP`'d and (on a `False` override) the headless retry also failed, or the
+profile dir is unreadable. Check `fba_scraper_headless` is `True` and the
+volume is chowned to `appuser`.
 
 ---
 
@@ -364,8 +389,9 @@ even though it still knows the account. Fix is the same as a real sign-out:
 * **Multi-worker status flicker** (§3) — same as tracking. Move to an
   `fba_import_jobs` table if it matters.
 * **No restart recovery** — re-upload (idempotent).
-* **Headless login refresh** needs a workstation + manual copy (§7b). A VNC-into-
-  `Xvfb` flow or a stored-2FA-secret automation could remove the copy step.
+* **Login refresh** needs a workstation login + a `Default/Cookies` copy (§7b).
+  A stored-2FA-secret headless login run on the server could remove the copy
+  step. With "Keep me signed in" this is a ~monthly chore, not a daily one.
 * **`get_input.py` auto-fetch is not ported** — the operator still downloads the
   two reports by hand. The dialog only *computes and shows* the right window.
 
@@ -409,10 +435,13 @@ src/components/common/Layout.tsx                <GlobalFbaImportChip/>
 
 **Tests:** `pytest Backend/tests/modules/fba` — 22 tests. Full backend suite: 132 passing.
 
-**Verified locally (dev container):**
-* pipeline output byte-identical to an archived `final_orders` CSV
-* end-to-end runner → real dev DB: order created with the right
+**Verified:**
+* (dev) pipeline output byte-identical to an archived `final_orders` CSV
+* (dev) end-to-end runner → real dev DB: order created with the right
   channel/source/totals; re-import is idempotent (in-place update, no dupes)
-* **live buyer-name scrape** against real Seller Central orders after a
-  cookies-only seed — `check_auth -> logged_in`, names pulled via
-  `[data-test-id="buyer-name-with-link"]` (e.g. `702-1973617-9964255 → "Alejandro"`)
+* (dev) live buyer-name scrape, `check_auth -> logged_in`, names via
+  `buyer-name-with-link` / `shipping-section-contact-buyer-value`
+* **(prod) headless scrape on `ct103-database` against real orders —
+  `702-1973617-9964255 → "Alejandro"`, `702-9030141-0336268 → "Eugenio"` —
+  with cookies minted on a workstation and ported over.** Headed Chrome
+  `SIGTRAP`s on this host; the headless default is what makes it work.

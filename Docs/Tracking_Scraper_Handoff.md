@@ -339,7 +339,19 @@ COPY --from=builder /opt/pw-browsers /opt/pw-browsers   # browser, no re-downloa
 RUN playwright install-deps chromium \                   # shared libs only (fast, cached)
     && rm -rf /var/lib/apt/lists/* \
     && chmod -R a+rX /opt/pw-browsers                     # readable by non-root appuser
+ENV HOME=/home/appuser                                    # ← headed Chrome needs this
 ```
+
+> **`ENV HOME=/home/appuser` is load-bearing.** The `python:3.12-slim` base bakes
+> `HOME=/root`, which the non-root `appuser` can't write. Headed Chrome puts its
+> crashpad database under `$HOME/.config/chromium/` — if that can't be created
+> the crashpad handler rejects its args and **Chrome `SIGTRAP`s on launch**
+> (`chrome_crashpad_handler: --database is required` → `Trace/breakpoint trap`).
+> `chrome-headless-shell` (Playwright's headless binary) has no crashpad, so
+> *headless* was unaffected — which made this look like a headed-only / host
+> problem. `scraper.py` also passes `env=_browser_env()` (a writable `HOME`
+> fallback) as belt-and-braces. First seen on an LXC deploy host (`ct103`); it's
+> not LXC-specific — any non-root container without a writable `HOME` hits it.
 
 **Python deps** (`requirements.txt`): `playwright==1.55.0`,
 `playwright-stealth==2.0.0`, `pyvirtualdisplay==3.0`.
@@ -352,8 +364,10 @@ build from this Dockerfile. Deploy (`.github/workflows/deploy.yml`) runs
 `alembic upgrade head` and `docker compose up -d --build` automatically on push
 to `main`; the first build after this lands is slow, subsequent ones are normal.
 
-**Verified:** the image builds; inside it Chromium launches headed in Xvfb and
-completes real scrapes.
+**Verified:** on the `ct103` LXC deploy host, headed Chromium launches in Xvfb
+and parcelsapp returns real data (`SHIPPING` / `DELIVERED` with event text) —
+but **only after `ENV HOME=/home/appuser`**. Before that, headed Chrome
+`SIGTRAP`'d and every lookup came back `NO_DATA` headless (parcelsapp soft-block).
 
 ---
 
