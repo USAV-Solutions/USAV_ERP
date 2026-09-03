@@ -56,6 +56,12 @@ RUN playwright install-deps chromium \
     && rm -rf /var/lib/apt/lists/* \
     && chmod -R a+rX /opt/pw-browsers
 
+# Mount point for the FBA buyer-name scraper's persistent Chromium profile.
+# A fresh named volume inherits this ownership from the image, so appuser can
+# write the profile. The profile itself is NEVER baked in — it arrives via the
+# mounted volume (see Docs/FBA_Import_Handoff.md).
+RUN mkdir -p /data/fba-profile && chown -R appuser:appgroup /data
+
 # Copy application code
 COPY --chown=appuser:appgroup . .
 

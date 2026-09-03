@@ -32,6 +32,7 @@ export interface TrackingItem {
   checked_at: string | null
   attempts: number
   parcelsapp_url: string
+  changed_order_ids: number[]
 }
 
 export interface TrackingJob {
@@ -53,6 +54,8 @@ export interface TrackingJob {
   cancel_requested: boolean
   message: string | null
   last_error: string | null
+  /** Distinct order ids whose shipping_status flipped this run → need a Zoho push. */
+  changed_order_ids: number[]
   items: TrackingItem[]
 }
 

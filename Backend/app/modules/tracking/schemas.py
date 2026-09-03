@@ -21,6 +21,7 @@ class TrackingItemOut(BaseModel):
     checked_at: datetime | None
     attempts: int
     parcelsapp_url: str
+    changed_order_ids: list[int] = []
 
     @classmethod
     def from_state(cls, item: TrackingItemState) -> "TrackingItemOut":
@@ -33,6 +34,7 @@ class TrackingItemOut(BaseModel):
             checked_at=item.checked_at,
             attempts=item.attempts,
             parcelsapp_url=item.parcelsapp_url,
+            changed_order_ids=item.changed_order_ids,
         )
 
 
@@ -55,6 +57,8 @@ class TrackingJobOut(BaseModel):
     cancel_requested: bool = False
     message: str | None = None
     last_error: str | None = None
+    # Distinct order ids whose shipping_status flipped this run → need a Zoho push.
+    changed_order_ids: list[int] = []
     items: list[TrackingItemOut] = []
 
     @classmethod
@@ -82,6 +86,7 @@ class TrackingJobOut(BaseModel):
             cancel_requested=job.cancel_requested,
             message=job.message,
             last_error=job.last_error,
+            changed_order_ids=job.changed_order_ids,
             items=[TrackingItemOut.from_state(it) for it in job.items],
         )
 

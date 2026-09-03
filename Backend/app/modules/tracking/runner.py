@@ -87,6 +87,8 @@ class TrackingItemState:
     detail: str | None = None  # human-readable diagnostic (latest event / error)
     checked_at: datetime | None = None
     attempts: int = 0
+    # order_ids whose shipping_status actually flipped (→ marked DIRTY for Zoho).
+    changed_order_ids: list[int] = field(default_factory=list)
 
     @property
     def parcelsapp_url(self) -> str:
@@ -127,6 +129,11 @@ class TrackingJobState:
     @property
     def remaining(self) -> int:
         return self.total - self.processed
+
+    @property
+    def changed_order_ids(self) -> list[int]:
+        """Distinct order ids whose shipping_status flipped → need a Zoho push."""
+        return sorted({oid for it in self.items for oid in it.changed_order_ids})
 
 
 # Module-level singletons.
@@ -221,15 +228,18 @@ async def _apply_result(item: TrackingItemState, result: ScrapeResult) -> None:
         orders = (
             await db.execute(select(Order).where(Order.id.in_(item.order_ids)))
         ).scalars().all()
+        changed: list[int] = []
         for order in orders:
             order.tracking_last_checked_at = now
             if mapped is not None and order.shipping_status != mapped:
                 order.shipping_status = mapped
                 order.zoho_sync_status = ZohoSyncStatus.DIRTY
+                changed.append(order.id)
         await db.commit()
 
     item.result = result.status
     item.checked_at = now
+    item.changed_order_ids = changed
 
 
 def _count(job: TrackingJobState, status: str) -> None:

@@ -42,6 +42,7 @@ import {
 } from '@mui/icons-material'
 import { useAuth } from '../../hooks/useAuth'
 import GlobalTrackingChip from '../tracking/GlobalTrackingChip'
+import GlobalFbaImportChip from '../fba/GlobalFbaImportChip'
 
 const DRAWER_WIDTH = 240
 
@@ -257,6 +258,7 @@ export default function Layout() {
             {getCurrentTitle()}
           </Typography>
           <GlobalTrackingChip />
+          <GlobalFbaImportChip />
           <IconButton color="inherit" onClick={handleMenuOpen}>
             <Avatar sx={{ width: 32, height: 32, bgcolor: 'secondary.main' }}>
               {user?.username?.charAt(0).toUpperCase()}

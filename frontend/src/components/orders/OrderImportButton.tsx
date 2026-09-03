@@ -21,6 +21,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { importOrdersFromApi, importOrdersFromFile } from '../../api/orders'
 import type { OrderFulfillmentChannel, SalesImportApiSource } from '../../types/orders'
+import FbaOrderImportButton from './FbaOrderImportButton'
 
 const API_SOURCES: SalesImportApiSource[] = [
   'ECWID',
@@ -52,6 +53,14 @@ interface OrderImportButtonProps {
 }
 
 export default function OrderImportButton({ fulfillmentChannel }: OrderImportButtonProps) {
+  // The FBA tab has its own two-file (raw report) import + server-side pipeline.
+  if (fulfillmentChannel === 'AMAZON_FBA') {
+    return <FbaOrderImportButton />
+  }
+  return <SalesOrderImportButton fulfillmentChannel={fulfillmentChannel} />
+}
+
+function SalesOrderImportButton({ fulfillmentChannel }: OrderImportButtonProps) {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
   const [mode, setMode] = useState<ImportMode>(

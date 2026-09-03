@@ -146,6 +146,14 @@ export const TRACKING = {
   SYNC_AUTO_PROBE: '/tracking/sync/auto-probe',
 }
 
+export const FBA = {
+  IMPORT_START: '/fba/import/start',
+  IMPORT_STATUS: '/fba/import/status',
+  IMPORT_ABORT: '/fba/import/abort',
+  IMPORT_PERIOD_HINT: '/fba/import/period-hint',
+  IMPORT_AUTH_CHECK: '/fba/import/auth-check',
+}
+
 export const RETURNS = {
   LIST: '/returns',
   RECORD: (id: number) => `/returns/${id}`,

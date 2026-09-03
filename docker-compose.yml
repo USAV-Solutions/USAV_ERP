@@ -35,6 +35,9 @@ services:
       - prod
     volumes:
       - /mnt/product_images:/mnt/product_images
+      # Persistent Chromium profile for the FBA buyer-name scraper (Seller
+      # Central login). Never baked into the image. See Docs/FBA_Import_Handoff.md.
+      - fba_profile:/data/fba-profile
     restart: unless-stopped
     environment:
       - DEBUG=${DEBUG:-false}
@@ -95,6 +98,7 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
     volumes:
       - ./Backend:/app
+      - fba_profile:/data/fba-profile
     environment:
       - DEBUG=true
       - ENVIRONMENT=development
@@ -286,3 +290,4 @@ networks:
 volumes:
   postgres_data:
   pgadmin_data:
+  fba_profile:
