@@ -225,13 +225,15 @@ in-flight scrape or a cooldown wait), and for a running job `await`s the task so
 it returns `aborted` in ~0.1s. Committed progress stays; the rest is picked up
 next run.
 
-### Multi-worker caveat
+### Multi-worker caveat  →  fixed with `--workers 1`
 
-Production runs `uvicorn --workers 4`. The job lives in **one** worker's memory,
-so `GET /tracking/sync/status` can occasionally hit a different worker and show
-"idle" briefly. The job itself is unaffected. Same limitation as the existing
-Zoho bulk sync. Fix if it becomes a problem: `--workers 1`, or move job state to
-a `tracking_jobs` table.
+The job lives in **one** worker's memory. With `uvicorn --workers 4` the
+status-poll endpoint hit a random worker every 2.5 s and reported `idle` ~¾ of
+the time mid-job — the panel flickered between progress and "No job". Prod now
+runs **`--workers 1`** (Dockerfile CMD) so every request sees the job. uvicorn
+is async; one worker serves this internal app fine. The Zoho bulk sync benefits
+from this too. The proper multi-worker fix (a `tracking_jobs` table / shared
+store) is still open if `--workers 1` ever becomes a throughput problem.
 
 A backend restart drops the in-memory job entirely — there is **no** restart
 recovery by design. The `tracking_last_checked_at` freshness guard means
@@ -401,8 +403,8 @@ docker compose --profile prod exec -e PYTHONPATH=/app -w /app backend \
 
 ## 10. Known limitations / possible future work
 
-* **Multi-worker status flicker** (§3). Move to a `tracking_jobs` table if it
-  matters.
+* **Multi-worker status flicker** — mitigated by `--workers 1` (§3). A
+  `tracking_jobs` table would restore multi-worker + add restart recovery.
 * **No restart recovery** — re-click the button (freshness guard handles it).
 * **Rate-limit ceiling unquantified server-side** — short runs are clean; a full
   ~200-order run from the deploy IP hasn't been measured end to end. If it

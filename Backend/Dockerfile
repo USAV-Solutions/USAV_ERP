@@ -81,5 +81,10 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # Expose port
 EXPOSE 8080
 
-# Run with production settings
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "4"]
+# Run with production settings.
+# --workers 1: the tracking scraper and FBA import hold their job state in
+# module-level globals in ONE worker. With multiple workers the status-poll
+# endpoints hit a random worker and intermittently report "idle" mid-job
+# (see Docs/Tracking_Scraper_Handoff.md §3). uvicorn is async, so one worker
+# still serves this internal app's concurrency fine.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
