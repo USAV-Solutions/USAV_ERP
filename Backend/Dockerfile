@@ -41,7 +41,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xauth \
     && rm -rf /var/lib/apt/lists/* \
     && addgroup --system --gid 1001 appgroup \
-    && adduser --system --uid 1001 --gid 1001 appuser
+    && adduser --system --uid 1001 --gid 1001 --home /home/appuser appuser \
+    && mkdir -p /home/appuser && chown -R appuser:appgroup /home/appuser
+
+# Chrome (headed, for the tracking scraper) writes its crashpad database under
+# $HOME. The python base image bakes ENV HOME=/root, which appuser can't write —
+# Chrome then SIGTRAPs on launch. Point HOME at a writable dir.
+ENV HOME=/home/appuser
 
 # Copy virtual environment from builder
 COPY --from=builder /opt/venv /opt/venv
