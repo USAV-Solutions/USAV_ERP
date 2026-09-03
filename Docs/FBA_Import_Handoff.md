@@ -123,9 +123,10 @@ queue is marked this and skipped).
 ## 3. Orchestration — `runner.py`
 
 One job, module-level singletons in the worker that received the request
-(`_CURRENT_JOB`, `_LAST_JOB`, `_CURRENT_TASK`, `_JOB_LOCK`) — same multi-worker
-caveat as tracking (`GET /status` can briefly hit a different worker; per-item
-progress is on the job object only, orders are committed at the ingest step).
+(`_CURRENT_JOB`, `_LAST_JOB`, `_CURRENT_TASK`, `_JOB_LOCK`). Prod runs
+`uvicorn --workers 1` (Dockerfile) so `GET /status` always sees the job —
+without that the panel flickers to "No job" mid-run. Per-item progress lives on
+the job object only; orders are committed at the ingest step.
 
 `FbaImportJobState` holds `status`, `phase`, the pipeline row counts, the
 `items` list (`BuyerNameItemState` per order needing a name), `counts`,
@@ -386,8 +387,8 @@ volume is chowned to `appuser`.
 
 ## 9. Known limitations / future work
 
-* **Multi-worker status flicker** (§3) — same as tracking. Move to an
-  `fba_import_jobs` table if it matters.
+* **Single-worker** (§3) — mitigated by `--workers 1`; an `fba_import_jobs`
+  table would restore multi-worker.
 * **No restart recovery** — re-upload (idempotent).
 * **Login refresh** needs a workstation login + a `Default/Cookies` copy (§7b).
   A stored-2FA-secret headless login run on the server could remove the copy
