@@ -25,7 +25,31 @@ import { useQuery } from '@tanstack/react-query'
 
 import { checkFbaAuth, getFbaPeriodHint } from '../../api/fba'
 import { useFbaImport } from '../../context/FbaImportContext'
-import { isFbaImportActive } from '../../types/fba'
+import { isFbaImportActive, type FbaReportHint } from '../../types/fba'
+
+function ReportInstructions({
+  report,
+  optionLabel,
+}: {
+  report: FbaReportHint
+  optionLabel: string
+}) {
+  return (
+    <Box sx={{ pl: 1, borderLeft: '3px solid', borderColor: 'divider', mb: 1 }}>
+      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+        {report.name}
+      </Typography>
+      <Typography variant="caption" display="block" color="text.secondary">
+        Open{' '}
+        <Link href={report.url} target="_blank" rel="noopener">
+          the report page <OpenInNew sx={{ fontSize: 12, verticalAlign: 'middle' }} />
+        </Link>{' '}
+        → pick <strong>{optionLabel}</strong> → click <strong>“{report.button}”</strong> →
+        download as {report.file_format}.
+      </Typography>
+    </Box>
+  )
+}
 
 interface DropZoneProps {
   label: string
@@ -89,6 +113,8 @@ export default function FbaOrderImportButton() {
   const [authDetail, setAuthDetail] = useState<string | null>(null)
 
   const hint = useQuery({ queryKey: ['fbaPeriodHint'], queryFn: getFbaPeriodHint, enabled: open })
+  const txtReport = hint.data?.reports.find((r) => r.save_as === 'all_orders_txt')
+  const csvReport = hint.data?.reports.find((r) => r.save_as === 'fulfillment_csv')
 
   useEffect(() => {
     if (!open) {
@@ -162,34 +188,28 @@ export default function FbaOrderImportButton() {
               </Alert>
             )}
 
-            {(hint.data?.reports ?? []).map((r) => (
-              <Box key={r.save_as} sx={{ pl: 1, borderLeft: '3px solid', borderColor: 'divider' }}>
-                <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                  {r.name}
-                </Typography>
-                <Typography variant="caption" display="block" color="text.secondary">
-                  Open{' '}
-                  <Link href={r.url} target="_blank" rel="noopener">
-                    the report page <OpenInNew sx={{ fontSize: 12, verticalAlign: 'middle' }} />
-                  </Link>{' '}
-                  → pick <strong>{hint.data?.option_label}</strong> → click{' '}
-                  <strong>“{r.button}”</strong> → download as {r.file_format}.
-                </Typography>
-              </Box>
-            ))}
-
-            <DropZone
-              label="1 · All Orders report (.txt, tab-delimited)"
-              accept=".txt,text/plain"
-              file={txtFile}
-              onFile={setTxtFile}
-            />
-            <DropZone
-              label="2 · Amazon Fulfilled Shipments report (.csv)"
-              accept=".csv,text/csv"
-              file={csvFile}
-              onFile={setCsvFile}
-            />
+            <Box>
+              {txtReport && (
+                <ReportInstructions report={txtReport} optionLabel={hint.data?.option_label ?? ''} />
+              )}
+              <DropZone
+                label="1 · All Orders report (.txt, tab-delimited)"
+                accept=".txt,text/plain"
+                file={txtFile}
+                onFile={setTxtFile}
+              />
+            </Box>
+            <Box>
+              {csvReport && (
+                <ReportInstructions report={csvReport} optionLabel={hint.data?.option_label ?? ''} />
+              )}
+              <DropZone
+                label="2 · Amazon Fulfilled Shipments report (.csv)"
+                accept=".csv,text/csv"
+                file={csvFile}
+                onFile={setCsvFile}
+              />
+            </Box>
 
             <Stack direction="row" spacing={1} alignItems="center">
               <Button size="small" onClick={runAuthCheck} disabled={authState === 'checking'}>
