@@ -242,7 +242,13 @@ class TrackingScraper:
 
         page = self._page
         payloads: list[dict] = []
-        blocked = {"count": 0}  # RELOAD or empty/garbage 200 — both are throttle signals
+        # Both mean "no data", but for very different reasons — keep them apart so
+        # the detail string says which. ``reload`` is parcelsapp's anti-bot
+        # challenge (a real, transient throttle). ``empty`` is a 200 with a
+        # zero-length body and no Content-Type, which is how parcelsapp soft-blocks
+        # an egress IP outright — that one never clears on its own, so reporting it
+        # as a plain throttle sends the job into an endless cooldown/probe loop.
+        blocked = {"reload": 0, "empty": 0}
 
         async def _on_response(resp):
             if _API_PATH not in resp.url:
@@ -252,15 +258,15 @@ class TrackingScraper:
             except Exception:  # noqa: BLE001
                 return
             if not text:
-                blocked["count"] += 1
+                blocked["empty"] += 1
                 return
             try:
                 body = json.loads(text)
             except Exception:  # noqa: BLE001
-                blocked["count"] += 1
+                blocked["empty"] += 1
                 return
             if isinstance(body, dict) and str(body.get("error")).upper() == "RELOAD":
-                blocked["count"] += 1
+                blocked["reload"] += 1
             else:
                 payloads.append(body)
 
@@ -282,14 +288,24 @@ class TrackingScraper:
             while waited < _API_POLL_SECONDS and not payloads:
                 await asyncio.sleep(_API_POLL_STEP)
                 waited += _API_POLL_STEP
-                if blocked["count"] and waited >= _API_BLOCKED_GIVEUP_SECONDS:
+                if (blocked["reload"] or blocked["empty"]) and waited >= _API_BLOCKED_GIVEUP_SECONDS:
                     break
 
             if payloads:
                 return classify_api(payloads[-1])
-            if blocked["count"]:
+            if blocked["reload"] or blocked["empty"]:
+                if blocked["empty"] and not blocked["reload"]:
+                    # Not a throttle: parcelsapp accepted the request (the quota
+                    # headers still count down) and returned nothing. That is an
+                    # egress-IP block, and it will not clear by waiting.
+                    return ScrapeResult(
+                        RATE_LIMITED,
+                        f"blocked ({blocked['empty']} empty 200s — egress IP "
+                        f"appears blocked, not a quota limit)",
+                    )
                 return ScrapeResult(
-                    RATE_LIMITED, f"throttled ({blocked['count']} empty/RELOAD API responses)"
+                    RATE_LIMITED,
+                    f"throttled ({blocked['reload']} RELOAD, {blocked['empty']} empty)",
                 )
 
             # API never answered — fall back to the DOM.

@@ -195,7 +195,7 @@ class Settings(BaseSettings):
     # resume is gated on a successful probe, not on this timer.
     tracking_cooldown_minutes: int = 30
     # How often auto-probe retries while paused, and its backoff ceiling.
-    tracking_auto_probe_interval_minutes: int = 15
+    tracking_auto_probe_interval_minutes: int = 25
     tracking_auto_probe_max_interval_minutes: int = 90
     # Orders checked more recently than this are skipped when (re)building the queue.
     tracking_freshness_hours: int = 6
@@ -209,11 +209,15 @@ class Settings(BaseSettings):
     # a logged-in session). That profile lives on a mounted volume — never in the
     # image, never under PLAYWRIGHT_BROWSERS_PATH. See Docs/FBA_Import_Handoff.md.
     fba_chrome_profile_path: str = "/data/fba-profile"
-    # Unlike parcelsapp, Amazon serves authenticated Seller Central order pages
-    # to a headless browser, so headless is the default (no Xvfb dependency, and
-    # it works on nested-container hosts where headed Chrome SIGTRAPs). Set False
-    # to force headed-in-Xvfb; the scraper falls back to headless if that fails.
-    fba_scraper_headless: bool = True
+    # Headed-in-Xvfb by default. A headless Chromium advertises
+    # "HeadlessChrome/<ver>" in its User-Agent, and Seller Central refuses to
+    # honour a valid session for that UA: every page bounces to /ap/signin with a
+    # password prompt (openid.pape.max_auth_age re-auth), which the runner then
+    # reports as AUTH_EXPIRED. Verified against a known-good profile — headless
+    # got the sign-in page, headed got the dashboard, same cookies, same minute.
+    # The scraper still falls back to headless if the headed launch fails, and
+    # spoofs a non-headless UA in that path (see scraper.py _HEADLESS_UA).
+    fba_scraper_headless: bool = False
     # Escape hatch for networks where Chromium's DNS resolver fails but the OS
     # resolver works (some Docker/VPN setups). Passed verbatim as Chromium's
     # --host-resolver-rules, e.g. "MAP * 1.2.3.4". Leave blank in production.

@@ -84,6 +84,8 @@ services:
       start_period: 40s
     networks:
       - usav_network
+      # IPv6 egress for the parcelsapp tracking scraper — see networks: below.
+      - usav_egress_v6
 
   # ==========================================================================
   # Development Backend (with hot reload)
@@ -146,6 +148,8 @@ services:
       start_period: 40s
     networks:
       - usav_network
+      # IPv6 egress for the parcelsapp tracking scraper — see networks: below.
+      - usav_egress_v6
 
   # ==============================================                                      
   # Database Migrations (run once)
@@ -283,6 +287,27 @@ services:
 networks:
   usav_network:
     driver: bridge
+
+  # IPv6-capable egress, attached to the backends only.
+  #
+  # parcelsapp soft-blocks this site's IPv4 egress address: it answers with a
+  # 200, no Content-Type and a zero-length body, so every tracking lookup came
+  # back RATE_LIMITED even though the response's own quota headers reported
+  # 299/300 remaining — nothing was ever actually throttled. The Docker host
+  # reaches parcelsapp fine because it has an IPv6 default route and prefers it;
+  # a v4-only bridge denies the container that path. Docker NAT66s this ULA
+  # subnet out via the host's IPv6, restoring the path that works.
+  #
+  # This is a *second* network rather than `enable_ipv6: true` on usav_network
+  # because IPAM is immutable — changing it recreates the network, which would
+  # force a restart of every attached container, including usav_db. Adding a
+  # network touches only the services that opt in.
+  usav_egress_v6:
+    driver: bridge
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: fd4d:5a56:1a2b::/64
 
 # =============================================================================
 # Volumes
