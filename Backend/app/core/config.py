@@ -195,7 +195,7 @@ class Settings(BaseSettings):
     # resume is gated on a successful probe, not on this timer.
     tracking_cooldown_minutes: int = 30
     # How often auto-probe retries while paused, and its backoff ceiling.
-    tracking_auto_probe_interval_minutes: int = 15
+    tracking_auto_probe_interval_minutes: int = 25
     tracking_auto_probe_max_interval_minutes: int = 90
     # Orders checked more recently than this are skipped when (re)building the queue.
     tracking_freshness_hours: int = 6

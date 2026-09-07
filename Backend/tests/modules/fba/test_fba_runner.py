@@ -143,10 +143,11 @@ async def test_auth_expired_still_imports_without_names(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_signed_out_check_skips_scrape_but_imports(monkeypatch):
+async def test_sustained_auth_redirects_bail_but_still_import(monkeypatch):
+    # check_auth flags signed-out AND every order load redirects to sign-in.
     monkeypatch.setattr(
         runner, "_scraper_factory",
-        lambda **kw: FakeScraper(auth=AUTH_SIGNED_OUT, **kw),
+        lambda **kw: FakeScraper(auth=AUTH_SIGNED_OUT, raise_auth_after=0, **kw),
     )
     txt, ff = _inputs(["111", "222"])
     job = await _run_to_completion(txt, ff)
@@ -154,6 +155,25 @@ async def test_signed_out_check_skips_scrape_but_imports(monkeypatch):
     assert job.status == runner.STATUS_COMPLETED_WARN
     assert job.counts.get(runner.R_AUTH_EXPIRED, 0) == 2
     assert job.orders_created == 2
+
+
+@pytest.mark.asyncio
+async def test_transient_auth_blip_does_not_abort_scrape(monkeypatch):
+    # One order raises FbaAuthExpired on its first load, then recovers.
+    class Blip(FakeScraper):
+        async def scrape_buyer_name(self, order_id):
+            self.calls += 1
+            if order_id == "222" and self.calls < 3:
+                raise FbaAuthExpired("blip")
+            return BuyerNameResult(buyer_name=f"Name-{order_id}", detail="fake")
+
+    monkeypatch.setattr(runner, "_scraper_factory", lambda **kw: Blip(**kw))
+    txt, ff = _inputs(["111", "222", "333"])
+    job = await _run_to_completion(txt, ff)
+
+    assert job.status == runner.STATUS_COMPLETED          # no job-level warning
+    assert job.counts.get(runner.R_FOUND, 0) == 3         # 222 recovered on retry
+    assert job.counts.get(runner.R_AUTH_EXPIRED, 0) == 0
 
 
 @pytest.mark.asyncio

@@ -55,6 +55,11 @@ PHASE_DONE = "done"
 
 _HANDOFF_DOC = "Docs/FBA_Import_Handoff.md"
 
+# A single order bouncing to /ap/signin is often transient (Amazon's periodic
+# re-auth interstitial, a connection reset on a stale URL). Only abandon the
+# whole scrape phase after this many *consecutive* auth redirects.
+_MAX_CONSECUTIVE_AUTH_FAILURES = 4
+
 # Scrape-result buckets for the per-order grid.
 R_FOUND = "FOUND"
 R_NOT_FOUND = "NOT_FOUND"
@@ -196,31 +201,45 @@ async def _scrape_buyer_names(job: FbaImportJobState, rows: list[dict]) -> None:
         headless=settings.fba_scraper_headless,
         host_resolver_rules=settings.fba_scraper_host_resolver_rules,
     )
+    consecutive_auth_failures = 0
     try:
         await scraper.start()
         auth = await scraper.check_auth()
         if auth == AUTH_SIGNED_OUT:
-            raise FbaAuthExpired("Seller Central profile is signed out")
-        # AUTH_UNVERIFIED (page wouldn't load): try scraping anyway — the first
-        # order load will raise FbaAuthExpired for real if the session is dead.
+            # Not a hard stop — check_auth has been seen to flap. Count it as the
+            # first strike and let the per-item threshold decide.
+            consecutive_auth_failures = 1
+            logger.warning("FBA job %s: check_auth reports signed out; trying anyway", job.job_id)
 
         while job.scrape_cursor < len(job.items):
             if job.cancel_requested:
                 return
             item = job.items[job.scrape_cursor]
             item.attempts += 1
+            auth_hit = False
             try:
                 res = await asyncio.wait_for(
                     scraper.scrape_buyer_name(item.order_id), timeout=90
                 )
             except FbaAuthExpired:
-                raise
+                auth_hit = True
+                res = None
+                item.detail = "sign-in redirect"
             except asyncio.TimeoutError:
                 res = None
                 item.detail = "timed out"
             except Exception as exc:  # noqa: BLE001
                 res = None
                 item.detail = str(exc)[:160]
+
+            if auth_hit:
+                consecutive_auth_failures += 1
+                if consecutive_auth_failures >= _MAX_CONSECUTIVE_AUTH_FAILURES:
+                    raise FbaAuthExpired(
+                        f"{consecutive_auth_failures} consecutive sign-in redirects"
+                    )
+            else:
+                consecutive_auth_failures = 0
 
             if res is not None and res.buyer_name:
                 item.buyer_name = res.buyer_name
@@ -231,9 +250,12 @@ async def _scrape_buyer_names(job: FbaImportJobState, rows: list[dict]) -> None:
                         row["buyer-name"] = res.buyer_name
                 _count(job, R_FOUND)
             elif item.attempts < max_attempts and not job.cancel_requested:
-                # retry same item
+                # retry same item (also covers a lone auth blip)
                 await asyncio.sleep(random.uniform(min_delay, max_delay))
                 continue
+            elif auth_hit:
+                item.result = R_AUTH_EXPIRED
+                _count(job, R_AUTH_EXPIRED)
             else:
                 item.result = R_NOT_FOUND if res is not None else R_ERROR
                 if item.result == R_ERROR:
@@ -244,10 +266,12 @@ async def _scrape_buyer_names(job: FbaImportJobState, rows: list[dict]) -> None:
             job.scrape_cursor += 1
             await asyncio.sleep(random.uniform(min_delay, max_delay))
     except FbaAuthExpired as exc:
-        logger.warning("FBA import job %s: Seller Central session expired (%s)", job.job_id, exc)
+        logger.warning("FBA import job %s: giving up scrape — %s", job.job_id, exc)
+        done = sum(1 for it in job.items if it.result == R_FOUND)
         job.warnings.append(
-            "Amazon Seller Central session expired — orders were imported without "
-            f"buyer names. Refresh the Chromium profile: see {_HANDOFF_DOC}."
+            f"Seller Central kept redirecting to sign-in after {done} buyer name(s) "
+            f"were found — the rest imported without names. The session needs "
+            f"refreshing: see {_HANDOFF_DOC}."
         )
         for it in job.items:
             if it.result is None:
