@@ -38,6 +38,18 @@ ORDER_URL = "https://sellercentral.amazon.com/orders-v3/order/{order_id}"
 
 _LAUNCH_ARGS = ["--no-sandbox", "--disable-blink-features=AutomationControlled"]
 _NAV_TIMEOUT_MS = 30_000
+
+# Seller Central refuses to honour a valid session when the User-Agent says
+# "HeadlessChrome/<ver>" — every page bounces to /ap/signin asking for a
+# password, which surfaces as AUTH_EXPIRED. Headed Chromium sends a normal UA,
+# so this only matters on the headless fallback path. Amazon keys on the
+# User-Agent header alone (it still serves the dashboard with sec-ch-ua leaking
+# "HeadlessChrome"), so overriding the UA is enough. Keep the Chrome major in
+# step with the Chromium that `playwright` pins in requirements.txt.
+_HEADLESS_UA = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+)
 _LOGIN_HOST_MARKERS = (
     "/ap/signin",
     "/ap/sso",
@@ -170,6 +182,9 @@ class FbaBuyerNameScraper:
                     args=args,
                     ignore_default_args=["--enable-automation"],
                     env=_browser_env(),
+                    # Only on the headless path: hide "HeadlessChrome" from the
+                    # UA, which Seller Central otherwise treats as signed out.
+                    **({"user_agent": _HEADLESS_UA} if want_headless else {}),
                 )
                 break
             except Exception as exc:  # noqa: BLE001
