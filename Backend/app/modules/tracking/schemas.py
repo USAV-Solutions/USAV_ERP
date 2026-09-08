@@ -50,8 +50,8 @@ class TrackingJobOut(BaseModel):
     current: TrackingItemOut | None = None
     cooldown_until: datetime | None = None
     consecutive_rate_limited: int = 0
-    auto_probe: bool = True
-    auto_probe_interval_minutes: int = 15
+    auto_probe: bool = False
+    auto_probe_interval_minutes: int = 25
     last_probe_result: str | None = None
     last_probe_at: datetime | None = None
     cancel_requested: bool = False
