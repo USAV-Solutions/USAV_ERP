@@ -422,12 +422,12 @@ class ShopifyClient(BasePlatformClient):
 
         if since:
             since_utc = since.astimezone(timezone.utc) if since.tzinfo else since
-            query_parts.append(f"created_at:>='{since_utc.strftime('%Y-%m-%dT%H:%M:%SZ')}'")
+            query_parts.append(f"created_at:>={since_utc.strftime('%Y-%m-%dT%H:%M:%SZ')}")
         if until:
             until_utc = until.astimezone(timezone.utc) if until.tzinfo else until
-            query_parts.append(f"created_at:<='{until_utc.strftime('%Y-%m-%dT%H:%M:%SZ')}'")
+            query_parts.append(f"created_at:<={until_utc.strftime('%Y-%m-%dT%H:%M:%SZ')}")
 
-        filter_query = " AND ".join(query_parts) if query_parts else None
+        filter_query = " ".join(query_parts) if query_parts else None
 
         gql_query = """
         query getOrders($first: Int!, $cursor: String, $query: String) {
@@ -528,13 +528,15 @@ class ShopifyClient(BasePlatformClient):
                 data = await self._graphql(gql_query, variables)
             except Exception as e:
                 logger.error(f"Failed to query Shopify orders: {e}")
-                break
+                raise
 
             await asyncio.sleep(0.5)
 
-            if "errors" in data:
-                logger.error(f"Shopify GraphQL error fetching orders: {data['errors']}")
-                break
+            if "errors" in data and data["errors"]:
+                error_messages = [e.get("message", str(e)) for e in data["errors"]]
+                joined_errors = "; ".join(error_messages)
+                logger.error(f"Shopify GraphQL error fetching orders: {joined_errors}")
+                raise RuntimeError(f"Shopify API error: {joined_errors}")
 
             orders_data = data.get("data", {}).get("orders", {})
             page_info = orders_data.get("pageInfo", {})
