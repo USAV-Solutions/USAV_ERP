@@ -11,6 +11,7 @@ Shopify GraphQL Admin API integration client for product/variant catalog queries
 - `ShopifyClient` uses GraphQL Admin API (`/admin/api/{version}/graphql.json`) with an Admin API access token (`X-Shopify-Access-Token`).
 - Rate limiting: Shopify uses leaky-bucket query cost budgeting (429 handling with retry and artificial delay).
 - Subclasses `BasePlatformClient` to support both price synchronization and orders domain API sync (`fetch_orders`, `get_order`). When querying orders, Shopify requires the `read_orders` scope and defaults to open orders unless `status:any` is included in the query string.
+- The GraphQL `customer` subfield on orders requires the `read_customers` scope. Orders are queried using `shippingAddress` and order-level `email`/`phone` instead of the root `customer` object to prevent `ACCESS_DENIED` errors when only `read_orders` is granted. Partial field errors do not abort ingestion if `data.orders` is returned.
 
 ## Child Folders
 - (No child folders)

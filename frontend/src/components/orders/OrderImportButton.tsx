@@ -95,7 +95,11 @@ function SalesOrderImportButton({ fulfillmentChannel }: OrderImportButtonProps) 
         until: toApiUntilIso(until),
       }),
     onSuccess: (data) => {
-      setMessage(`Imported ${data.new_orders} orders (${data.new_items} items).`)
+      if (!data.success && data.errors && data.errors.length > 0) {
+        setError(data.errors.join('; '))
+      } else {
+        setMessage(`Imported ${data.new_orders} orders (${data.new_items} items).`)
+      }
       queryClient.invalidateQueries({ queryKey: ['orders'] })
       queryClient.invalidateQueries({ queryKey: ['syncStatus'] })
     },

@@ -307,11 +307,11 @@ class ShopifyClient(BasePlatformClient):
         customer = node.get("customer") or {}
         shipping = node.get("shippingAddress") or {}
 
-        first_name = customer.get("firstName") or ""
-        last_name = customer.get("lastName") or ""
+        first_name = customer.get("firstName") or shipping.get("firstName") or ""
+        last_name = customer.get("lastName") or shipping.get("lastName") or ""
         customer_name = f"{first_name} {last_name}".strip() or shipping.get("name") or None
         customer_email = customer.get("email") or node.get("email") or None
-        customer_phone = customer.get("phone") or shipping.get("phone") or None
+        customer_phone = customer.get("phone") or shipping.get("phone") or node.get("phone") or None
         customer_company = shipping.get("company") or None
         customer_external_id = customer.get("id") or None
 
@@ -443,6 +443,7 @@ class ShopifyClient(BasePlatformClient):
                 createdAt
                 currencyCode
                 email
+                phone
                 subtotalPriceSet {
                   shopMoney {
                     amount
@@ -463,15 +464,10 @@ class ShopifyClient(BasePlatformClient):
                     amount
                   }
                 }
-                customer {
-                  id
-                  firstName
-                  lastName
-                  email
-                  phone
-                }
                 shippingAddress {
                   name
+                  firstName
+                  lastName
                   address1
                   address2
                   city
@@ -535,8 +531,10 @@ class ShopifyClient(BasePlatformClient):
             if "errors" in data and data["errors"]:
                 error_messages = [e.get("message", str(e)) for e in data["errors"]]
                 joined_errors = "; ".join(error_messages)
-                logger.error(f"Shopify GraphQL error fetching orders: {joined_errors}")
-                raise RuntimeError(f"Shopify API error: {joined_errors}")
+                if not data.get("data") or not data.get("data", {}).get("orders"):
+                    logger.error(f"Shopify GraphQL error fetching orders: {joined_errors}")
+                    raise RuntimeError(f"Shopify API error: {joined_errors}")
+                logger.warning(f"Shopify GraphQL non-fatal warning fetching orders: {joined_errors}")
 
             orders_data = data.get("data", {}).get("orders", {})
             page_info = orders_data.get("pageInfo", {})
@@ -571,6 +569,7 @@ class ShopifyClient(BasePlatformClient):
             createdAt
             currencyCode
             email
+            phone
             subtotalPriceSet {
               shopMoney {
                 amount
@@ -591,15 +590,10 @@ class ShopifyClient(BasePlatformClient):
                 amount
               }
             }
-            customer {
-              id
-              firstName
-              lastName
-              email
-              phone
-            }
             shippingAddress {
               name
+              firstName
+              lastName
               address1
               address2
               city
