@@ -29,6 +29,7 @@ const API_SOURCES: SalesImportApiSource[] = [
   'EBAY_USAV',
   'EBAY_DRAGON',
   'EBAY_PURCHASING',
+  'SHOPIFY',
   'WALMART',
 ]
 

@@ -64,6 +64,7 @@ _ORDER_TO_ENTITY_PLATFORM: dict[OrderPlatform, Platform] = {
     OrderPlatform.EBAY_DRAGON: Platform.EBAY_DRAGON,
     OrderPlatform.EBAY_PURCHASING: Platform.EBAY_PURCHASING,
     OrderPlatform.ECWID: Platform.ECWID,
+    OrderPlatform.SHOPIFY: Platform.SHOPIFY,
     OrderPlatform.WALMART: Platform.WALMART,
 }
 

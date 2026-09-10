@@ -25,6 +25,7 @@ export type SalesImportApiSource =
   | 'EBAY_USAV'
   | 'EBAY_DRAGON'
   | 'EBAY_PURCHASING'
+  | 'SHOPIFY'
   | 'WALMART'
 
 export type SalesImportFileSource =

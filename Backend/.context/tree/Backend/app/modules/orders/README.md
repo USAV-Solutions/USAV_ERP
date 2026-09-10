@@ -13,6 +13,7 @@ Sales orders domain: ingestion/import, listing-centric matching, filtering, cust
 - **Packing Metadata:** `orders.packing_metadata` stores JSON paths to Synology NAS photo attachments (`slip_photo` and `box_photo`).
 - **FileStation/Upload Proxying:** Frontend uploads base64 canvas captures to `/api/orders/photo-station/upload` which uploads to Synology DS418j FileStation API via DSM WebAPI. If NAS is offline or unconfigured, it defaults to saving locally under `Backend/static/photos/` as a fallback.
 - **End-of-Day Box Count:** `/photo-station/verify-shelf` queries `locate_anything.py` using NVIDIA Locate Anything 3B model prompt. If the counted boxes mismatch today's `VERIFIED` order count, all active verified orders are flagged as `ERROR_COUNT_MISMATCH` and a discrepancy warning is returned.
+- **Shopify Order Ingestion:** `SalesImportApiSource` and `_IMPORT_SOURCE_TO_PLATFORM` include `SHOPIFY`. The `ShopifyClient` integrates via GraphQL Admin API to pull orders with status, customer, address, and line items, auto-matching line items against `Platform.SHOPIFY` listings.
 - Forgetting to align platform/source enums across model, schema, migration, and frontend types.
 - Adding filters in route layer but not implementing repository query logic.
 - Bypassing OrderSyncService ingestion path and breaking dedupe/matching consistency.
