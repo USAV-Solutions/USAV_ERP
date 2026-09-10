@@ -82,6 +82,7 @@ class SalesImportApiSource(str, Enum):
     EBAY_USAV = "EBAY_USAV"
     EBAY_DRAGON = "EBAY_DRAGON"
     EBAY_PURCHASING = "EBAY_PURCHASING"
+    SHOPIFY = "SHOPIFY"
     WALMART = "WALMART"
 
 

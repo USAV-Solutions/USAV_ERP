@@ -41,6 +41,7 @@ from app.integrations.amazon.client import AmazonClient
 from app.integrations.base import BasePlatformClient
 from app.integrations.ebay.client import EbayClient
 from app.integrations.ecwid.client import EcwidClient
+from app.integrations.shopify.client import ShopifyClient
 from app.integrations.walmart.client import WalmartClient
 from app.modules.orders.dependencies import (
     get_order_item_repo,
@@ -170,6 +171,7 @@ _IMPORT_SOURCE_TO_PLATFORM: dict[SalesImportApiSource, str] = {
     SalesImportApiSource.EBAY_USAV: "EBAY_USAV",
     SalesImportApiSource.EBAY_DRAGON: "EBAY_DRAGON",
     SalesImportApiSource.EBAY_PURCHASING: "EBAY_PURCHASING",
+    SalesImportApiSource.SHOPIFY: "SHOPIFY",
     SalesImportApiSource.WALMART: "WALMART",
 }
 
@@ -260,6 +262,17 @@ def _build_platform_clients() -> dict[str, BasePlatformClient]:
         logger.debug("WALMART client built")
     else:
         logger.debug("WALMART skipped (walmart credentials not set)")
+
+    # Shopify
+    if settings.shopify_shop_url and settings.shopify_access_token:
+        clients["SHOPIFY"] = ShopifyClient(
+            shop_url=settings.shopify_shop_url,
+            access_token=settings.shopify_access_token,
+            api_version=settings.shopify_api_version,
+        )
+        logger.debug("✓ SHOPIFY client built")
+    else:
+        logger.debug("✗ SHOPIFY skipped (shopify credentials not set)")
 
     logger.debug(f"[DEBUG.INTERNAL_API] Platform clients built: {list(clients.keys())}")
     return clients
