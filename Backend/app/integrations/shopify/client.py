@@ -307,11 +307,11 @@ class ShopifyClient(BasePlatformClient):
         customer = node.get("customer") or {}
         shipping = node.get("shippingAddress") or {}
 
-        first_name = customer.get("firstName") or ""
-        last_name = customer.get("lastName") or ""
+        first_name = customer.get("firstName") or shipping.get("firstName") or ""
+        last_name = customer.get("lastName") or shipping.get("lastName") or ""
         customer_name = f"{first_name} {last_name}".strip() or shipping.get("name") or None
         customer_email = customer.get("email") or node.get("email") or None
-        customer_phone = customer.get("phone") or shipping.get("phone") or None
+        customer_phone = customer.get("phone") or shipping.get("phone") or node.get("phone") or None
         customer_company = shipping.get("company") or None
         customer_external_id = customer.get("id") or None
 
@@ -422,12 +422,12 @@ class ShopifyClient(BasePlatformClient):
 
         if since:
             since_utc = since.astimezone(timezone.utc) if since.tzinfo else since
-            query_parts.append(f"created_at:>='{since_utc.strftime('%Y-%m-%dT%H:%M:%SZ')}'")
+            query_parts.append(f"created_at:>={since_utc.strftime('%Y-%m-%dT%H:%M:%SZ')}")
         if until:
             until_utc = until.astimezone(timezone.utc) if until.tzinfo else until
-            query_parts.append(f"created_at:<='{until_utc.strftime('%Y-%m-%dT%H:%M:%SZ')}'")
+            query_parts.append(f"created_at:<={until_utc.strftime('%Y-%m-%dT%H:%M:%SZ')}")
 
-        filter_query = " AND ".join(query_parts) if query_parts else None
+        filter_query = " ".join(query_parts) if query_parts else None
 
         gql_query = """
         query getOrders($first: Int!, $cursor: String, $query: String) {
@@ -443,6 +443,7 @@ class ShopifyClient(BasePlatformClient):
                 createdAt
                 currencyCode
                 email
+                phone
                 subtotalPriceSet {
                   shopMoney {
                     amount
@@ -463,15 +464,10 @@ class ShopifyClient(BasePlatformClient):
                     amount
                   }
                 }
-                customer {
-                  id
-                  firstName
-                  lastName
-                  email
-                  phone
-                }
                 shippingAddress {
                   name
+                  firstName
+                  lastName
                   address1
                   address2
                   city
@@ -528,13 +524,17 @@ class ShopifyClient(BasePlatformClient):
                 data = await self._graphql(gql_query, variables)
             except Exception as e:
                 logger.error(f"Failed to query Shopify orders: {e}")
-                break
+                raise
 
             await asyncio.sleep(0.5)
 
-            if "errors" in data:
-                logger.error(f"Shopify GraphQL error fetching orders: {data['errors']}")
-                break
+            if "errors" in data and data["errors"]:
+                error_messages = [e.get("message", str(e)) for e in data["errors"]]
+                joined_errors = "; ".join(error_messages)
+                if not data.get("data") or not data.get("data", {}).get("orders"):
+                    logger.error(f"Shopify GraphQL error fetching orders: {joined_errors}")
+                    raise RuntimeError(f"Shopify API error: {joined_errors}")
+                logger.warning(f"Shopify GraphQL non-fatal warning fetching orders: {joined_errors}")
 
             orders_data = data.get("data", {}).get("orders", {})
             page_info = orders_data.get("pageInfo", {})
@@ -569,6 +569,7 @@ class ShopifyClient(BasePlatformClient):
             createdAt
             currencyCode
             email
+            phone
             subtotalPriceSet {
               shopMoney {
                 amount
@@ -589,15 +590,10 @@ class ShopifyClient(BasePlatformClient):
                 amount
               }
             }
-            customer {
-              id
-              firstName
-              lastName
-              email
-              phone
-            }
             shippingAddress {
               name
+              firstName
+              lastName
               address1
               address2
               city

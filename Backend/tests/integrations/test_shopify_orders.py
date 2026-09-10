@@ -140,3 +140,44 @@ async def test_fetch_orders_paginated():
     assert len(orders) == 1
     assert orders[0].platform_order_id == "gid://shopify/Order/2001"
     assert orders[0].platform_order_number == "#2001"
+
+
+@pytest.mark.asyncio
+async def test_fetch_orders_raises_on_graphql_error():
+    client = ShopifyClient("test.myshopify.com", "token")
+    mock_error_response = {
+        "errors": [{"message": "Access denied for orders field."}]
+    }
+    client._graphql = AsyncMock(return_value=mock_error_response)
+
+    with pytest.raises(RuntimeError, match="Access denied for orders field"):
+        await client.fetch_orders()
+
+
+@pytest.mark.asyncio
+async def test_fetch_orders_handles_partial_field_errors():
+    client = ShopifyClient("test.myshopify.com", "token")
+    mock_partial_response = {
+        "errors": [{"message": "Access denied for customer field."}],
+        "data": {
+            "orders": {
+                "pageInfo": {"hasNextPage": False, "endCursor": None},
+                "edges": [
+                    {
+                        "node": {
+                            "id": "gid://shopify/Order/2002",
+                            "name": "#2002",
+                            "createdAt": "2026-09-10T10:00:00Z",
+                            "currencyCode": "USD",
+                            "lineItems": {"edges": []},
+                        }
+                    }
+                ],
+            }
+        },
+    }
+    client._graphql = AsyncMock(return_value=mock_partial_response)
+
+    orders = await client.fetch_orders()
+    assert len(orders) == 1
+    assert orders[0].platform_order_id == "gid://shopify/Order/2002"
