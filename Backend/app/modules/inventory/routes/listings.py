@@ -24,7 +24,7 @@ from app.core.database import get_db
 from app.integrations.ebay.client import EbayClient
 from app.integrations.shopify.client import ShopifyClient
 from app.models import Platform, PlatformSyncStatus
-from app.models.entities import ProductVariant, ProductIdentity, ProductFamily, PlatformListing
+from app.models.entities import ProductVariant, ProductIdentity, ProductFamily, PlatformListing, BundleComponent
 from app.repositories import PlatformListingRepository, ProductVariantRepository
 from app.modules.inventory.schemas import (
     AISuggestRequest,
@@ -35,6 +35,7 @@ from app.modules.inventory.schemas import (
     CompareResponse,
     GraphEdge,
     GraphTopologyResponse,
+    GroupHub,
     ListingNode,
     LockRelationshipRequest,
     LockRelationshipResponse,
@@ -504,6 +505,11 @@ async def get_variant_graph_topology(
 
     listing_nodes = []
     edges = []
+    # Track hub membership for listings and products
+    variant_hub_children: list[str] = []
+    accessory_hub_children: list[str] = []
+    component_hub_children: list[str] = []
+
     for listing in listings:
         meta_rel = None
         if listing.platform_metadata and isinstance(listing.platform_metadata, dict):
@@ -521,6 +527,7 @@ async def get_variant_graph_topology(
             else:
                 rel_type = RelationshipType.EXACT
 
+        node_id = f"listing-{listing.id}"
         listing_nodes.append(ListingNode(
             listing_id=listing.id,
             variant_id=listing.variant_id,
@@ -535,17 +542,30 @@ async def get_variant_graph_topology(
             last_synced_at=listing.last_synced_at,
             sync_error_message=listing.sync_error_message,
         ))
+        
+        # Categorize listing into hub if not EXACT
+        if rel_type == RelationshipType.ACCESSORY:
+            accessory_hub_children.append(node_id)
+        elif rel_type == RelationshipType.KIT_COMPONENT:
+            component_hub_children.append(node_id)
+        elif rel_type in [RelationshipType.BUNDLE, RelationshipType.BUNDLE_COMPONENT]:
+            variant_hub_children.append(node_id)
+
         edges.append(GraphEdge(
             source="product",
-            target=f"listing-{listing.id}",
+            target=node_id,
             relationship=rel_type.value.lower(),
             relationship_type=rel_type,
         ))
 
     # Query related products within same family (accessories, parts, bundles, sibling variants)
     related_products_nodes = []
+    hubs: list[GroupHub] = []
+
     if variant.identity and variant.identity.product_id:
         family_id = variant.identity.product_id
+
+        # 1. Fetch sibling variants (same family, different identity or color/condition)
         rel_stmt = (
             select(ProductVariant)
             .join(ProductIdentity, ProductVariant.identity_id == ProductIdentity.id)
@@ -554,20 +574,16 @@ async def get_variant_graph_topology(
                 ProductIdentity.product_id == family_id,
                 ProductVariant.id != variant.id,
             )
-            .limit(10)
+            .limit(15)
         )
         rel_res = await db.execute(rel_stmt)
         rel_variants = rel_res.scalars().all()
+
         for rv in rel_variants:
             rv_type = rv.identity.type.value if rv.identity and rv.identity.type else "Product"
-            if rv_type in ["P", "A"]:
-                rv_rel = RelationshipType.ACCESSORY
-            elif rv_type in ["B", "K"]:
-                rv_rel = RelationshipType.BUNDLE
-            else:
-                rv_rel = RelationshipType.RELATED_PRODUCT
+            node_id = f"related-product-{rv.id}"
 
-            related_products_nodes.append(ProductNode(
+            node = ProductNode(
                 variant_id=rv.id,
                 full_sku=rv.full_sku,
                 variant_name=rv.variant_name,
@@ -578,19 +594,101 @@ async def get_variant_graph_topology(
                 condition_code=rv.condition_code.value if rv.condition_code else None,
                 color_code=rv.color_code,
                 identity_type=rv_type,
-            ))
+            )
+            related_products_nodes.append(node)
+
+            # Classify into hub groups
+            if rv_type in ["P"]:
+                accessory_hub_children.append(node_id)
+                rv_rel = RelationshipType.ACCESSORY
+            elif rv_type in ["B", "K"]:
+                # Bundles/Kits in same family → they are sibling products
+                variant_hub_children.append(node_id)
+                rv_rel = RelationshipType.SIBLING_VARIANT
+            else:
+                # Standard sibling variants (same product, different color/condition)
+                variant_hub_children.append(node_id)
+                rv_rel = RelationshipType.SIBLING_VARIANT
+
             edges.append(GraphEdge(
                 source="product",
-                target=f"related-product-{rv.id}",
+                target=node_id,
                 relationship=rv_rel.value.lower(),
                 relationship_type=rv_rel,
             ))
+
+        # 2. Fetch Kit/Bundle components (children of this product's identity)
+        if variant.identity_id:
+            comp_stmt = (
+                select(BundleComponent)
+                .options(
+                    selectinload(BundleComponent.child).selectinload(ProductIdentity.variants),
+                    selectinload(BundleComponent.child).selectinload(ProductIdentity.family),
+                )
+                .where(BundleComponent.parent_identity_id == variant.identity_id)
+            )
+            comp_res = await db.execute(comp_stmt)
+            components = comp_res.scalars().all()
+
+            seen_ids = {rv.id for rv in rel_variants}
+            for comp in components:
+                child_identity = comp.child
+                if not child_identity or not child_identity.variants:
+                    continue
+                cv = child_identity.variants[0]
+                if cv.id in seen_ids or cv.id == variant.id:
+                    continue
+                seen_ids.add(cv.id)
+
+                node_id = f"related-product-{cv.id}"
+                cv_type = child_identity.type.value if child_identity.type else "Product"
+
+                related_products_nodes.append(ProductNode(
+                    variant_id=cv.id,
+                    full_sku=cv.full_sku,
+                    variant_name=cv.variant_name,
+                    identity_name=child_identity.identity_name,
+                    family_name=child_identity.family.base_name if child_identity.family else None,
+                    family_code=child_identity.family.family_code if child_identity.family else None,
+                    identity_type=cv_type,
+                ))
+                component_hub_children.append(node_id)
+                edges.append(GraphEdge(
+                    source="product",
+                    target=node_id,
+                    relationship="kit_component" if variant.identity.type and variant.identity.type.value == "K" else "bundle_component",
+                    relationship_type=RelationshipType.KIT_COMPONENT if variant.identity.type and variant.identity.type.value == "K" else RelationshipType.BUNDLE_COMPONENT,
+                ))
+
+    # Build hub nodes (only if they have children)
+    if variant_hub_children:
+        hubs.append(GroupHub(
+            hub_id="hub-variants",
+            hub_label="Variants",
+            hub_type="variants",
+            children_ids=variant_hub_children,
+        ))
+    if accessory_hub_children:
+        hubs.append(GroupHub(
+            hub_id="hub-accessory",
+            hub_label="Accessory",
+            hub_type="accessory",
+            children_ids=accessory_hub_children,
+        ))
+    if component_hub_children:
+        hubs.append(GroupHub(
+            hub_id="hub-component",
+            hub_label="Component",
+            hub_type="component",
+            children_ids=component_hub_children,
+        ))
 
     return GraphTopologyResponse(
         product=product_node,
         listings=listing_nodes,
         related_products=related_products_nodes,
         edges=edges,
+        hubs=hubs,
     )
 
 
@@ -691,8 +789,8 @@ async def suggest_listing_matches(
             ]
 
             prompt = f"""
-            You are an AI product matching engine for an ERP catalog system.
-            We need to match an internal ERP Product Variant against candidate marketplace listings and classify their relationship.
+            You are an AI product matching engine for an ERP catalog system adhering to the USAV Product Identification Specification (UPIS).
+            We need to match an internal ERP Product Variant against candidate marketplace listings and classify their semantic relationship.
 
             TARGET ERP PRODUCT:
             - Full SKU: "{target_sku}"
@@ -705,15 +803,16 @@ async def suggest_listing_matches(
 
             Evaluate how each candidate listing relates to the Target ERP Product:
             - EXACT: The candidate is the exact same standalone physical product.
-            - BUNDLE: The candidate is a bundle/kit containing this product plus other items/accessories (e.g. includes amplifier, cables, etc.).
-            - ACCESSORY: The candidate is a compatible accessory or attachment for this product (e.g. bluetooth adapter, bracket, remote, cable).
-            - PART: The candidate is a sub-component or replacement part (e.g. media center only, power supply, laser lens).
+            - ACCESSORY: The candidate is a compatible accessory or attachment (e.g. bluetooth adapter, wall bracket, remote, link cable, stand).
+            - BUNDLE_COMPONENT: The candidate is a dynamic USAV bundle (Type B) containing this product plus other items.
+            - KIT_COMPONENT: The candidate is a component of a predefined manufacturer kit (Type K) (e.g. satellite speaker, subwoofer, media center).
+            - PART_LCI: The candidate is an internal replacement part or LCI component (Type P) (e.g. motherboard, laser lens, display board, power supply).
 
             For each candidate, output a JSON object with:
             - listing_id: integer
-            - relationship_type: "EXACT" | "BUNDLE" | "ACCESSORY" | "PART"
+            - relationship_type: "EXACT" | "ACCESSORY" | "BUNDLE_COMPONENT" | "KIT_COMPONENT" | "PART_LCI"
             - confidence: float between 0.00 and 1.00 (e.g. 0.95 for exact/high match, 0.50 for probable, 0.10 for unlikely)
-            - reasons: list of short strings explaining the match factors (e.g. "Includes Bluetooth adapter accessory", "SKU prefix match", "Compatible wall bracket")
+            - reasons: list of short strings explaining the match factors (e.g. "Includes Bluetooth adapter accessory", "SKU prefix match", "Laser lens replacement part")
 
             Output ONLY a valid JSON array of objects, with no markdown code fences or backticks.
             """
@@ -737,6 +836,11 @@ async def suggest_listing_matches(
                     conf = float(ai_item.get("confidence", 0.0))
                     conf = max(0.0, min(1.0, conf))
                     rel_raw = str(ai_item.get("relationship_type", "EXACT")).upper()
+                    # Map legacy names if returned by LLM
+                    if rel_raw == "BUNDLE":
+                        rel_raw = "BUNDLE_COMPONENT"
+                    elif rel_raw == "PART":
+                        rel_raw = "PART_LCI"
                     rel_type = RelationshipType(rel_raw) if rel_raw in RelationshipType.__members__ else RelationshipType.EXACT
                     reasons = ai_item.get("reasons", [])
                     if not isinstance(reasons, list):
@@ -764,8 +868,11 @@ async def suggest_listing_matches(
             reasons = []
             lname = (c.listed_name or "").lower()
             if "bundle" in lname or "package" in lname or "with" in lname:
-                rel_type = RelationshipType.BUNDLE
+                rel_type = RelationshipType.BUNDLE_COMPONENT
                 reasons.append("Multi-item bundle detected in title")
+            elif any(kw in lname for kw in ["lens", "laser", "board", "motor", "pcb", "drive", "supply", "chassis"]):
+                rel_type = RelationshipType.PART_LCI
+                reasons.append("Replacement part / LCI component detected")
             elif any(kw in lname for kw in ["bracket", "adapter", "cable", "remote", "antenna", "dock", "mount", "stand"]):
                 rel_type = RelationshipType.ACCESSORY
                 reasons.append("Compatible accessory / attachment keyword detected")

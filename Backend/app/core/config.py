@@ -192,11 +192,28 @@ class Settings(BaseSettings):
     # Consecutive "information has not been found yet" hits before the job pauses.
     tracking_rate_limit_threshold: int = 3
     # Advisory cooldown shown after a rate-limit pause (minutes). Not enforced —
-    # resume is gated on a successful probe, not on this timer.
-    tracking_cooldown_minutes: int = 30
-    # How often auto-probe retries while paused, and its backoff ceiling.
-    tracking_auto_probe_interval_minutes: int = 25
-    tracking_auto_probe_max_interval_minutes: int = 90
+    # resume is gated on a successful probe, not on this timer. 24h because that
+    # is what was actually measured: an address blocked at 09-07 09:08 was still
+    # blocked at 09-08 06:24 — through verified-silent 20- and 60-minute windows
+    # (120 samples, zero connections, zero browsers). The old 30 told the
+    # operator to come back in half an hour, which was never true and is why
+    # "still throttled?" kept getting re-tested all day.
+    tracking_cooldown_minutes: int = 1440
+    # Auto-probe is OFF by default. parcelsapp's block is not a short throttle:
+    # it is a per-egress-address budget (~55-60 lookups), after which that exact
+    # address stops getting API bodies for many hours. Measured on the deploy
+    # host: blocked at 09-07 09:08, still blocked 09-08 05:18 after a verified
+    # 20-minute silent window — while a *different* address in the same /64
+    # answered normally. Probing on a 25-minute timer through that window can
+    # only re-offend, and because probe() used to log nothing it did so
+    # invisibly for 20 hours. The correct response to exhaustion is to stop
+    # touching the service and let the queue drain over subsequent days.
+    tracking_auto_probe_enabled: bool = False
+    # How often auto-probe retries while paused, and its backoff ceiling. Only
+    # used if an operator deliberately turns auto-probe back on; sized in hours,
+    # not minutes, so re-enabling it cannot recreate the 25-minute knocking.
+    tracking_auto_probe_interval_minutes: int = 360
+    tracking_auto_probe_max_interval_minutes: int = 1440
     # Orders checked more recently than this are skipped when (re)building the queue.
     tracking_freshness_hours: int = 6
 

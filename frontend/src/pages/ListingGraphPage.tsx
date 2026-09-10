@@ -35,12 +35,29 @@ import {
   Extension,
   Inventory2,
   CheckCircle,
+  Handyman,
+  Palette,
+  TrendingUp,
+  Warning,
+  DarkMode,
+  LightMode,
+  ChangeCircle,
+  Workspaces,
+  Explore,
 } from '@mui/icons-material'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axiosClient from '../api/axiosClient'
-import { CATALOG, LISTINGS } from '../api/endpoints'
+import { CATALOG, LISTINGS, ORBIT } from '../api/endpoints'
 import VariantSearchAutocomplete from '../components/common/VariantSearchAutocomplete'
+import OrbitContextMenu, { type ContextMenuTarget } from '../components/orbit/OrbitContextMenu'
+import OrbitBundleKitModal from '../components/orbit/OrbitBundleKitModal'
+import OrbitVariantModal from '../components/orbit/OrbitVariantModal'
+import OrbitConvertTypeModal from '../components/orbit/OrbitConvertTypeModal'
+import OrbitDeepClassifyPanel, {
+  type AIDeepClassifyResponse,
+} from '../components/orbit/OrbitDeepClassifyPanel'
+import OrbitObsidianGraph from '../components/orbit/OrbitObsidianGraph'
 import type { VariantSearchResult } from '../types/orders'
 import type {
   GraphTopologyResponse,
@@ -52,7 +69,25 @@ import type {
   CompareResponse,
   Platform,
   RelationshipType,
+  OrbitAnalyticsResponse,
+  UniverseTopologyResponse,
 } from '../types/inventory'
+
+export interface BundleParticipation {
+  parent_variant_id: number
+  parent_sku: string
+  parent_name?: string
+  parent_type: string
+  role: string
+  quantity_required: number
+  sibling_components: ProductNode[]
+}
+
+export interface BundleDiscoveryResponse {
+  variant_id: number
+  full_sku: string
+  participations: BundleParticipation[]
+}
 
 const PLATFORM_META: Record<string, { label: string; color: string; bgColor: string; icon: string }> = {
   ECWID: { label: 'Ecwid', color: '#0064d2', bgColor: '#e8f0fe', icon: '🛒' },
@@ -68,27 +103,43 @@ const PLATFORM_META: Record<string, { label: string; color: string; bgColor: str
 const RELATIONSHIP_META: Record<string, { label: string; color: string; icon: string; borderStyle: string }> = {
   EXACT: { label: 'Exact Listing', color: '#38bdf8', icon: '🎯', borderStyle: 'solid' },
   ACCESSORY: { label: 'Accessory', color: '#10b981', icon: '🔌', borderStyle: 'dashed' },
-  BUNDLE: { label: 'Bundle', color: '#f59e0b', icon: '📦', borderStyle: 'dashed' },
-  PART: { label: 'Part / Component', color: '#f97316', icon: '⚙️', borderStyle: 'dashed' },
-  RELATED_PRODUCT: { label: 'Sibling Variant', color: '#818cf8', icon: '🔗', borderStyle: 'solid' },
+  BUNDLE_COMPONENT: { label: 'Bundle (B)', color: '#f59e0b', icon: '📦', borderStyle: 'dashed' },
+  KIT_COMPONENT: { label: 'Kit (K)', color: '#818cf8', icon: '🧰', borderStyle: 'dashed' },
+  PART_LCI: { label: 'Part (P)', color: '#f97316', icon: '⚙️', borderStyle: 'dashed' },
+  SIBLING_VARIANT: { label: 'Sibling Variant', color: '#a855f7', icon: '🔗', borderStyle: 'solid' },
+  // Backward compatibility
+  BUNDLE: { label: 'Bundle (B)', color: '#f59e0b', icon: '📦', borderStyle: 'dashed' },
+  PART: { label: 'Part (P)', color: '#f97316', icon: '⚙️', borderStyle: 'dashed' },
+  RELATED_PRODUCT: { label: 'Sibling Variant', color: '#a855f7', icon: '🔗', borderStyle: 'solid' },
+}
+
+export interface HubData {
+  hubId: string
+  label: string
+  hubType: 'variants' | 'accessory' | 'component' | 'bundle'
+  icon: string
+  color: string
+  count: number
 }
 
 interface CanvasNode {
   id: string
-  type: 'product' | 'listing' | 'related_product' | 'ai_candidate'
+  type: 'product' | 'listing' | 'related_product' | 'ai_candidate' | 'hub'
   x: number
   y: number
   baseX: number
   baseY: number
   radius: number
+  orbitRing: number
   relationship_type: RelationshipType
-  data: ProductNode | ListingNode | (AISuggestion & { platform: Platform })
+  data: ProductNode | ListingNode | (AISuggestion & { platform: Platform }) | HubData | any
   confidence?: number
   reasons?: string[]
   phase: number
 }
 
 interface CanvasEdge {
+  id: string
   source: string
   target: string
   type: 'locked' | 'suggested' | 'related'
@@ -99,6 +150,19 @@ interface CanvasEdge {
 export default function ListingGraphPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const queryClient = useQueryClient()
+
+  // Dark / Light Theme Toggle State
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    return localStorage.getItem('orbit_theme') !== 'light'
+  })
+
+  const toggleTheme = () => {
+    setIsDarkMode((prev) => {
+      const next = !prev
+      localStorage.setItem('orbit_theme', next ? 'dark' : 'light')
+      return next
+    })
+  }
 
   const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -147,17 +211,43 @@ export default function ListingGraphPage() {
   const [isPanning, setIsPanning] = useState(false)
   const [panStart, setPanStart] = useState({ x: 0, y: 0 })
 
+  // View Mode: 'universe' (3D Macro Galaxy) vs 'single' (Single-Product Orbit)
+  const [viewMode, setViewMode] = useState<'universe' | 'single'>(
+    activeVariantId ? 'single' : 'universe',
+  )
+  const [highlightSku, setHighlightSku] = useState<string | null>(null)
+
   // Feature states
   const [compareOpen, setCompareOpen] = useState(false)
+  const [bundleKitModalOpen, setBundleKitModalOpen] = useState(false)
+  const [variantModalOpen, setVariantModalOpen] = useState(false)
+  const [convertTypeModalOpen, setConvertTypeModalOpen] = useState(false)
+  const [analyticsModalOpen, setAnalyticsModalOpen] = useState(false)
+  const [bundleViewEnabled, setBundleViewEnabled] = useState(false)
+  const [deepClassifyResult, setDeepClassifyResult] = useState<AIDeepClassifyResponse | null>(null)
+  const [deepClassifyLoading, setDeepClassifyLoading] = useState(false)
   const [aiScanning, setAiScanning] = useState(false)
   const [aiSuggestions, setAiSuggestions] = useState<AISuggestion[]>([])
-  const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null)
+
+  // Context Menu State
+  const [contextMenuAnchor, setContextMenuAnchor] = useState<{ mouseX: number; mouseY: number } | null>(null)
+  const [contextMenuTarget, setContextMenuTarget] = useState<ContextMenuTarget | null>(null)
+
+  // 0. Fetch 3D Universe Topology (Whole Database)
+  const { data: universeData, isLoading: isUniverseLoading } = useQuery<UniverseTopologyResponse>({
+    queryKey: ['orbit-universe'],
+    queryFn: async () => {
+      const resp = await axiosClient.get(ORBIT.UNIVERSE)
+      return resp.data
+    },
+    staleTime: 5 * 60 * 1000,
+  })
 
   // 1. Fetch graph topology
   const {
     data: graphData,
     isLoading: isGraphLoading,
-    refetch: refetchGraph,
   } = useQuery<GraphTopologyResponse>({
     queryKey: ['listing-graph', activeVariantId],
     queryFn: async () => {
@@ -167,7 +257,29 @@ export default function ListingGraphPage() {
     enabled: !!activeVariantId,
   })
 
-  // 2. Lock relationship mutation
+  // 2. Fetch Orbit Real-time Sales Analytics & Warnings
+  const { data: analyticsData } = useQuery<OrbitAnalyticsResponse>({
+    queryKey: ['orbit-analytics', activeVariantId],
+    queryFn: async () => {
+      const resp = await axiosClient.get(ORBIT.ANALYTICS(activeVariantId!))
+      return resp.data
+    },
+    enabled: !!activeVariantId,
+    refetchInterval: 60000,
+    retry: 1,
+  })
+
+  // 2b. Fetch Participating Bundles (when Bundle View is toggled ON)
+  const { data: bundleData } = useQuery<BundleDiscoveryResponse>({
+    queryKey: ['orbit-bundles', activeVariantId],
+    queryFn: async () => {
+      const resp = await axiosClient.get(ORBIT.BUNDLES(activeVariantId!))
+      return resp.data
+    },
+    enabled: !!activeVariantId && bundleViewEnabled,
+  })
+
+  // 3. Lock relationship mutation
   const lockMutation = useMutation({
     mutationFn: async ({
       listingId,
@@ -192,7 +304,7 @@ export default function ListingGraphPage() {
         text: `Successfully locked listing as ${data.relationship_type}!`,
       })
       queryClient.invalidateQueries({ queryKey: ['listing-graph', activeVariantId] })
-      queryClient.invalidateQueries({ queryKey: ['listings'] })
+      queryClient.invalidateQueries({ queryKey: ['orbit-analytics', activeVariantId] })
       setAiSuggestions((prev) => prev.filter((s) => s.listing_id !== data.listing_id))
       setSelectedNodeIds([])
     },
@@ -204,7 +316,61 @@ export default function ListingGraphPage() {
     },
   })
 
-  // 3. Compare listings query
+  // 4. Update relationship type mutation
+  const updateRelMutation = useMutation({
+    mutationFn: async ({
+      targetType,
+      targetId,
+      relType,
+    }: {
+      targetType: 'listing' | 'component'
+      targetId: number
+      relType: RelationshipType
+    }) => {
+      const resp = await axiosClient.post(ORBIT.UPDATE_RELATIONSHIP, {
+        target_type: targetType,
+        source_variant_id: activeVariantId!,
+        target_id: targetId,
+        relationship_type: relType,
+      })
+      return resp.data
+    },
+    onSuccess: (data) => {
+      setActionMessage({ type: 'success', text: data.message || 'Relationship updated' })
+      queryClient.invalidateQueries({ queryKey: ['listing-graph', activeVariantId] })
+    },
+    onError: (err: any) => {
+      setActionMessage({ type: 'error', text: err?.response?.data?.detail || 'Failed to update relationship' })
+    },
+  })
+
+  // 5. Unlink mutation
+  const unlinkMutation = useMutation({
+    mutationFn: async ({
+      targetType,
+      targetId,
+    }: {
+      targetType: 'listing' | 'component'
+      targetId: number
+    }) => {
+      const resp = await axiosClient.post(ORBIT.UNLINK, {
+        target_type: targetType,
+        target_id: targetId,
+        source_variant_id: activeVariantId!,
+      })
+      return resp.data
+    },
+    onSuccess: (data) => {
+      setActionMessage({ type: 'success', text: data.message || 'Tether severed' })
+      queryClient.invalidateQueries({ queryKey: ['listing-graph', activeVariantId] })
+      setSelectedNodeIds([])
+    },
+    onError: (err: any) => {
+      setActionMessage({ type: 'error', text: err?.response?.data?.detail || 'Failed to unlink' })
+    },
+  })
+
+  // 6. Compare listings query
   const { data: compareData, isLoading: isCompareLoading } = useQuery<CompareResponse>({
     queryKey: ['compare-listings', selectedNodeIds],
     queryFn: async () => {
@@ -217,12 +383,14 @@ export default function ListingGraphPage() {
     enabled: compareOpen && selectedNodeIds.length >= 2,
   })
 
-  // 4. Scan AI Matches function (Prioritized Scan)
+  // 7. Scan AI Matches function (Phase 1 Listing Match + Auto Phase 2 Deep Classification)
   const handleScanAI = async () => {
     if (!activeVariantId) return
     setAiScanning(true)
+    setDeepClassifyLoading(true)
     setActionMessage(null)
     try {
+      // Phase 1: Listing Match Suggestions
       const resp = await axiosClient.post<AISuggestResponse>(LISTINGS.SUGGEST, {
         variant_id: activeVariantId,
         limit: 8,
@@ -230,15 +398,32 @@ export default function ListingGraphPage() {
       })
       const suggestions = resp.data.suggestions || []
       setAiSuggestions(suggestions)
-      if (suggestions.length === 0) {
-        setActionMessage({
-          type: 'success',
-          text: 'AI Scan complete: No unlinked candidate listings found for this product.',
+
+      // Phase 2: Auto-trigger Deep Product Classification
+      try {
+        const deepResp = await axiosClient.post<AIDeepClassifyResponse>(ORBIT.DEEP_CLASSIFY, {
+          variant_id: activeVariantId,
         })
-      } else {
+        setDeepClassifyResult(deepResp.data)
+        const typeLabels: Record<string, string> = {
+          Product: 'Standalone Item',
+          K: 'Kit (K)',
+          B: 'Bundle (B)',
+          P: 'Part (P)',
+        }
+        const sType = typeLabels[deepResp.data.suggested_type] || deepResp.data.suggested_type
+        const conf = (deepResp.data.type_confidence * 100).toFixed(0)
         setActionMessage({
           type: 'success',
-          text: `AI Scan complete: Found ${suggestions.length} candidate listings with relationship classifications!`,
+          text: `AI Scan complete: ${suggestions.length} candidate listing(s) found. Classified as ${sType} (${conf}% confidence).`,
+        })
+      } catch (deepErr: any) {
+        console.warn('Deep classification warning:', deepErr)
+        setActionMessage({
+          type: 'success',
+          text: `Phase 1 scan complete: Discovered ${suggestions.length} candidate listings. (Deep classify: ${
+            deepErr?.response?.data?.detail || 'unavailable'
+          })`,
         })
       }
     } catch (err: any) {
@@ -248,10 +433,11 @@ export default function ListingGraphPage() {
       })
     } finally {
       setAiScanning(false)
+      setDeepClassifyLoading(false)
     }
   }
 
-  // 5. Layout calculation
+  // 8. Grouped Hub Orbit Layout Calculation
   useEffect(() => {
     if (!graphData && !selectedVariant) {
       nodesRef.current = []
@@ -268,7 +454,7 @@ export default function ListingGraphPage() {
     const newNodes: CanvasNode[] = []
     const newEdges: CanvasEdge[] = []
 
-    // Center Master Product Node
+    // 1. Center Master Product Core
     const centerProduct = graphData?.product || {
       variant_id: selectedVariant!.id,
       full_sku: selectedVariant!.full_sku,
@@ -285,84 +471,365 @@ export default function ListingGraphPage() {
       baseX: cx,
       baseY: cy,
       radius: 46,
+      orbitRing: 0,
       relationship_type: 'EXACT',
       data: centerProduct,
       phase: 0,
     })
 
-    // Locked Listings
+    // 2. Direct Marketplace Listings (Concentric multi-ring distribution arranged by line length)
     const listings = graphData?.listings || []
-    const totalOrbiters = listings.length + aiSuggestions.length + (graphData?.related_products?.length || 0)
-    let orbitIndex = 0
+    const exactListings = listings.filter((l) => !l.relationship_type || l.relationship_type === 'EXACT')
+    const accessoryListings = listings.filter((l) => l.relationship_type === 'ACCESSORY')
+    const componentListings = listings.filter((l) => l.relationship_type === 'KIT_COMPONENT')
+    const bundleListings = listings.filter(
+      (l) => l.relationship_type === 'BUNDLE' || l.relationship_type === 'BUNDLE_COMPONENT',
+    )
 
-    listings.forEach((listing) => {
-      const angle = (orbitIndex / (totalOrbiters || 1)) * Math.PI * 2 - Math.PI / 2
-      const radiusDist = 200 + (orbitIndex % 2) * 45
-      const lx = cx + Math.cos(angle) * radiusDist
-      const ly = cy + Math.sin(angle) * radiusDist
-      const relType = listing.relationship_type || 'EXACT'
+    // Check if hubs are present to determine arc boundaries
+    const hasRightHubs =
+      accessoryListings.length > 0 ||
+      componentListings.length > 0 ||
+      (graphData?.related_products || []).some(
+        (rp) => rp.identity_type === 'P' || rp.identity_type === 'A' || rp.identity_type === 'K',
+      )
 
-      newNodes.push({
-        id: `listing-${listing.listing_id}`,
-        type: 'listing',
-        x: lx,
-        y: ly,
-        baseX: lx,
-        baseY: ly,
-        radius: 34,
-        relationship_type: relType,
-        data: listing,
-        phase: orbitIndex * 0.9,
-      })
+    // If no hubs on the right, use an expanded wide circle arc (up to 320 deg); if hubs exist, use the Western arc
+    const startListingAngle = hasRightHubs ? -Math.PI * 0.75 : -Math.PI * 0.92
+    const endListingAngle = hasRightHubs ? Math.PI * 0.65 : Math.PI * 0.92
+    const listingArcSpan = endListingAngle - startListingAngle
 
-      newEdges.push({
-        source: 'product',
-        target: `listing-${listing.listing_id}`,
-        type: 'locked',
-        relationship_type: relType,
-      })
+    // Multi-tier concentric orbits for exact listings to arrange line lengths and eliminate collisions
+    const listingRingCapacities = [6, 8, 10, 13, 16, 20]
+    const listingRingDistances = [175, 255, 335, 415, 495, 575]
 
-      orbitIndex++
-    })
+    let processedListings = 0
+    let ringIdx = 0
 
-    // Related Products (Accessories / Bundles / Siblings)
+    while (processedListings < exactListings.length) {
+      const cap = listingRingCapacities[Math.min(ringIdx, listingRingCapacities.length - 1)]
+      const baseDist = listingRingDistances[Math.min(ringIdx, listingRingDistances.length - 1)]
+      const countInRing = Math.min(cap, exactListings.length - processedListings)
+
+      for (let i = 0; i < countInRing; i++) {
+        const listing = exactListings[processedListings + i]
+        const fraction = countInRing === 1 ? 0.5 : i / (countInRing - 1)
+        // Stagger alternating rings so outer nodes sit between inner nodes
+        const staggerShift =
+          ringIdx % 2 === 1 && countInRing > 1 ? (0.5 / (countInRing - 1)) * listingArcSpan * 0.4 : 0
+        const angle = startListingAngle + fraction * listingArcSpan + staggerShift
+
+        // Micro-alternating radius for line length variety
+        const radiusDist = baseDist + (i % 2 === 1 ? 12 : -6)
+        const lx = cx + Math.cos(angle) * radiusDist
+        const ly = cy + Math.sin(angle) * radiusDist
+        const relType = listing.relationship_type || 'EXACT'
+
+        newNodes.push({
+          id: `listing-${listing.listing_id}`,
+          type: 'listing',
+          x: lx,
+          y: ly,
+          baseX: lx,
+          baseY: ly,
+          radius: 32,
+          orbitRing: ringIdx + 1,
+          relationship_type: relType,
+          data: listing,
+          phase: (processedListings + i) * 0.9,
+        })
+
+        newEdges.push({
+          id: `edge-listing-${listing.listing_id}`,
+          source: 'product',
+          target: `listing-${listing.listing_id}`,
+          type: 'locked',
+          relationship_type: relType,
+        })
+      }
+
+      processedListings += countInRing
+      ringIdx++
+    }
+
+    // 3. Partition Related Products into Groups
     const relatedProducts = graphData?.related_products || []
+    const variantItems: ProductNode[] = []
+    const accessoryItems: ProductNode[] = []
+    const componentItems: ProductNode[] = []
+
     relatedProducts.forEach((relProd) => {
-      const angle = (orbitIndex / (totalOrbiters || 1)) * Math.PI * 2 - Math.PI / 2
-      const radiusDist = 260 + (orbitIndex % 2) * 35
-      const rx = cx + Math.cos(angle) * radiusDist
-      const ry = cy + Math.sin(angle) * radiusDist
-      const isAcc = relProd.identity_type === 'P' || relProd.identity_type === 'A'
-      const isBun = relProd.identity_type === 'B' || relProd.identity_type === 'K'
-      const relType: RelationshipType = isAcc ? 'ACCESSORY' : isBun ? 'BUNDLE' : 'RELATED_PRODUCT'
+      const edge = graphData?.edges?.find((e) => e.target === `related-product-${relProd.variant_id}`)
+      const relType =
+        edge?.relationship_type ||
+        (relProd.identity_type === 'P' || relProd.identity_type === 'A' ? 'ACCESSORY' : 'SIBLING_VARIANT')
 
-      newNodes.push({
-        id: `related-product-${relProd.variant_id}`,
-        type: 'related_product',
-        x: rx,
-        y: ry,
-        baseX: rx,
-        baseY: ry,
-        radius: 30,
-        relationship_type: relType,
-        data: relProd,
-        phase: orbitIndex * 0.9,
-      })
-
-      newEdges.push({
-        source: 'product',
-        target: `related-product-${relProd.variant_id}`,
-        type: 'related',
-        relationship_type: relType,
-      })
-
-      orbitIndex++
+      if (relType === 'KIT_COMPONENT' || relType === 'BUNDLE_COMPONENT') {
+        componentItems.push(relProd)
+      } else if (relType === 'ACCESSORY' || relProd.identity_type === 'P' || relProd.identity_type === 'A') {
+        accessoryItems.push(relProd)
+      } else {
+        variantItems.push(relProd)
+      }
     })
 
-    // AI Suggestions (Purple Candidate Nodes)
-    aiSuggestions.forEach((sug) => {
-      const angle = (orbitIndex / (totalOrbiters || 1)) * Math.PI * 2 - Math.PI / 2
-      const radiusDist = 220 + (orbitIndex % 2) * 50
+    // Helper to position Hub + its children with multi-tier collision-free spacing
+    const layoutHubGroup = (
+      hubId: string,
+      hubLabel: string,
+      hubType: 'variants' | 'accessory' | 'component',
+      hubIcon: string,
+      hubColor: string,
+      hubAngle: number,
+      hubDist: number,
+      productItems: ProductNode[],
+      listingItems: ListingNode[],
+      childRelType: RelationshipType,
+    ) => {
+      const allElements: Array<{ kind: 'product' | 'listing'; data: ProductNode | ListingNode; id: string }> = [
+        ...listingItems.map((l) => ({ kind: 'listing' as const, data: l, id: `listing-${l.listing_id}` })),
+        ...productItems.map((p) => ({ kind: 'product' as const, data: p, id: `related-product-${p.variant_id}` })),
+      ]
+
+      if (allElements.length === 0) return
+
+      const hx = cx + Math.cos(hubAngle) * hubDist
+      const hy = cy + Math.sin(hubAngle) * hubDist
+
+      // Add Hub Node
+      newNodes.push({
+        id: hubId,
+        type: 'hub',
+        x: hx,
+        y: hy,
+        baseX: hx,
+        baseY: hy,
+        radius: 36,
+        orbitRing: 2,
+        relationship_type: childRelType,
+        data: {
+          hubId,
+          label: hubLabel,
+          hubType,
+          icon: hubIcon,
+          color: hubColor,
+          count: allElements.length,
+        } as HubData,
+        phase: hubAngle,
+      })
+
+      // Tether ERP MASTER -> Hub
+      newEdges.push({
+        id: `edge-master-${hubId}`,
+        source: 'product',
+        target: hubId,
+        type: 'locked',
+        relationship_type: childRelType,
+      })
+
+      // Multi-tier fan out for children to ensure zero overlap even for 15+ items
+      const tierCapacities = [4, 5, 6, 7]
+      const tierDistances = [120, 195, 270, 345]
+      const tierSpans = [Math.PI * 0.45, Math.PI * 0.60, Math.PI * 0.75, Math.PI * 0.90]
+
+      let processed = 0
+      let tierIdx = 0
+
+      while (processed < allElements.length) {
+        const cap = tierCapacities[Math.min(tierIdx, tierCapacities.length - 1)]
+        const tierDist = tierDistances[Math.min(tierIdx, tierDistances.length - 1)]
+        const tierSpan = tierSpans[Math.min(tierIdx, tierSpans.length - 1)]
+        const countInTier = Math.min(cap, allElements.length - processed)
+
+        for (let i = 0; i < countInTier; i++) {
+          const el = allElements[processed + i]
+          const fraction = countInTier === 1 ? 0.5 : i / (countInTier - 1)
+          const angleOffset = (fraction - 0.5) * tierSpan
+          const childAngle = hubAngle + angleOffset
+          const cx_child = hx + Math.cos(childAngle) * tierDist
+          const cy_child = hy + Math.sin(childAngle) * tierDist
+
+          if (el.kind === 'listing') {
+            const lData = el.data as ListingNode
+            newNodes.push({
+              id: el.id,
+              type: 'listing',
+              x: cx_child,
+              y: cy_child,
+              baseX: cx_child,
+              baseY: cy_child,
+              radius: 32,
+              orbitRing: 3,
+              relationship_type: childRelType,
+              data: lData,
+              phase: (processed + i + 3) * 0.8,
+            })
+
+            // Tether Hub -> Listing
+            newEdges.push({
+              id: `edge-hub-${hubId}-${lData.listing_id}`,
+              source: hubId,
+              target: el.id,
+              type: 'locked',
+              relationship_type: childRelType,
+            })
+          } else {
+            const pData = el.data as ProductNode
+            newNodes.push({
+              id: el.id,
+              type: 'related_product',
+              x: cx_child,
+              y: cy_child,
+              baseX: cx_child,
+              baseY: cy_child,
+              radius: 28,
+              orbitRing: 3,
+              relationship_type: childRelType,
+              data: pData,
+              phase: (processed + i + 3) * 0.8,
+            })
+
+            // Tether Hub -> Product
+            newEdges.push({
+              id: `edge-hub-${hubId}-${pData.variant_id}`,
+              source: hubId,
+              target: el.id,
+              type: 'related',
+              relationship_type: childRelType,
+            })
+          }
+        }
+
+        processed += countInTier
+        tierIdx++
+      }
+    }
+
+    // A. Variants Hub (Lower-Left: 140 deg / ~2.44 rad)
+    layoutHubGroup(
+      'hub-variants',
+      'Variants',
+      'variants',
+      '🔗',
+      '#a855f7',
+      Math.PI * 0.78,
+      250,
+      variantItems,
+      bundleListings,
+      'SIBLING_VARIANT',
+    )
+
+    // B. Accessory Hub (Upper-Right: -35 deg / ~ -0.61 rad)
+    layoutHubGroup(
+      'hub-accessory',
+      'Accessory',
+      'accessory',
+      '🔌',
+      '#10b981',
+      -Math.PI * 0.20,
+      260,
+      accessoryItems,
+      accessoryListings,
+      'ACCESSORY',
+    )
+
+    // C. Component Hub (Lower-Right: 45 deg / ~ 0.78 rad) - for Kits and Bundles
+    layoutHubGroup(
+      'hub-component',
+      'Component',
+      'component',
+      '🧰',
+      '#818cf8',
+      Math.PI * 0.25,
+      270,
+      componentItems,
+      componentListings,
+      'KIT_COMPONENT',
+    )
+
+    // 4. Bundle View Layer (When Toggle is ON)
+    if (bundleViewEnabled && bundleData?.participations?.length) {
+      // Find the outermost listing radius or use standard 460px
+      const maxListingR =
+        exactListings.length > 0
+          ? listingRingDistances[Math.min(ringIdx - 1, listingRingDistances.length - 1)] || 335
+          : 250
+      const bBaseDist = Math.max(380, maxListingR + 100)
+
+      bundleData.participations.forEach((part, bIdx) => {
+        // Place in top-left quadrant (-135 deg / ~ -0.75pi) with comfortable spread
+        const bAngle = -Math.PI * 0.75 + (bIdx - (bundleData.participations.length - 1) / 2) * 0.45
+        const bDist = bBaseDist + (bIdx % 2) * 40
+        const bx = cx + Math.cos(bAngle) * bDist
+        const by = cy + Math.sin(bAngle) * bDist
+
+        const parentNodeId = `bundle-parent-${part.parent_variant_id}`
+        newNodes.push({
+          id: parentNodeId,
+          type: 'related_product',
+          x: bx,
+          y: by,
+          baseX: bx,
+          baseY: by,
+          radius: 34,
+          orbitRing: 4,
+          relationship_type: 'BUNDLE_COMPONENT',
+          data: {
+            variant_id: part.parent_variant_id,
+            full_sku: part.parent_sku,
+            variant_name: part.parent_name,
+            identity_type: part.parent_type,
+          } as ProductNode,
+          phase: bIdx * 1.2,
+        })
+
+        // Edge: ERP MASTER -> Bundle Parent (dashed amber tether)
+        newEdges.push({
+          id: `edge-bundle-${part.parent_variant_id}`,
+          source: 'product',
+          target: parentNodeId,
+          type: 'suggested',
+          relationship_type: 'BUNDLE_COMPONENT',
+        })
+
+        // Sibling components in this bundle (Product P, etc.)
+        part.sibling_components.forEach((sib, sIdx) => {
+          // Angle fanning outward away from center (top-left direction)
+          const sibAngle = bAngle + (sIdx === 0 ? -0.38 : 0.38) * (sIdx + 1) * 0.5
+          const sx = bx + Math.cos(sibAngle) * 135
+          const sy = by + Math.sin(sibAngle) * 135
+
+          const sibNodeId = `bundle-sib-${part.parent_variant_id}-${sib.variant_id}`
+          newNodes.push({
+            id: sibNodeId,
+            type: 'related_product',
+            x: sx,
+            y: sy,
+            baseX: sx,
+            baseY: sy,
+            radius: 28,
+            orbitRing: 5,
+            relationship_type: 'BUNDLE_COMPONENT',
+            data: sib,
+            phase: sIdx * 0.9,
+          })
+
+          // Edge: Bundle Parent -> Sibling Product P (solid line)
+          newEdges.push({
+            id: `edge-sib-${part.parent_variant_id}-${sib.variant_id}`,
+            source: parentNodeId,
+            target: sibNodeId,
+            type: 'related',
+            relationship_type: 'BUNDLE_COMPONENT',
+          })
+        })
+      })
+    }
+
+    // 5. AI Suggestions (Purple Candidate Nodes)
+    aiSuggestions.forEach((sug, idx) => {
+      const angle = Math.PI * 0.05 + idx * 0.22
+      const radiusDist = 205 + (idx % 2) * 35
       const sx = cx + Math.cos(angle) * radiusDist
       const sy = cy + Math.sin(angle) * radiusDist
       const relType = sug.relationship_type || 'EXACT'
@@ -374,30 +841,30 @@ export default function ListingGraphPage() {
         y: sy,
         baseX: sx,
         baseY: sy,
-        radius: 34,
+        radius: 32,
+        orbitRing: 2,
         relationship_type: relType,
         confidence: sug.confidence,
         reasons: sug.reasons,
         data: sug,
-        phase: orbitIndex * 0.9,
+        phase: (idx + 10) * 0.9,
       })
 
       newEdges.push({
+        id: `edge-ai-${sug.listing_id}`,
         source: 'product',
         target: `ai-${sug.listing_id}`,
         type: 'suggested',
         relationship_type: relType,
         confidence: sug.confidence,
       })
-
-      orbitIndex++
     })
 
     nodesRef.current = newNodes
     edgesRef.current = newEdges
-  }, [graphData, selectedVariant, aiSuggestions])
+  }, [graphData, selectedVariant, aiSuggestions, bundleViewEnabled, bundleData])
 
-  // 6. Smooth Animation & Canvas Drawing Loop (requestAnimationFrame)
+  // 9. Animation & Celestial Orbit Rendering Loop (requestAnimationFrame)
   useEffect(() => {
     let isRunning = true
 
@@ -408,7 +875,6 @@ export default function ListingGraphPage() {
       const ctx = canvas.getContext('2d')
       if (!ctx) return
 
-      // Handle retina displays
       const dpr = window.devicePixelRatio || 1
       if (canvas.width !== canvas.clientWidth * dpr || canvas.height !== canvas.clientHeight * dpr) {
         canvas.width = canvas.clientWidth * dpr
@@ -419,36 +885,42 @@ export default function ListingGraphPage() {
       ctx.scale(dpr, dpr)
       ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight)
 
-      // Apply Pan & Zoom
       ctx.save()
       ctx.translate(pan.x, pan.y)
       ctx.scale(zoom, zoom)
 
-      // Ambient Space Radial Glow (Soft illumination)
       const cx = canvas.clientWidth / 2
       const cy = canvas.clientHeight / 2
-      const bgGrad = ctx.createRadialGradient(cx, cy, 50, cx, cy, 600)
-      bgGrad.addColorStop(0, 'rgba(30, 58, 138, 0.12)')
-      bgGrad.addColorStop(0.6, 'rgba(15, 23, 42, 0.04)')
-      bgGrad.addColorStop(1, 'rgba(0, 0, 0, 0)')
-      ctx.fillStyle = bgGrad
-      ctx.fillRect(-1000, -1000, canvas.clientWidth + 2000, canvas.clientHeight + 2000)
 
-      // Update gentle organic floating physics for nodes
+      // Draw Celestial Orbit Guide Rings
+      const orbitRings = [175, 255, 335, 415, 495, 575]
+      orbitRings.forEach((r, idx) => {
+        ctx.beginPath()
+        ctx.arc(cx, cy, r, 0, Math.PI * 2)
+        ctx.strokeStyle = isDarkMode ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.06)'
+        ctx.lineWidth = 1
+        ctx.setLineDash([4, 8])
+        ctx.stroke()
+        ctx.setLineDash([])
+
+        ctx.fillStyle = isDarkMode ? 'rgba(148, 163, 184, 0.3)' : 'rgba(100, 116, 139, 0.5)'
+        ctx.font = '8px Inter, sans-serif'
+        ctx.fillText(`RING ${idx + 1}`, cx + r - 16, cy - 4)
+      })
+
+      // Zero-Gravity Organic Physics
       const t = time * 0.001
       const currentNodes = nodesRef.current
       currentNodes.forEach((node) => {
         if (draggedNode && draggedNode.id === node.id) {
-          // Keep dragged position
+          // Keep dragged pos
         } else if (node.type === 'product') {
-          // Central breathing
           const breathe = Math.sin(t * 1.5) * 1.5
           node.x = node.baseX
           node.y = node.baseY + breathe
         } else {
-          // Orbiting sinusoidal floating in space
-          const floatX = Math.sin(t * 1.2 + node.phase) * 5.5
-          const floatY = Math.cos(t * 0.9 + node.phase * 1.3) * 5.5
+          const floatX = Math.sin(t * 1.1 + node.phase) * 5.0
+          const floatY = Math.cos(t * 0.85 + node.phase * 1.2) * 5.0
           node.x = node.baseX + floatX
           node.y = node.baseY + floatY
         }
@@ -457,7 +929,7 @@ export default function ListingGraphPage() {
       const nodeMap = new Map<string, CanvasNode>()
       currentNodes.forEach((n) => nodeMap.set(n.id, n))
 
-      // --- Draw Edges ---
+      // --- Draw Edges (Tethers) ---
       const currentEdges = edgesRef.current
       currentEdges.forEach((edge) => {
         const sourceNode = nodeMap.get(edge.source)
@@ -470,7 +942,6 @@ export default function ListingGraphPage() {
         ctx.lineTo(targetNode.x, targetNode.y)
 
         if (edge.type === 'suggested') {
-          // AI Candidate Edge: Violet dashed with pulse
           ctx.setLineDash([6, 6])
           ctx.lineDashOffset = -t * 15
           ctx.strokeStyle = 'rgba(192, 132, 252, 0.85)'
@@ -478,7 +949,6 @@ export default function ListingGraphPage() {
           ctx.shadowColor = '#c084fc'
           ctx.shadowBlur = 10
         } else if (edge.type === 'related') {
-          // Related Product / Accessory / Sibling Edge
           ctx.setLineDash([4, 4])
           ctx.lineDashOffset = 0
           ctx.strokeStyle = relMeta.color
@@ -486,7 +956,6 @@ export default function ListingGraphPage() {
           ctx.shadowColor = relMeta.color
           ctx.shadowBlur = 8
         } else {
-          // Locked Platform Listing Edge
           ctx.setLineDash([])
           ctx.strokeStyle = relMeta.color
           ctx.lineWidth = 2.5
@@ -497,37 +966,35 @@ export default function ListingGraphPage() {
         ctx.setLineDash([])
         ctx.shadowBlur = 0
 
-        // Midpoint Badges on Edge
+        // Edge Midpoint Badge
         const midX = (sourceNode.x + targetNode.x) / 2
         const midY = (sourceNode.y + targetNode.y) / 2
 
         if (edge.type === 'suggested' && edge.confidence !== undefined) {
-          // AI Confidence & Relationship Pill
-          const confText = `✨ ${(edge.confidence * 100).toFixed(0)}% ${edge.relationship_type}`
-          ctx.font = 'bold 10px Inter, sans-serif'
+          const confText = `✨ ${(edge.confidence * 100).toFixed(0)}% ${relMeta.label}`
+          ctx.font = 'bold 9.5px Inter, sans-serif'
           const tw = ctx.measureText(confText).width + 14
-          ctx.fillStyle = 'rgba(24, 15, 45, 0.92)'
+          ctx.fillStyle = isDarkMode ? 'rgba(24, 15, 45, 0.94)' : 'rgba(255, 255, 255, 0.95)'
           ctx.strokeStyle = '#c084fc'
           ctx.lineWidth = 1.2
           ctx.beginPath()
-          ctx.roundRect(midX - tw / 2, midY - 10, tw, 20, 10)
+          ctx.roundRect(midX - tw / 2, midY - 9, tw, 18, 9)
           ctx.fill()
           ctx.stroke()
 
-          ctx.fillStyle = '#f3e8ff'
+          ctx.fillStyle = isDarkMode ? '#f3e8ff' : '#6b21a8'
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
           ctx.fillText(confText, midX, midY)
-        } else if (edge.relationship_type !== 'EXACT') {
-          // Relationship Type Pill (ACCESSORY, BUNDLE, PART)
+        } else if (edge.relationship_type !== 'EXACT' && !edge.id.startsWith('edge-hub-')) {
           const badgeText = `${relMeta.icon} ${relMeta.label}`
-          ctx.font = 'bold 9px Inter, sans-serif'
+          ctx.font = 'bold 8.5px Inter, sans-serif'
           const tw = ctx.measureText(badgeText).width + 12
-          ctx.fillStyle = 'rgba(15, 23, 42, 0.92)'
+          ctx.fillStyle = isDarkMode ? 'rgba(15, 23, 42, 0.94)' : 'rgba(255, 255, 255, 0.95)'
           ctx.strokeStyle = relMeta.color
           ctx.lineWidth = 1.2
           ctx.beginPath()
-          ctx.roundRect(midX - tw / 2, midY - 9, tw, 18, 9)
+          ctx.roundRect(midX - tw / 2, midY - 8, tw, 16, 8)
           ctx.fill()
           ctx.stroke()
 
@@ -544,7 +1011,7 @@ export default function ListingGraphPage() {
         const isSelected = selectedNodeIds.includes(node.id)
         const relMeta = RELATIONSHIP_META[node.relationship_type] || RELATIONSHIP_META.EXACT
 
-        // Selection / Hover Ring
+        // Node Selection / Hover Halo
         if (isSelected || isHovered) {
           ctx.beginPath()
           ctx.arc(node.x, node.y, node.radius + (isSelected ? 8 : 5), 0, Math.PI * 2)
@@ -560,57 +1027,133 @@ export default function ListingGraphPage() {
         ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2)
 
         if (node.type === 'product') {
-          // Central ERP Master Node
+          // Central Master Product Core
+          const stockWarning = analyticsData?.stock_warning || 'HEALTHY'
+          const warningHaloColor =
+            stockWarning === 'OUT_OF_STOCK'
+              ? '#ef4444'
+              : stockWarning === 'LOW_STOCK'
+              ? '#f59e0b'
+              : '#38bdf8'
+
+          // Pulsing Warning Halo
+          if (stockWarning !== 'HEALTHY') {
+            ctx.beginPath()
+            const pulseRadius = node.radius + 6 + Math.sin(t * 3) * 3
+            ctx.arc(node.x, node.y, pulseRadius, 0, Math.PI * 2)
+            ctx.strokeStyle = warningHaloColor
+            ctx.lineWidth = 2
+            ctx.setLineDash([4, 4])
+            ctx.stroke()
+            ctx.setLineDash([])
+          }
+
           const grad = ctx.createRadialGradient(node.x, node.y, 4, node.x, node.y, node.radius)
           grad.addColorStop(0, '#1e3a8a')
           grad.addColorStop(1, '#0f172a')
           ctx.fillStyle = grad
-          ctx.shadowColor = '#38bdf8'
+          ctx.shadowColor = warningHaloColor
           ctx.shadowBlur = 24
           ctx.fill()
-          ctx.strokeStyle = '#38bdf8'
+          ctx.strokeStyle = warningHaloColor
           ctx.lineWidth = 3
           ctx.stroke()
           ctx.shadowBlur = 0
 
-          // Central Label
           ctx.fillStyle = '#ffffff'
-          ctx.font = 'bold 12px Inter, sans-serif'
+          ctx.font = 'bold 11px Inter, sans-serif'
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
-          ctx.fillText('ERP MASTER', node.x, node.y - 7)
+          ctx.fillText('ERP MASTER', node.x, node.y - 12)
 
-          ctx.fillStyle = '#94a3b8'
-          ctx.font = '10px monospace'
+          ctx.fillStyle = '#38bdf8'
+          ctx.font = 'bold 10px monospace'
           const sku = (node.data as ProductNode).full_sku || ''
-          ctx.fillText(sku.length > 13 ? sku.substring(0, 11) + '..' : sku, node.x, node.y + 9)
+          ctx.fillText(sku.length > 12 ? sku.substring(0, 10) + '..' : sku, node.x, node.y + 2)
+
+          // Stock Badge Pill under core
+          if (analyticsData) {
+            ctx.fillStyle = analyticsData.available_stock === 0 ? '#ef4444' : '#4ade80'
+            ctx.font = 'bold 8.5px Inter, sans-serif'
+            ctx.fillText(`${analyticsData.available_stock} in stock`, node.x, node.y + 14)
+          }
         } else if (node.type === 'related_product') {
-          // Sibling / Accessory / Bundle Product Node
           const pData = node.data as ProductNode
+          const isBundleParent = node.id.startsWith('bundle-parent') || pData.identity_type === 'B'
+          const isBundleSib = node.id.startsWith('bundle-sib')
+
           const grad = ctx.createRadialGradient(node.x, node.y, 2, node.x, node.y, node.radius)
-          grad.addColorStop(0, '#1e293b')
-          grad.addColorStop(1, '#0f172a')
+          if (isBundleParent) {
+            grad.addColorStop(0, isDarkMode ? '#451a03' : '#fffbeb')
+            grad.addColorStop(1, isDarkMode ? '#1e1b4b' : '#fef3c7')
+          } else {
+            grad.addColorStop(0, isDarkMode ? '#1e293b' : '#ffffff')
+            grad.addColorStop(1, isDarkMode ? '#0f172a' : '#f1f5f9')
+          }
           ctx.fillStyle = grad
           ctx.fill()
 
-          ctx.strokeStyle = relMeta.color
-          ctx.lineWidth = 2
-          ctx.setLineDash([3, 3])
-          ctx.stroke()
-          ctx.setLineDash([])
+          if (isBundleParent) {
+            ctx.strokeStyle = '#f59e0b'
+            ctx.lineWidth = 2.5
+            ctx.shadowColor = '#f59e0b'
+            ctx.shadowBlur = 10
+            ctx.stroke()
+            ctx.shadowBlur = 0
 
-          ctx.fillStyle = '#f8fafc'
-          ctx.font = 'bold 9px Inter, sans-serif'
+            ctx.fillStyle = '#f59e0b'
+            ctx.font = 'bold 9px Inter, sans-serif'
+            ctx.textAlign = 'center'
+            ctx.textBaseline = 'middle'
+            ctx.fillText('📦 BUNDLE', node.x, node.y - 6)
+
+            ctx.fillStyle = isDarkMode ? '#fef3c7' : '#78350f'
+            ctx.font = 'bold 8px monospace'
+            const rSku = pData.full_sku || ''
+            ctx.fillText(rSku.length > 10 ? rSku.substring(0, 8) + '..' : rSku, node.x, node.y + 7)
+          } else {
+            ctx.strokeStyle = isBundleSib ? '#f59e0b' : relMeta.color
+            ctx.lineWidth = 2
+            ctx.setLineDash(isBundleSib ? [] : [3, 3])
+            ctx.stroke()
+            ctx.setLineDash([])
+
+            ctx.fillStyle = isDarkMode ? '#f8fafc' : '#0f172a'
+            ctx.font = 'bold 9px Inter, sans-serif'
+            ctx.textAlign = 'center'
+            ctx.textBaseline = 'middle'
+            ctx.fillText(isBundleSib ? '📦' : relMeta.icon, node.x, node.y - 6)
+
+            ctx.fillStyle = isDarkMode ? '#cbd5e1' : '#334155'
+            ctx.font = '8px monospace'
+            const rSku = pData.full_sku || ''
+            ctx.fillText(rSku.length > 10 ? rSku.substring(0, 8) + '..' : rSku, node.x, node.y + 7)
+          }
+        } else if (node.type === 'hub') {
+          const hData = node.data as HubData
+          const grad = ctx.createRadialGradient(node.x, node.y, 4, node.x, node.y, node.radius)
+          grad.addColorStop(0, isDarkMode ? '#1e293b' : '#ffffff')
+          grad.addColorStop(1, isDarkMode ? '#0f172a' : '#f1f5f9')
+          ctx.fillStyle = grad
+          ctx.fill()
+
+          ctx.strokeStyle = hData.color || '#8b5cf6'
+          ctx.lineWidth = 3
+          ctx.shadowColor = hData.color || '#8b5cf6'
+          ctx.shadowBlur = 12
+          ctx.stroke()
+          ctx.shadowBlur = 0
+
+          ctx.fillStyle = hData.color || '#8b5cf6'
+          ctx.font = 'bold 11px Inter, sans-serif'
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
-          ctx.fillText(relMeta.icon, node.x, node.y - 6)
+          ctx.fillText(`${hData.icon || '🪐'} ${hData.label}`, node.x, node.y - 6)
 
-          ctx.fillStyle = '#cbd5e1'
-          ctx.font = '8px monospace'
-          const rSku = pData.full_sku || ''
-          ctx.fillText(rSku.length > 10 ? rSku.substring(0, 8) + '..' : rSku, node.x, node.y + 7)
+          ctx.fillStyle = isDarkMode ? '#cbd5e1' : '#64748b'
+          ctx.font = 'bold 9px Inter, sans-serif'
+          ctx.fillText(`${hData.count} item${hData.count === 1 ? '' : 's'}`, node.x, node.y + 8)
         } else if (node.type === 'ai_candidate') {
-          // AI Candidate Node
           const aiData = node.data as AISuggestion
           const pMeta = PLATFORM_META[aiData.platform] || { label: aiData.platform, color: '#c084fc', icon: '✨' }
 
@@ -626,18 +1169,19 @@ export default function ListingGraphPage() {
           ctx.lineWidth = 2.5
           ctx.shadowColor = '#c084fc'
           ctx.shadowBlur = 12
+          ctx.fill()
           ctx.stroke()
           ctx.setLineDash([])
           ctx.shadowBlur = 0
 
           ctx.fillStyle = '#ffffff'
-          ctx.font = 'bold 10px Inter, sans-serif'
+          ctx.font = 'bold 9.5px Inter, sans-serif'
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
           ctx.fillText(pMeta.label, node.x, node.y - 7)
 
           ctx.fillStyle = '#e9d5ff'
-          ctx.font = 'bold 10px Inter, sans-serif'
+          ctx.font = 'bold 9.5px Inter, sans-serif'
           const confPct = `${((node.confidence || 0) * 100).toFixed(0)}%`
           ctx.fillText(`✨ ${confPct}`, node.x, node.y + 8)
         } else {
@@ -646,8 +1190,8 @@ export default function ListingGraphPage() {
           const pMeta = PLATFORM_META[lData.platform] || { label: lData.platform, color: '#38bdf8', icon: '🛒' }
 
           const grad = ctx.createRadialGradient(node.x, node.y, 2, node.x, node.y, node.radius)
-          grad.addColorStop(0, '#1e293b')
-          grad.addColorStop(1, '#0f172a')
+          grad.addColorStop(0, isDarkMode ? '#1e293b' : '#ffffff')
+          grad.addColorStop(1, isDarkMode ? '#0f172a' : '#f1f5f9')
           ctx.fillStyle = grad
           ctx.fill()
 
@@ -658,23 +1202,39 @@ export default function ListingGraphPage() {
           ctx.stroke()
           ctx.shadowBlur = 0
 
-          // Platform Label
-          ctx.fillStyle = '#f8fafc'
-          ctx.font = 'bold 10px Inter, sans-serif'
+          ctx.fillStyle = isDarkMode ? '#f8fafc' : '#0f172a'
+          ctx.font = 'bold 9.5px Inter, sans-serif'
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
           ctx.fillText(pMeta.label, node.x, node.y - 7)
 
-          // Price Tag
-          ctx.fillStyle = '#4ade80'
-          ctx.font = 'bold 10px Inter, sans-serif'
-          const price = lData.listing_price !== null && lData.listing_price !== undefined ? `$${lData.listing_price.toFixed(0)}` : '--'
+          ctx.fillStyle = '#10b981'
+          ctx.font = 'bold 9.5px Inter, sans-serif'
+          const price =
+            lData.listing_price !== null && lData.listing_price !== undefined
+              ? `$${lData.listing_price.toFixed(0)}`
+              : '--'
           ctx.fillText(price, node.x, node.y + 8)
+
+          // Price Mismatch Indicator Warning Pip
+          if (
+            analyticsData?.price_mismatch.has_mismatch &&
+            (lData.platform === 'SHOPIFY' || lData.platform === 'ECWID')
+          ) {
+            ctx.beginPath()
+            ctx.arc(node.x - node.radius + 6, node.y - node.radius + 6, 5, 0, Math.PI * 2)
+            ctx.fillStyle = '#f59e0b'
+            ctx.fill()
+            ctx.strokeStyle = '#0f172a'
+            ctx.lineWidth = 1.5
+            ctx.stroke()
+          }
 
           // Sync status indicator pip
           ctx.beginPath()
           ctx.arc(node.x + node.radius - 6, node.y - node.radius + 6, 4.5, 0, Math.PI * 2)
-          ctx.fillStyle = lData.sync_status === 'SYNCED' ? '#22c55e' : lData.sync_status === 'ERROR' ? '#ef4444' : '#f59e0b'
+          ctx.fillStyle =
+            lData.sync_status === 'SYNCED' ? '#22c55e' : lData.sync_status === 'ERROR' ? '#ef4444' : '#f59e0b'
           ctx.fill()
           ctx.strokeStyle = '#0f172a'
           ctx.lineWidth = 1.5
@@ -696,17 +1256,17 @@ export default function ListingGraphPage() {
         cancelAnimationFrame(animFrameRef.current)
       }
     }
-  }, [pan, zoom, draggedNode, hoveredNode, selectedNodeIds])
+  }, [pan, zoom, draggedNode, hoveredNode, selectedNodeIds, analyticsData, isDarkMode])
 
-  // Mouse Handlers for Pan, Zoom, Drag, Hover
+  // Mouse Handlers: Drag, Pan, Select
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (e.button === 2) return
     const canvas = canvasRef.current
     if (!canvas) return
     const rect = canvas.getBoundingClientRect()
     const mouseX = (e.clientX - rect.left - pan.x) / zoom
     const mouseY = (e.clientY - rect.top - pan.y) / zoom
 
-    // Check if clicking a node
     const clickedNode = nodesRef.current.find((n) => {
       const dx = n.x - mouseX
       const dy = n.y - mouseY
@@ -751,7 +1311,6 @@ export default function ListingGraphPage() {
       return
     }
 
-    // Hover inspection
     const hovered = nodesRef.current.find((n) => {
       const dx = n.x - mouseX
       const dy = n.y - mouseY
@@ -778,16 +1337,129 @@ export default function ListingGraphPage() {
     setZoom((prev) => Math.min(2.5, Math.max(0.4, prev * zoomFactor)))
   }
 
-  const handleResetView = () => {
-    setZoom(1)
-    setPan({ x: 0, y: 0 })
+  // Right-Click Context Menu Trigger
+  const handleContextMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    e.preventDefault()
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    const mouseX = (e.clientX - rect.left - pan.x) / zoom
+    const mouseY = (e.clientY - rect.top - pan.y) / zoom
+
+    // 1. Check Node right-click
+    const clickedNode = nodesRef.current.find((n) => {
+      const dx = n.x - mouseX
+      const dy = n.y - mouseY
+      return Math.sqrt(dx * dx + dy * dy) <= n.radius
+    })
+
+    if (clickedNode) {
+      let title = ''
+      let subtitle = ''
+      let price: number | null = null
+      let platform: Platform | undefined
+      let numericId: number | undefined
+
+      if (clickedNode.type === 'product') {
+        const p = clickedNode.data as ProductNode
+        title = p.variant_name || p.full_sku
+        subtitle = p.full_sku
+        numericId = p.variant_id
+      } else if (clickedNode.type === 'listing') {
+        const l = clickedNode.data as ListingNode
+        title = l.listed_name || l.merchant_sku || 'Listing'
+        subtitle = l.platform
+        price = l.listing_price ?? null
+        platform = l.platform
+        numericId = l.listing_id
+      } else if (clickedNode.type === 'ai_candidate') {
+        const a = clickedNode.data as AISuggestion
+        title = a.listed_name || a.merchant_sku || 'AI Candidate'
+        subtitle = a.platform
+        price = a.listing_price ?? null
+        platform = a.platform
+        numericId = a.listing_id
+      } else {
+        const rp = clickedNode.data as ProductNode
+        title = rp.variant_name || rp.full_sku
+        subtitle = rp.full_sku
+        numericId = rp.variant_id
+      }
+
+      setContextMenuTarget({
+        type: 'node',
+        nodeType: clickedNode.type,
+        id: clickedNode.id,
+        numericId,
+        title,
+        subtitle,
+        relationshipType: clickedNode.relationship_type,
+        platform,
+        price,
+        hasPriceMismatch:
+          analyticsData?.price_mismatch.has_mismatch && (platform === 'SHOPIFY' || platform === 'ECWID'),
+        mismatchDiff: analyticsData?.price_mismatch.price_diff || 0,
+      })
+      setContextMenuAnchor({ mouseX: e.clientX, mouseY: e.clientY })
+      return
+    }
+
+    // 2. Check Edge right-click
+    const clickedEdge = edgesRef.current.find((edge) => {
+      const nodeMap = new Map<string, CanvasNode>()
+      nodesRef.current.forEach((n) => nodeMap.set(n.id, n))
+      const s = nodeMap.get(edge.source)
+      const t = nodeMap.get(edge.target)
+      if (!s || !t) return false
+      const midX = (s.x + t.x) / 2
+      const midY = (s.y + t.y) / 2
+      const dx = midX - mouseX
+      const dy = midY - mouseY
+      return Math.sqrt(dx * dx + dy * dy) <= 25
+    })
+
+    if (clickedEdge) {
+      setContextMenuTarget({
+        type: 'edge',
+        id: clickedEdge.id,
+        title: `Relationship Tether (${clickedEdge.relationship_type})`,
+        relationshipType: clickedEdge.relationship_type,
+      })
+      setContextMenuAnchor({ mouseX: e.clientX, mouseY: e.clientY })
+    }
   }
 
-  // Active selected candidate node for bottom action bar
+  // Focus a related product as central master core
+  const handleFocusProduct = (variantId: number, sku?: string) => {
+    setSearchParams({ variantId: variantId.toString() })
+    setSelectedVariant(null)
+    setAiSuggestions([])
+    setSelectedNodeIds([])
+    if (sku) setHighlightSku(sku)
+    setViewMode('single')
+  }
+
+  // Selected node for floating bar
   const selectedNode = useMemo(() => {
     if (selectedNodeIds.length !== 1) return null
     return nodesRef.current.find((n) => n.id === selectedNodeIds[0]) || null
   }, [selectedNodeIds])
+
+  // Multi-selected product nodes for Bundle / Kit modal
+  const multiSelectedProducts = useMemo(() => {
+    const prods = []
+    if (graphData?.product) {
+      prods.push(graphData.product)
+    }
+    selectedNodeIds.forEach((id) => {
+      if (id.startsWith('related-product-')) {
+        const vid = parseInt(id.replace('related-product-', ''), 10)
+        const found = graphData?.related_products?.find((rp) => rp.variant_id === vid)
+        if (found) prods.push(found)
+      }
+    })
+    return prods
+  }, [selectedNodeIds, graphData])
 
   return (
     <Box
@@ -795,20 +1467,20 @@ export default function ListingGraphPage() {
         display: 'flex',
         flexDirection: 'column',
         height: 'calc(100vh - 70px)',
-        bgcolor: '#080c14',
-        color: '#f8fafc',
+        bgcolor: isDarkMode ? '#080c14' : '#f8fafc',
+        color: isDarkMode ? '#f8fafc' : '#0f172a',
         overflow: 'hidden',
       }}
     >
-      {/* Top Query & Search Header */}
+      {/* Top Query & Orbit Control Header */}
       <Paper
         elevation={3}
         sx={{
           p: 1.5,
           px: 3,
-          bgcolor: 'rgba(15, 23, 42, 0.95)',
+          bgcolor: isDarkMode ? 'rgba(15, 23, 42, 0.95)' : '#ffffff',
           backdropFilter: 'blur(12px)',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+          borderBottom: isDarkMode ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid #e2e8f0',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -816,8 +1488,37 @@ export default function ListingGraphPage() {
           zIndex: 10,
         }}
       >
-        <Stack direction="row" alignItems="center" spacing={2} sx={{ flex: 1, maxWidth: 650 }}>
-          <Hub sx={{ color: '#38bdf8', fontSize: 28 }} />
+        <Stack direction="row" alignItems="center" spacing={1.5} sx={{ flex: 1, maxWidth: 720 }}>
+          <Tooltip title={viewMode === 'universe' ? 'Currently in Obsidian Graph View' : 'Explore Database Knowledge Graph'}>
+            <Button
+              variant={viewMode === 'universe' ? 'contained' : 'outlined'}
+              size="small"
+              startIcon={<Hub />}
+              onClick={() => {
+                if (viewMode === 'universe' && activeVariantId) {
+                  setViewMode('single')
+                } else {
+                  setViewMode('universe')
+                }
+              }}
+              sx={{
+                borderColor: '#38bdf8',
+                bgcolor: viewMode === 'universe' ? '#38bdf8' : 'transparent',
+                color: viewMode === 'universe' ? '#0f172a' : '#38bdf8',
+                fontWeight: 700,
+                textTransform: 'none',
+                minWidth: 150,
+                fontSize: 12,
+                boxShadow: viewMode === 'universe' ? '0 0 16px rgba(56, 189, 248, 0.4)' : 'none',
+                '&:hover': {
+                  bgcolor: viewMode === 'universe' ? '#0284c7' : 'rgba(56, 189, 248, 0.1)',
+                },
+              }}
+            >
+              {viewMode === 'universe' ? '🕸️ Database Graph' : '🪐 Single Orbit'}
+            </Button>
+          </Tooltip>
+
           <Box sx={{ flex: 1 }}>
             <VariantSearchAutocomplete
               value={selectedVariant}
@@ -827,29 +1528,126 @@ export default function ListingGraphPage() {
                   setSearchParams({ variantId: result.id.toString() })
                   setAiSuggestions([])
                   setSelectedNodeIds([])
+                  setHighlightSku(result.full_sku)
+                  setViewMode('single')
                 } else {
                   setSearchParams({})
+                  setViewMode('universe')
                 }
               }}
               placeholder="Query product by SKU, Name, or UPIS..."
+              isDarkMode={isDarkMode}
             />
           </Box>
         </Stack>
 
-        {/* Action Controls */}
+        {/* Orbit Action Controls & Sales Velocity HUD */}
         <Stack direction="row" alignItems="center" spacing={1.5}>
+          {analyticsData && (
+            <Tooltip title="Real 30-Day Sales Velocity & Stock Runway">
+              <Chip
+                icon={<TrendingUp sx={{ color: '#10b981 !important', fontSize: '15px !important' }} />}
+                label={`🔥 ${analyticsData.units_sold_30d} sold (30d) · ${analyticsData.available_stock} stock (${analyticsData.runway_days ?? '--'}d runway)`}
+                onClick={() => setAnalyticsModalOpen(true)}
+                sx={{
+                  bgcolor: isDarkMode ? 'rgba(16, 185, 129, 0.1)' : 'rgba(16, 185, 129, 0.15)',
+                  color: isDarkMode ? '#10b981' : '#047857',
+                  border: '1px solid rgba(16, 185, 129, 0.3)',
+                  fontWeight: 600,
+                  fontSize: 11,
+                  cursor: 'pointer',
+                }}
+              />
+            </Tooltip>
+          )}
+
+          {/* Convert Product Type Button */}
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<ChangeCircle />}
+            disabled={!activeVariantId}
+            onClick={() => setConvertTypeModalOpen(true)}
+            sx={{
+              borderColor: '#818cf8',
+              color: '#818cf8',
+              textTransform: 'none',
+              fontWeight: 600,
+              '&:hover': { bgcolor: 'rgba(129, 140, 248, 0.1)', borderColor: '#6366f1' },
+            }}
+          >
+            Convert Type
+          </Button>
+
+          {/* Form Bundle / Kit Button */}
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<Inventory2 />}
+            disabled={!activeVariantId}
+            onClick={() => setBundleKitModalOpen(true)}
+            sx={{
+              borderColor: '#f59e0b',
+              color: '#f59e0b',
+              textTransform: 'none',
+              fontWeight: 600,
+              '&:hover': { bgcolor: 'rgba(245, 158, 11, 0.1)', borderColor: '#d97706' },
+            }}
+          >
+            Form Bundle / Kit
+          </Button>
+
+          {/* Create Variant Button */}
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<Palette />}
+            disabled={!activeVariantId}
+            onClick={() => setVariantModalOpen(true)}
+            sx={{
+              borderColor: '#38bdf8',
+              color: '#38bdf8',
+              textTransform: 'none',
+              fontWeight: 600,
+              '&:hover': { bgcolor: 'rgba(56, 189, 248, 0.1)', borderColor: '#0284c7' },
+            }}
+          >
+            + Add Variant
+          </Button>
+
           {selectedNodeIds.length >= 2 && (
             <Button
               variant="outlined"
-              color="primary"
               size="small"
               startIcon={<CompareArrows />}
               onClick={() => setCompareOpen(true)}
               sx={{ borderColor: '#38bdf8', color: '#38bdf8', textTransform: 'none', fontWeight: 600 }}
             >
-              Compare ({selectedNodeIds.length}) Listings
+              Compare ({selectedNodeIds.length})
             </Button>
           )}
+
+          {/* Bundle View Toggle */}
+          <Button
+            variant={bundleViewEnabled ? 'contained' : 'outlined'}
+            size="small"
+            startIcon={<Workspaces />}
+            disabled={!activeVariantId}
+            onClick={() => setBundleViewEnabled((prev) => !prev)}
+            sx={{
+              borderColor: '#f59e0b',
+              bgcolor: bundleViewEnabled ? '#f59e0b' : 'transparent',
+              color: bundleViewEnabled ? '#ffffff' : '#f59e0b',
+              textTransform: 'none',
+              fontWeight: 600,
+              '&:hover': {
+                bgcolor: bundleViewEnabled ? '#d97706' : 'rgba(245, 158, 11, 0.1)',
+                borderColor: '#d97706',
+              },
+            }}
+          >
+            Bundle View {bundleViewEnabled ? 'ON' : 'OFF'}
+          </Button>
 
           <Button
             variant="contained"
@@ -868,33 +1666,99 @@ export default function ListingGraphPage() {
               },
             }}
           >
-            {aiScanning ? 'Scanning Gemini AI...' : 'Scan AI Matches'}
+            {aiScanning ? 'Scanning...' : 'Scan AI'}
           </Button>
 
-          <Stack direction="row" sx={{ bgcolor: 'rgba(255, 255, 255, 0.05)', borderRadius: 1 }}>
-            <IconButton size="small" onClick={() => setZoom((z) => Math.min(2.5, z * 1.15))} sx={{ color: '#94a3b8' }}>
+          {/* Dark / Light Mode Toggle */}
+          <Tooltip title={`Switch to ${isDarkMode ? 'Light' : 'Dark'} Mode`}>
+            <IconButton
+              size="small"
+              onClick={toggleTheme}
+              sx={{
+                color: isDarkMode ? '#fbbf24' : '#64748b',
+                bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.06)' : '#f1f5f9',
+                borderRadius: 1.5,
+              }}
+            >
+              {isDarkMode ? <LightMode fontSize="small" /> : <DarkMode fontSize="small" />}
+            </IconButton>
+          </Tooltip>
+
+          {/* Pan / Zoom Reset Controls */}
+          <Stack direction="row" sx={{ bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : '#f1f5f9', borderRadius: 1 }}>
+            <IconButton size="small" onClick={() => setZoom((z) => Math.min(2.5, z * 1.15))} sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}>
               <ZoomIn fontSize="small" />
             </IconButton>
-            <IconButton size="small" onClick={() => setZoom((z) => Math.max(0.4, z * 0.85))} sx={{ color: '#94a3b8' }}>
+            <IconButton size="small" onClick={() => setZoom((z) => Math.max(0.4, z * 0.85))} sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}>
               <ZoomOut fontSize="small" />
             </IconButton>
-            <IconButton size="small" onClick={handleResetView} sx={{ color: '#94a3b8' }}>
+            <IconButton
+              size="small"
+              onClick={() => {
+                setZoom(1)
+                setPan({ x: 0, y: 0 })
+              }}
+              sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}
+            >
               <RestartAlt fontSize="small" />
             </IconButton>
           </Stack>
         </Stack>
       </Paper>
 
-      {/* Alert Notifications */}
+      {/* Ecwid vs. Shopify Price Mismatch Alert Banner */}
+      {analyticsData?.price_mismatch.has_mismatch && (
+        <Box sx={{ px: 3, pt: 1, zIndex: 10 }}>
+          <Alert
+            severity="warning"
+            icon={<Warning sx={{ color: '#fbbf24' }} />}
+            sx={{
+              bgcolor: isDarkMode ? 'rgba(120, 53, 15, 0.85)' : '#fffbeb',
+              color: isDarkMode ? '#ffffff' : '#92400e',
+              border: '1px solid #f59e0b',
+              fontSize: 12.5,
+              fontWeight: 600,
+            }}
+          >
+            {analyticsData.price_mismatch.message}
+          </Alert>
+        </Box>
+      )}
+
+      {/* Action Notification */}
       {actionMessage && (
         <Box sx={{ px: 3, pt: 1, zIndex: 10 }}>
           <Alert
             severity={actionMessage.type}
             onClose={() => setActionMessage(null)}
             sx={{
-              bgcolor: actionMessage.type === 'success' ? 'rgba(6, 78, 59, 0.85)' : 'rgba(127, 29, 29, 0.85)',
-              color: '#ffffff',
-              border: `1px solid ${actionMessage.type === 'success' ? '#10b981' : '#ef4444'}`,
+              bgcolor:
+                actionMessage.type === 'success'
+                  ? isDarkMode
+                    ? 'rgba(6, 78, 59, 0.85)'
+                    : '#ecfdf5'
+                  : actionMessage.type === 'warning'
+                  ? isDarkMode
+                    ? 'rgba(120, 53, 15, 0.85)'
+                    : '#fffbeb'
+                  : isDarkMode
+                  ? 'rgba(127, 29, 29, 0.85)'
+                  : '#fef2f2',
+              color:
+                actionMessage.type === 'success'
+                  ? isDarkMode
+                    ? '#ffffff'
+                    : '#065f46'
+                  : actionMessage.type === 'warning'
+                  ? isDarkMode
+                    ? '#ffffff'
+                    : '#92400e'
+                  : isDarkMode
+                  ? '#ffffff'
+                  : '#991b1b',
+              border: `1px solid ${
+                actionMessage.type === 'success' ? '#10b981' : actionMessage.type === 'warning' ? '#f59e0b' : '#ef4444'
+              }`,
             }}
           >
             {actionMessage.text}
@@ -902,7 +1766,7 @@ export default function ListingGraphPage() {
         </Box>
       )}
 
-      {/* Main Canvas Area */}
+      {/* Main Orbit Canvas Area */}
       <Box
         ref={containerRef}
         sx={{
@@ -910,61 +1774,86 @@ export default function ListingGraphPage() {
           position: 'relative',
           overflow: 'hidden',
           cursor: isPanning ? 'grabbing' : 'grab',
-          background: 'radial-gradient(ellipse at center, #0f172a 0%, #080c14 100%)',
+          background: isDarkMode
+            ? 'radial-gradient(ellipse at center, #0f172a 0%, #080c14 100%)'
+            : 'radial-gradient(ellipse at center, #ffffff 0%, #f1f5f9 100%)',
         }}
       >
-        {isGraphLoading && (
-          <Box
-            sx={{
-              position: 'absolute',
-              top: '50%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              zIndex: 5,
-              textAlign: 'center',
-            }}
-          >
-            <CircularProgress size={40} sx={{ color: '#38bdf8' }} />
-            <Typography variant="body2" sx={{ color: '#94a3b8', mt: 1.5 }}>
-              Loading Knowledge Graph...
-            </Typography>
-          </Box>
-        )}
+        {viewMode === 'universe' ? (
+          <OrbitObsidianGraph
+            data={universeData || null}
+            loading={isUniverseLoading}
+            isDarkMode={isDarkMode}
+            highlightSku={highlightSku}
+            onSelectProduct={(vId, sku) => handleFocusProduct(vId, sku)}
+          />
+        ) : (
+          <>
+            {isGraphLoading && (
+              <Box
+                sx={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  zIndex: 5,
+                  textAlign: 'center',
+                }}
+              >
+                <CircularProgress size={40} sx={{ color: '#38bdf8' }} />
+                <Typography variant="body2" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', mt: 1.5 }}>
+                  Loading Orbit System...
+                </Typography>
+              </Box>
+            )}
 
-        {!activeVariantId && !isGraphLoading && (
-          <Box
-            sx={{
-              position: 'absolute',
-              top: '50%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              textAlign: 'center',
-              maxWidth: 420,
-              p: 4,
-              bgcolor: 'rgba(15, 23, 42, 0.8)',
-              backdropFilter: 'blur(8px)',
-              borderRadius: 3,
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-            }}
-          >
-            <Search sx={{ fontSize: 48, color: '#38bdf8', mb: 1 }} />
-            <Typography variant="h6" sx={{ fontWeight: 600, color: '#f8fafc' }}>
-              Search for an ERP Product
-            </Typography>
-            <Typography variant="body2" sx={{ color: '#94a3b8', mt: 1 }}>
-              Type any SKU (e.g. <code>00005-BK</code>, <code>00738</code>) or product name above to visualize its live multi-channel listings, bundles, and accessories.
-            </Typography>
-          </Box>
-        )}
+            {!activeVariantId && !isGraphLoading && (
+              <Box
+                sx={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  textAlign: 'center',
+                  maxWidth: 440,
+                  p: 4,
+                  bgcolor: isDarkMode ? 'rgba(15, 23, 42, 0.85)' : '#ffffff',
+                  backdropFilter: 'blur(10px)',
+                  borderRadius: 3,
+                  border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid #e2e8f0',
+                  boxShadow: isDarkMode ? 'none' : '0 10px 30px rgba(0,0,0,0.08)',
+                  zIndex: 5,
+                }}
+              >
+                <Search sx={{ fontSize: 48, color: '#38bdf8', mb: 1 }} />
+                <Typography variant="h6" sx={{ fontWeight: 600, color: isDarkMode ? '#f8fafc' : '#0f172a' }}>
+                  Search for an ERP Product
+                </Typography>
+                <Typography variant="body2" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', mt: 1, mb: 2 }}>
+                  Type any SKU (e.g. <code>00005-BK</code>, <code>00738</code>) or explore the 3D Database Universe.
+                </Typography>
+                <Button
+                  variant="contained"
+                  startIcon={<Explore />}
+                  onClick={() => setViewMode('universe')}
+                  sx={{ bgcolor: '#38bdf8', color: '#0f172a', fontWeight: 700, textTransform: 'none' }}
+                >
+                  Explore 3D Universe
+                </Button>
+              </Box>
+            )}
 
-        <canvas
-          ref={canvasRef}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onWheel={handleWheel}
-          style={{ width: '100%', height: '100%', display: 'block' }}
-        />
+            <canvas
+              ref={canvasRef}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onWheel={handleWheel}
+              onContextMenu={handleContextMenu}
+              style={{ width: '100%', height: '100%', display: 'block' }}
+            />
+          </>
+        )}
 
         {/* Hover Tooltip Card */}
         {hoveredNode && hoverPos && (
@@ -973,17 +1862,18 @@ export default function ListingGraphPage() {
               position: 'absolute',
               left: hoverPos.x,
               top: hoverPos.y,
-              maxWidth: 320,
-              bgcolor: 'rgba(15, 23, 42, 0.95)',
-              backdropFilter: 'blur(12px)',
-              border: '1px solid rgba(255, 255, 255, 0.15)',
-              borderRadius: 2,
-              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
+              maxWidth: hoveredNode.type === 'product' ? 440 : 340,
+              minWidth: hoveredNode.type === 'product' ? 360 : 'auto',
+              bgcolor: isDarkMode ? 'rgba(15, 23, 42, 0.96)' : 'rgba(255, 255, 255, 0.98)',
+              backdropFilter: 'blur(14px)',
+              border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid #cbd5e1',
+              borderRadius: 2.5,
+              boxShadow: isDarkMode ? '0 12px 36px rgba(0, 0, 0, 0.8)' : '0 12px 36px rgba(0, 0, 0, 0.15)',
               pointerEvents: 'none',
-              zIndex: 20,
+              zIndex: 25,
             }}
           >
-            <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
+            <CardContent sx={{ p: 1.75, '&:last-child': { pb: 1.75 } }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
                 {hoveredNode.type === 'ai_candidate' ? (
                   <Chip
@@ -994,29 +1884,141 @@ export default function ListingGraphPage() {
                 ) : null}
                 <Chip
                   size="small"
-                  label={hoveredNode.relationship_type}
+                  label={RELATIONSHIP_META[hoveredNode.relationship_type]?.label || hoveredNode.relationship_type}
                   sx={{
-                    bgcolor: 'rgba(255, 255, 255, 0.08)',
+                    bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.08)' : '#f1f5f9',
                     color: RELATIONSHIP_META[hoveredNode.relationship_type]?.color || '#38bdf8',
                     fontWeight: 600,
                     fontSize: 10,
                   }}
                 />
+                {hoveredNode.type === 'product' && (
+                  <Chip
+                    size="small"
+                    label="ERP MASTER"
+                    sx={{
+                      bgcolor: 'rgba(56, 189, 248, 0.15)',
+                      color: '#38bdf8',
+                      fontWeight: 700,
+                      fontSize: 10,
+                      border: '1px solid rgba(56, 189, 248, 0.3)',
+                    }}
+                  />
+                )}
               </Stack>
 
-              <Typography variant="body2" sx={{ fontWeight: 600, color: '#f8fafc', fontSize: 12 }}>
+              <Typography variant="body2" sx={{ fontWeight: 700, color: isDarkMode ? '#f8fafc' : '#0f172a', fontSize: 13, mb: 0.5 }}>
                 {'listed_name' in hoveredNode.data
                   ? (hoveredNode.data as ListingNode).listed_name || (hoveredNode.data as ListingNode).merchant_sku
                   : (hoveredNode.data as ProductNode).variant_name || (hoveredNode.data as ProductNode).full_sku}
               </Typography>
 
+              {/* ERP Master Sales Velocity & Inventory Summary */}
+              {hoveredNode.type === 'product' && analyticsData && (
+                <Box sx={{ mt: 1, p: 1.2, borderRadius: 1.5, bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.04)' : '#f8fafc', border: isDarkMode ? '1px solid rgba(255,255,255,0.06)' : '1px solid #e2e8f0' }}>
+                  <Stack direction="row" spacing={2} justifyContent="space-between" alignItems="center">
+                    <Box>
+                      <Typography variant="caption" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', display: 'block', fontSize: 10 }}>
+                        🔥 30D Velocity
+                      </Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 700, color: '#38bdf8', fontSize: 12 }}>
+                        {analyticsData.units_sold_30d} sold <span style={{ fontSize: 10, color: isDarkMode ? '#cbd5e1' : '#475569', fontWeight: 500 }}>(${analyticsData.revenue_30d.toLocaleString()})</span>
+                      </Typography>
+                    </Box>
+                    <Box sx={{ textAlign: 'right' }}>
+                      <Typography variant="caption" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', display: 'block', fontSize: 10 }}>
+                        📦 Available Stock
+                      </Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 700, color: analyticsData.available_stock > 0 ? '#10b981' : '#f43f5e', fontSize: 12 }}>
+                        {analyticsData.available_stock} in stock <span style={{ fontSize: 10, color: isDarkMode ? '#cbd5e1' : '#475569', fontWeight: 500 }}>({analyticsData.runway_days ?? '—'}d runway)</span>
+                      </Typography>
+                    </Box>
+                  </Stack>
+                </Box>
+              )}
+
+              {/* Sales Transaction History Table (Platform · Order ID · Qty · Timestamp) */}
+              {hoveredNode.type === 'product' && (
+                <Box sx={{ mt: 1.2, pt: 1, borderTop: isDarkMode ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid #e2e8f0' }}>
+                  <Typography variant="caption" sx={{ color: isDarkMode ? '#38bdf8' : '#0284c7', fontWeight: 700, display: 'block', mb: 0.75, letterSpacing: 0.3 }}>
+                    🛒 TRANSACTION HISTORY (ORDERS MODULE)
+                  </Typography>
+
+                  {analyticsData?.recent_transactions && analyticsData.recent_transactions.length > 0 ? (
+                    <Stack spacing={0.6} sx={{ maxHeight: 220, overflowY: 'auto', pr: 0.5 }}>
+                      {analyticsData.recent_transactions.map((tx) => {
+                        const pMeta = PLATFORM_META[tx.platform] || { label: tx.platform, color: '#38bdf8', icon: '🛒', bgColor: 'rgba(56,189,248,0.1)' }
+                        const orderNum = tx.external_order_number || tx.external_order_id || `#${tx.order_id}`
+                        const formattedDate = tx.ordered_at
+                          ? new Date(tx.ordered_at).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                          : '—'
+
+                        return (
+                          <Box
+                            key={tx.order_id}
+                            sx={{
+                              p: 0.75,
+                              px: 1,
+                              borderRadius: 1.2,
+                              bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.03)' : '#f8fafc',
+                              border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.05)' : '1px solid #f1f5f9',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: 1,
+                            }}
+                          >
+                            <Stack direction="row" alignItems="center" spacing={0.8} sx={{ minWidth: 0, flex: 1 }}>
+                              <Chip
+                                size="small"
+                                label={`${pMeta.icon} ${pMeta.label}`}
+                                sx={{
+                                  height: 18,
+                                  fontSize: 9.5,
+                                  fontWeight: 600,
+                                  color: pMeta.color,
+                                  bgcolor: isDarkMode ? 'rgba(255,255,255,0.06)' : pMeta.bgColor,
+                                  border: `1px solid ${pMeta.color}33`,
+                                  '& .MuiChip-label': { px: 0.6 },
+                                }}
+                              />
+                              <Typography variant="caption" sx={{ fontWeight: 600, color: isDarkMode ? '#e2e8f0' : '#1e293b', fontSize: 11, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                                {orderNum}
+                              </Typography>
+                            </Stack>
+
+                            <Stack direction="row" alignItems="center" spacing={1} sx={{ flexShrink: 0 }}>
+                              <Typography variant="caption" sx={{ fontWeight: 700, color: '#f59e0b', fontSize: 11 }}>
+                                ×{tx.quantity}
+                              </Typography>
+                              {tx.unit_price !== null && tx.unit_price !== undefined && (
+                                <Typography variant="caption" sx={{ fontWeight: 600, color: isDarkMode ? '#cbd5e1' : '#334155', fontSize: 10.5 }}>
+                                  ${tx.unit_price.toFixed(2)}
+                                </Typography>
+                              )}
+                              <Typography variant="caption" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', fontSize: 10 }}>
+                                {formattedDate}
+                              </Typography>
+                            </Stack>
+                          </Box>
+                        )
+                      })}
+                    </Stack>
+                  ) : (
+                    <Typography variant="caption" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', fontStyle: 'italic', display: 'block', py: 0.5 }}>
+                      No order transactions recorded for this SKU yet.
+                    </Typography>
+                  )}
+                </Box>
+              )}
+
               {hoveredNode.reasons && hoveredNode.reasons.length > 0 && (
-                <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
-                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                <Box sx={{ mt: 1, pt: 1, borderTop: isDarkMode ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid #e2e8f0' }}>
+                  <Typography variant="caption" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', display: 'block', mb: 0.5 }}>
                     Match Reasoning:
                   </Typography>
                   {hoveredNode.reasons.map((r, i) => (
-                    <Typography key={i} variant="caption" sx={{ color: '#cbd5e1', display: 'block', fontSize: 10.5 }}>
+                    <Typography key={i} variant="caption" sx={{ color: isDarkMode ? '#cbd5e1' : '#334155', display: 'block', fontSize: 10.5 }}>
                       • {r}
                     </Typography>
                   ))}
@@ -1024,13 +2026,13 @@ export default function ListingGraphPage() {
               )}
 
               <Typography variant="caption" sx={{ color: '#38bdf8', display: 'block', mt: 1, fontStyle: 'italic' }}>
-                Click node to select & lock relationship
+                💡 Right-click node for full action menu
               </Typography>
             </CardContent>
           </Card>
         )}
 
-        {/* Floating Bottom Action Bar with Multi-Relationship Lock */}
+        {/* Floating Bottom Action Bar for 1-Click Lock */}
         {selectedNode && (selectedNode.type === 'ai_candidate' || selectedNode.type === 'listing') && (
           <Paper
             elevation={6}
@@ -1039,9 +2041,9 @@ export default function ListingGraphPage() {
               bottom: 24,
               left: '50%',
               transform: 'translateX(-50%)',
-              bgcolor: 'rgba(15, 23, 42, 0.95)',
+              bgcolor: isDarkMode ? 'rgba(15, 23, 42, 0.95)' : '#ffffff',
               backdropFilter: 'blur(16px)',
-              border: '1px solid rgba(255, 255, 255, 0.15)',
+              border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid #cbd5e1',
               borderRadius: 3,
               p: 2,
               px: 3,
@@ -1049,19 +2051,15 @@ export default function ListingGraphPage() {
               alignItems: 'center',
               gap: 2.5,
               zIndex: 30,
-              boxShadow: '0 12px 40px rgba(0, 0, 0, 0.7)',
+              boxShadow: isDarkMode ? '0 12px 40px rgba(0, 0, 0, 0.7)' : '0 12px 40px rgba(0, 0, 0, 0.15)',
               maxWidth: '90%',
             }}
           >
-            <Box sx={{ maxWidth: 380 }}>
+            <Box sx={{ maxWidth: 360 }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
                 <Chip
                   size="small"
-                  label={
-                    'platform' in selectedNode.data
-                      ? (selectedNode.data as ListingNode).platform
-                      : 'Listing'
-                  }
+                  label={'platform' in selectedNode.data ? (selectedNode.data as ListingNode).platform : 'Listing'}
                   sx={{ bgcolor: '#1e3a8a', color: '#93c5fd', fontWeight: 600, fontSize: 10.5 }}
                 />
                 {selectedNode.confidence !== undefined && (
@@ -1072,12 +2070,12 @@ export default function ListingGraphPage() {
                   />
                 )}
               </Stack>
-              <Typography variant="body2" sx={{ fontWeight: 600, color: '#f8fafc', fontSize: 12 }} noWrap>
+              <Typography variant="body2" sx={{ fontWeight: 600, color: isDarkMode ? '#f8fafc' : '#0f172a', fontSize: 12 }} noWrap>
                 {'listed_name' in selectedNode.data ? (selectedNode.data as ListingNode).listed_name : ''}
               </Typography>
             </Box>
 
-            {/* Lock with chosen relationship */}
+            {/* 1-Click Lock Options */}
             <Stack direction="row" spacing={1}>
               <Tooltip title="Lock as direct 1:1 physical item listing">
                 <Button
@@ -1104,7 +2102,7 @@ export default function ListingGraphPage() {
                 </Button>
               </Tooltip>
 
-              <Tooltip title="Lock as bundle variation containing this product">
+              <Tooltip title="Lock as USAV Bundle component (Type B)">
                 <Button
                   variant="contained"
                   size="small"
@@ -1114,7 +2112,7 @@ export default function ListingGraphPage() {
                     lockMutation.mutate({
                       listingId: lid,
                       variantId: activeVariantId!,
-                      relationshipType: 'BUNDLE',
+                      relationshipType: 'BUNDLE_COMPONENT',
                     })
                   }}
                   sx={{
@@ -1129,7 +2127,32 @@ export default function ListingGraphPage() {
                 </Button>
               </Tooltip>
 
-              <Tooltip title="Lock as compatible accessory (e.g. bluetooth adapter, bracket)">
+              <Tooltip title="Lock as Predefined Manufacturer Kit component (Type K)">
+                <Button
+                  variant="contained"
+                  size="small"
+                  startIcon={<Handyman />}
+                  onClick={() => {
+                    const lid = parseInt(selectedNode.id.replace('ai-', '').replace('listing-', ''), 10)
+                    lockMutation.mutate({
+                      listingId: lid,
+                      variantId: activeVariantId!,
+                      relationshipType: 'KIT_COMPONENT',
+                    })
+                  }}
+                  sx={{
+                    bgcolor: '#6366f1',
+                    textTransform: 'none',
+                    fontWeight: 600,
+                    fontSize: 11,
+                    '&:hover': { bgcolor: '#4f46e5' },
+                  }}
+                >
+                  Lock Kit
+                </Button>
+              </Tooltip>
+
+              <Tooltip title="Lock as compatible accessory">
                 <Button
                   variant="contained"
                   size="small"
@@ -1155,12 +2178,330 @@ export default function ListingGraphPage() {
               </Tooltip>
             </Stack>
 
-            <IconButton size="small" onClick={() => setSelectedNodeIds([])} sx={{ color: '#94a3b8' }}>
+            <IconButton size="small" onClick={() => setSelectedNodeIds([])} sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}>
               <Close fontSize="small" />
             </IconButton>
           </Paper>
         )}
       </Box>
+
+      {/* Orbit Right-Click Context Menu */}
+      <OrbitContextMenu
+        anchorPos={contextMenuAnchor}
+        target={contextMenuTarget}
+        isDarkMode={isDarkMode}
+        onClose={() => {
+          setContextMenuAnchor(null)
+          setContextMenuTarget(null)
+        }}
+        onChangeRelationship={(relType) => {
+          if (!contextMenuTarget) return
+          let targetType: 'listing' | 'component' = 'listing'
+          let targetId = contextMenuTarget.numericId || 0
+
+          if (
+            contextMenuTarget.nodeType === 'related_product' ||
+            contextMenuTarget.id.startsWith('related-product-') ||
+            contextMenuTarget.id.startsWith('bundle-')
+          ) {
+            targetType = 'component'
+            targetId =
+              contextMenuTarget.numericId ||
+              parseInt(
+                contextMenuTarget.id
+                  .replace('related-product-', '')
+                  .replace('bundle-sib-', '')
+                  .replace('bundle-parent-', ''),
+                10,
+              )
+          } else if (contextMenuTarget.type === 'edge') {
+            if (contextMenuTarget.id.startsWith('edge-listing-') || contextMenuTarget.id.startsWith('edge-hub-')) {
+              targetType = 'listing'
+              targetId = parseInt(contextMenuTarget.id.split('-').pop() || '0', 10)
+            } else {
+              targetType = 'component'
+              targetId = parseInt(contextMenuTarget.id.split('-').pop() || '0', 10)
+            }
+          } else {
+            targetType = 'listing'
+            targetId =
+              contextMenuTarget.numericId ||
+              parseInt(contextMenuTarget.id.replace('listing-', '').replace('ai-', ''), 10)
+          }
+
+          updateRelMutation.mutate({
+            targetType,
+            targetId,
+            relType,
+          })
+        }}
+        onUnlink={() => {
+          if (!contextMenuTarget) return
+          let targetType: 'listing' | 'component' = 'listing'
+          let targetId = contextMenuTarget.numericId || 0
+
+          if (
+            contextMenuTarget.nodeType === 'related_product' ||
+            contextMenuTarget.id.startsWith('related-product-') ||
+            contextMenuTarget.id.startsWith('bundle-')
+          ) {
+            targetType = 'component'
+            targetId =
+              contextMenuTarget.numericId ||
+              parseInt(
+                contextMenuTarget.id
+                  .replace('related-product-', '')
+                  .replace('bundle-sib-', '')
+                  .replace('bundle-parent-', ''),
+                10,
+              )
+          } else if (contextMenuTarget.type === 'edge') {
+            if (contextMenuTarget.id.startsWith('edge-listing-') || contextMenuTarget.id.startsWith('edge-hub-')) {
+              targetType = 'listing'
+              targetId = parseInt(contextMenuTarget.id.split('-').pop() || '0', 10)
+            } else {
+              targetType = 'component'
+              targetId = parseInt(contextMenuTarget.id.split('-').pop() || '0', 10)
+            }
+          } else {
+            targetType = 'listing'
+            targetId =
+              contextMenuTarget.numericId ||
+              parseInt(contextMenuTarget.id.replace('listing-', '').replace('ai-', ''), 10)
+          }
+
+          unlinkMutation.mutate({
+            targetType,
+            targetId,
+          })
+        }}
+        onCreateVariant={() => setVariantModalOpen(true)}
+        onFormBundleKit={() => setBundleKitModalOpen(true)}
+        onConvertType={() => setConvertTypeModalOpen(true)}
+        onScanAI={handleScanAI}
+        onViewAnalytics={() => setAnalyticsModalOpen(true)}
+        onFocusProduct={handleFocusProduct}
+      />
+
+      {/* Convert Product Type Modal */}
+      {convertTypeModalOpen && (selectedVariant || graphData?.product) && (
+        <OrbitConvertTypeModal
+          open={convertTypeModalOpen}
+          onClose={() => setConvertTypeModalOpen(false)}
+          variant={selectedVariant || graphData!.product}
+          isDarkMode={isDarkMode}
+          onSuccess={(converted) => {
+            setActionMessage({
+              type: 'success',
+              text: `Successfully converted product to ${converted.full_sku} (${converted.identity_type})!`,
+            })
+            queryClient.invalidateQueries({ queryKey: ['listing-graph', activeVariantId] })
+          }}
+        />
+      )}
+
+      {/* AI Deep Classification Results Panel */}
+      <OrbitDeepClassifyPanel
+        result={deepClassifyResult}
+        loading={deepClassifyLoading}
+        isDarkMode={isDarkMode}
+        onConvertType={() => {
+          setConvertTypeModalOpen(true)
+        }}
+        onFocusProduct={handleFocusProduct}
+      />
+
+      {/* Bundle / Kit Creator Modal */}
+      {bundleKitModalOpen && (
+        <OrbitBundleKitModal
+          open={bundleKitModalOpen}
+          onClose={() => setBundleKitModalOpen(false)}
+          selectedNodes={multiSelectedProducts}
+          isDarkMode={isDarkMode}
+          onSuccess={(created) => {
+            setActionMessage({ type: 'success', text: `Created ${created.full_sku} (${created.variant_name})!` })
+            queryClient.invalidateQueries({ queryKey: ['listing-graph', activeVariantId] })
+          }}
+        />
+      )}
+
+      {/* Color / Condition Variant Creator Modal */}
+      {variantModalOpen && selectedVariant && (
+        <OrbitVariantModal
+          open={variantModalOpen}
+          onClose={() => setVariantModalOpen(false)}
+          sourceVariant={selectedVariant}
+          onSuccess={(newVar) => {
+            setActionMessage({ type: 'success', text: `Created variant ${newVar.full_sku}!` })
+            queryClient.invalidateQueries({ queryKey: ['listing-graph', activeVariantId] })
+          }}
+        />
+      )}
+
+      {/* Sales Velocity & Order Analytics Dialog */}
+      <Dialog
+        open={analyticsModalOpen}
+        onClose={() => setAnalyticsModalOpen(false)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            bgcolor: isDarkMode ? '#0f172a' : '#ffffff',
+            color: isDarkMode ? '#f8fafc' : '#0f172a',
+            border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid #cbd5e1',
+            borderRadius: 3,
+          },
+        }}
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <TrendingUp sx={{ color: '#10b981' }} />
+            <Typography variant="h6" sx={{ fontWeight: 600 }}>
+              Order Velocity & Inventory Runway
+            </Typography>
+          </Stack>
+          <IconButton onClick={() => setAnalyticsModalOpen(false)} sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}>
+            <Close />
+          </IconButton>
+        </DialogTitle>
+
+        <DialogContent dividers sx={{ borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.08)' : '#e2e8f0' }}>
+          {analyticsData ? (
+            <Stack spacing={2.5}>
+              {/* Quick Metrics Grid */}
+              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 1.5 }}>
+                <Paper
+                  sx={{
+                    p: 1.5,
+                    bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.04)' : '#f8fafc',
+                    border: isDarkMode ? 'none' : '1px solid #e2e8f0',
+                    borderRadius: 2,
+                    textAlign: 'center',
+                  }}
+                >
+                  <Typography variant="caption" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}>
+                    30-Day Sales
+                  </Typography>
+                  <Typography variant="h6" sx={{ color: isDarkMode ? '#f8fafc' : '#0f172a', fontWeight: 700 }}>
+                    {analyticsData.units_sold_30d} units
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: '#10b981', fontWeight: 600 }}>
+                    ${analyticsData.revenue_30d.toFixed(2)}
+                  </Typography>
+                </Paper>
+
+                <Paper
+                  sx={{
+                    p: 1.5,
+                    bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.04)' : '#f8fafc',
+                    border: isDarkMode ? 'none' : '1px solid #e2e8f0',
+                    borderRadius: 2,
+                    textAlign: 'center',
+                  }}
+                >
+                  <Typography variant="caption" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}>
+                    Warehouse Stock
+                  </Typography>
+                  <Typography
+                    variant="h6"
+                    sx={{
+                      fontWeight: 700,
+                      color: analyticsData.available_stock === 0 ? '#ef4444' : '#38bdf8',
+                    }}
+                  >
+                    {analyticsData.available_stock} units
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}>
+                    Available on-hand
+                  </Typography>
+                </Paper>
+
+                <Paper
+                  sx={{
+                    p: 1.5,
+                    bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.04)' : '#f8fafc',
+                    border: isDarkMode ? 'none' : '1px solid #e2e8f0',
+                    borderRadius: 2,
+                    textAlign: 'center',
+                  }}
+                >
+                  <Typography variant="caption" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}>
+                    Stock Runway
+                  </Typography>
+                  <Typography
+                    variant="h6"
+                    sx={{
+                      fontWeight: 700,
+                      color:
+                        analyticsData.stock_warning === 'OUT_OF_STOCK'
+                          ? '#ef4444'
+                          : analyticsData.stock_warning === 'LOW_STOCK'
+                          ? '#f59e0b'
+                          : '#10b981',
+                    }}
+                  >
+                    {analyticsData.runway_days !== null ? `${analyticsData.runway_days} days` : '∞'}
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}>
+                    {analyticsData.stock_warning}
+                  </Typography>
+                </Paper>
+              </Box>
+
+              {/* Price Mismatch Card */}
+              {analyticsData.price_mismatch.has_mismatch && (
+                <Alert severity="warning" sx={{ bgcolor: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24' }}>
+                  {analyticsData.price_mismatch.message}
+                </Alert>
+              )}
+
+              {/* Channel Sales Table */}
+              <Box>
+                <Typography variant="subtitle2" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', fontWeight: 600, mb: 1 }}>
+                  Channel Order Breakdown (Last 90 Days)
+                </Typography>
+                <TableContainer
+                  component={Paper}
+                  sx={{
+                    bgcolor: isDarkMode ? 'transparent' : '#f8fafc',
+                    border: isDarkMode ? 'none' : '1px solid #e2e8f0',
+                    boxShadow: 'none',
+                  }}
+                >
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow sx={{ borderBottom: isDarkMode ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid #cbd5e1' }}>
+                        <TableCell sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', fontWeight: 600 }}>Platform</TableCell>
+                        <TableCell sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', fontWeight: 600 }}>30d Units</TableCell>
+                        <TableCell sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', fontWeight: 600 }}>30d Revenue</TableCell>
+                        <TableCell sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', fontWeight: 600 }}>90d Units</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {analyticsData.channel_metrics.map((cm) => (
+                        <TableRow key={cm.platform} sx={{ borderBottom: isDarkMode ? '1px solid rgba(255, 255, 255, 0.05)' : '1px solid #f1f5f9' }}>
+                          <TableCell sx={{ color: '#0284c7', fontWeight: 600, fontSize: 12 }}>{cm.platform}</TableCell>
+                          <TableCell sx={{ color: isDarkMode ? '#f8fafc' : '#0f172a', fontSize: 12 }}>{cm.units_sold_30d}</TableCell>
+                          <TableCell sx={{ color: '#10b981', fontSize: 12 }}>${cm.revenue_30d.toFixed(2)}</TableCell>
+                          <TableCell sx={{ color: isDarkMode ? '#cbd5e1' : '#334155', fontSize: 12 }}>{cm.units_sold_90d}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Box>
+            </Stack>
+          ) : (
+            <CircularProgress size={24} sx={{ color: '#38bdf8' }} />
+          )}
+        </DialogContent>
+
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={() => setAnalyticsModalOpen(false)} sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', textTransform: 'none' }}>
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Side-by-Side Comparison Dialog */}
       <Dialog
@@ -1170,9 +2511,9 @@ export default function ListingGraphPage() {
         fullWidth
         PaperProps={{
           sx: {
-            bgcolor: '#0f172a',
-            color: '#f8fafc',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
+            bgcolor: isDarkMode ? '#0f172a' : '#ffffff',
+            color: isDarkMode ? '#f8fafc' : '#0f172a',
+            border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid #cbd5e1',
             borderRadius: 3,
           },
         }}
@@ -1184,12 +2525,12 @@ export default function ListingGraphPage() {
               Multi-Listing Side-by-Side Comparison
             </Typography>
           </Stack>
-          <IconButton onClick={() => setCompareOpen(false)} sx={{ color: '#94a3b8' }}>
+          <IconButton onClick={() => setCompareOpen(false)} sx={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}>
             <Close />
           </IconButton>
         </DialogTitle>
 
-        <DialogContent dividers sx={{ borderColor: 'rgba(255, 255, 255, 0.08)' }}>
+        <DialogContent dividers sx={{ borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.08)' : '#e2e8f0' }}>
           {isCompareLoading ? (
             <Box sx={{ textAlign: 'center', py: 4 }}>
               <CircularProgress size={32} sx={{ color: '#38bdf8' }} />
@@ -1198,8 +2539,8 @@ export default function ListingGraphPage() {
             <TableContainer component={Paper} sx={{ bgcolor: 'transparent', boxShadow: 'none' }}>
               <Table size="small">
                 <TableHead>
-                  <TableRow sx={{ borderBottom: '1px solid rgba(255, 255, 255, 0.12)' }}>
-                    <TableCell sx={{ color: '#94a3b8', fontWeight: 600 }}>Attribute</TableCell>
+                  <TableRow sx={{ borderBottom: isDarkMode ? '1px solid rgba(255, 255, 255, 0.12)' : '1px solid #cbd5e1' }}>
+                    <TableCell sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', fontWeight: 600 }}>Attribute</TableCell>
                     {compareData.listings.map((l) => (
                       <TableCell key={l.listing_id} sx={{ color: '#38bdf8', fontWeight: 600 }}>
                         {l.platform} (#{l.listing_id})
@@ -1209,10 +2550,10 @@ export default function ListingGraphPage() {
                 </TableHead>
                 <TableBody>
                   {compareData.comparison_fields.map((field) => (
-                    <TableRow key={field.key} sx={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                      <TableCell sx={{ color: '#94a3b8', fontWeight: 500, fontSize: 12 }}>{field.label}</TableCell>
+                    <TableRow key={field.key} sx={{ borderBottom: isDarkMode ? '1px solid rgba(255, 255, 255, 0.05)' : '1px solid #f1f5f9' }}>
+                      <TableCell sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', fontWeight: 500, fontSize: 12 }}>{field.label}</TableCell>
                       {compareData.listings.map((l) => (
-                        <TableCell key={l.listing_id} sx={{ color: '#f8fafc', fontSize: 12 }}>
+                        <TableCell key={l.listing_id} sx={{ color: isDarkMode ? '#f8fafc' : '#0f172a', fontSize: 12 }}>
                           {field.values[l.listing_id.toString()] ?? '--'}
                         </TableCell>
                       ))}
@@ -1222,14 +2563,14 @@ export default function ListingGraphPage() {
               </Table>
             </TableContainer>
           ) : (
-            <Typography variant="body2" sx={{ color: '#94a3b8', textAlign: 'center', py: 2 }}>
+            <Typography variant="body2" sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', textAlign: 'center', py: 2 }}>
               Select 2 or more listing nodes on the canvas to compare.
             </Typography>
           )}
         </DialogContent>
 
         <DialogActions sx={{ p: 2 }}>
-          <Button onClick={() => setCompareOpen(false)} sx={{ color: '#94a3b8', textTransform: 'none' }}>
+          <Button onClick={() => setCompareOpen(false)} sx={{ color: isDarkMode ? '#94a3b8' : '#64748b', textTransform: 'none' }}>
             Close
           </Button>
         </DialogActions>

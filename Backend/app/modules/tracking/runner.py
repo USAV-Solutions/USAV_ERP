@@ -108,7 +108,9 @@ class TrackingJobState:
     current: TrackingItemState | None = None
     cooldown_until: datetime | None = None
     consecutive_rate_limited: int = 0
-    auto_probe: bool = True
+    auto_probe: bool = field(
+        default_factory=lambda: settings.tracking_auto_probe_enabled
+    )
     auto_probe_interval_minutes: int = field(
         default_factory=lambda: settings.tracking_auto_probe_interval_minutes
     )
@@ -369,13 +371,27 @@ async def _run_probe(job: TrackingJobState) -> bool:
         return True
 
     item = remaining[0]
+    # Probes used to be completely silent, so an auto-probe loop could hammer
+    # parcelsapp for 20 hours while the logs showed nothing at all between the
+    # "paused on rate limit" line and the next manual action. Always leave a
+    # trace: one line going out, one coming back.
+    logger.info(
+        "tracking job=%s PROBE %s (attempt %s)",
+        job.job_id, item.tracking_number, item.attempts + 1,
+    )
     try:
         async with _scraper_factory(headless=settings.tracking_scraper_headless) as scraper:
             result = await _scrape_item(scraper, item)
     except Exception as exc:  # noqa: BLE001
         job.last_probe_result = "ERROR"
         job.message = f"Probe failed: {exc}"
+        logger.warning("tracking job=%s PROBE %s → failed: %s", job.job_id, item.tracking_number, exc)
         return False
+
+    logger.info(
+        "tracking job=%s PROBE %s → %s (%s)",
+        job.job_id, item.tracking_number, result.status, result.detail,
+    )
 
     if result.status == RATE_LIMITED:
         job.last_probe_result = "RATE_LIMITED"
@@ -447,8 +463,11 @@ def _spawn(coro) -> None:
 
 # ── Public API (used by routes) ─────────────────────────────────────────────
 async def start_job(
-    db, *, triggered_by: str | None = None, auto_probe: bool = True
+    db, *, triggered_by: str | None = None, auto_probe: bool | None = None
 ) -> TrackingJobState:
+    """Start a job. ``auto_probe=None`` takes the (off-by-default) setting."""
+    if auto_probe is None:
+        auto_probe = settings.tracking_auto_probe_enabled
     global _CURRENT_JOB, _LAST_JOB
     async with _JOB_LOCK:
         if _is_active(_CURRENT_JOB):

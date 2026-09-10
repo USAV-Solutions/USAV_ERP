@@ -1,5 +1,5 @@
 """
-Graph and AI Matching Schemas for Listing Management.
+Graph, Orbit, and AI Matching Schemas for Listing Management.
 """
 import enum
 from datetime import datetime
@@ -11,11 +11,23 @@ from app.models import Platform, PlatformSyncStatus
 
 class RelationshipType(str, enum.Enum):
     """Semantic relationship types between catalog entities and listings."""
-    EXACT = "EXACT"                  # Direct 1:1 listing of physical product
-    BUNDLE = "BUNDLE"                # Multi-item bundle containing this product
-    ACCESSORY = "ACCESSORY"          # Compatible accessory (e.g. bluetooth adapter, bracket, cable)
-    PART = "PART"                    # Sub-assembly or replacement part
-    RELATED_PRODUCT = "RELATED_PRODUCT"  # Related variant or family sibling
+    EXACT = "EXACT"                          # Direct 1:1 listing of physical product
+    ACCESSORY = "ACCESSORY"                  # Compatible accessory (e.g. bluetooth adapter, bracket, cable)
+    BUNDLE_COMPONENT = "BUNDLE_COMPONENT"    # Dynamic USAV Bundle component (Type B)
+    KIT_COMPONENT = "KIT_COMPONENT"          # Predefined manufacturer kit component (Type K)
+    PART_LCI = "PART_LCI"                    # Internal LCI replacement part (Type P)
+    SIBLING_VARIANT = "SIBLING_VARIANT"      # Sibling variant under same identity / family
+    # Backward compatibility aliases
+    BUNDLE = "BUNDLE"
+    PART = "PART"
+    RELATED_PRODUCT = "RELATED_PRODUCT"
+
+
+class StockWarningStatus(str, enum.Enum):
+    """Stock runway warning levels."""
+    HEALTHY = "HEALTHY"          # > 30 days runway
+    LOW_STOCK = "LOW_STOCK"      # < 14 days runway
+    OUT_OF_STOCK = "OUT_OF_STOCK" # 0 units available with active sales demand
 
 
 class ProductNode(BaseModel):
@@ -61,12 +73,21 @@ class GraphEdge(BaseModel):
     confidence: Optional[float] = None
 
 
+class GroupHub(BaseModel):
+    """A logical group hub node (Variants, Accessory, Component, Bundle)."""
+    hub_id: str           # e.g. "hub-variants", "hub-accessory", "hub-component"
+    hub_label: str        # "Variants", "Accessory", "Component"
+    hub_type: str         # "variants", "accessory", "component", "bundle"
+    children_ids: List[str] = Field(default_factory=list)
+
+
 class GraphTopologyResponse(BaseModel):
     """Full graph topology for visualizer canvas."""
     product: ProductNode
     listings: List[ListingNode] = Field(default_factory=list)
     related_products: List[ProductNode] = Field(default_factory=list)
     edges: List[GraphEdge] = Field(default_factory=list)
+    hubs: List[GroupHub] = Field(default_factory=list)
 
 
 class AISuggestRequest(BaseModel):
@@ -126,7 +147,7 @@ class CompareField(BaseModel):
     """Comparison metric row."""
     key: str
     label: str
-    values: Dict[str, Any]  # mapping stringified listing_id -> value
+    values: Dict[str, Any]
 
 
 class CompareResponse(BaseModel):
@@ -134,3 +155,207 @@ class CompareResponse(BaseModel):
     listing_ids: List[int]
     listings: List[ListingNode]
     comparison_fields: List[CompareField]
+
+
+# ============================================================================
+# ORBIT VIEW & ANALYTICS SCHEMAS
+# ============================================================================
+
+class PriceMismatchAlert(BaseModel):
+    """Ecwid vs. Shopify price mismatch detection."""
+    has_mismatch: bool = False
+    ecwid_price: Optional[float] = None
+    shopify_price: Optional[float] = None
+    price_diff: Optional[float] = None
+    message: Optional[str] = None
+
+
+class ChannelSalesMetric(BaseModel):
+    """Channel breakdown of sales orders."""
+    platform: str
+    units_sold_30d: int = 0
+    revenue_30d: float = 0.0
+    units_sold_90d: int = 0
+    revenue_90d: float = 0.0
+
+
+class SalesTransactionItem(BaseModel):
+    """Recent order sales transaction for a product."""
+    order_id: int
+    external_order_id: Optional[str] = None
+    external_order_number: Optional[str] = None
+    platform: str
+    quantity: int = 1
+    unit_price: Optional[float] = None
+    total_price: Optional[float] = None
+    currency: str = "USD"
+    ordered_at: Optional[datetime] = None
+    status: Optional[str] = None
+
+
+class OrbitAnalyticsResponse(BaseModel):
+    """Sales velocity, order metrics, stock runway, price mismatch alert, and recent transaction history."""
+    variant_id: int
+    full_sku: str
+    units_sold_30d: int = 0
+    revenue_30d: float = 0.0
+    units_sold_90d: int = 0
+    revenue_90d: float = 0.0
+    monthly_velocity: float = 0.0
+    available_stock: int = 0
+    runway_days: Optional[float] = None
+    stock_warning: StockWarningStatus = StockWarningStatus.HEALTHY
+    price_mismatch: PriceMismatchAlert = Field(default_factory=PriceMismatchAlert)
+    channel_metrics: List[ChannelSalesMetric] = Field(default_factory=list)
+    recent_transactions: List[SalesTransactionItem] = Field(default_factory=list)
+
+
+class BundleComponentInput(BaseModel):
+    """Input component for Kit / Bundle formation."""
+    child_variant_id: int
+    quantity_required: int = Field(default=1, ge=1)
+    role: str = Field(default="PRIMARY", description="PRIMARY, ACCESSORY, SATELLITE, SUBWOOFER, MAIN_UNIT")
+
+
+class OrbitCreateBundleKitRequest(BaseModel):
+    """Request to form a Bundle (Type B) or Kit (Type K) per USAV UPIS spec."""
+    type: str = Field(..., description="'B' for USAV Bundle, 'K' for Predefined Kit")
+    name: str = Field(..., min_length=2, max_length=255, description="Name of the bundle/kit")
+    product_id: Optional[int] = Field(None, description="Optional 5-digit ECWID Product ID namespace")
+    components: List[BundleComponentInput] = Field(..., min_length=1, description="List of components")
+    target_price: Optional[float] = Field(None, description="Optional selling price")
+
+
+class OrbitCreateVariantRequest(BaseModel):
+    """Request to generate a new Color / Condition Variant (UPIS Layer 2)."""
+    source_variant_id: int = Field(..., description="Existing variant ID to clone identity from")
+    color_code: str = Field(..., min_length=1, max_length=2, description="BK, WY, SV, GY, BL, RD, BG, GD")
+    condition_code: Optional[str] = Field("U", description="'N' New, 'R' Refurbished, 'U' Used")
+    variant_name: Optional[str] = None
+
+
+class OrbitUpdateRelationshipRequest(BaseModel):
+    """Request to update a relationship tether."""
+    target_type: str = Field(..., description="'listing' or 'component'")
+    source_variant_id: int
+    target_id: int
+    relationship_type: RelationshipType
+
+
+class OrbitUnlinkRequest(BaseModel):
+    """Request to unlink a node or relationship tether."""
+    target_type: str = Field(..., description="'listing' or 'component'")
+    target_id: int
+    source_variant_id: int
+
+
+class OrbitConvertTypeRequest(BaseModel):
+    """Request to convert an existing product variant to Kit (K), Bundle (B), or Base Product."""
+    variant_id: int = Field(..., description="Target variant ID to convert")
+    target_type: str = Field(..., description="'K' (Predefined Kit), 'B' (USAV Bundle), or 'Product' (Base)")
+    components: Optional[List[BundleComponentInput]] = Field(default_factory=list, description="Optional initial components")
+
+
+# ============================================================================
+# AI DEEP CLASSIFICATION SCHEMAS
+# ============================================================================
+
+class AIDeepClassifyRequest(BaseModel):
+    """Request for AI deep product classification."""
+    variant_id: int = Field(..., ge=1)
+
+
+class AIClassifiedComponent(BaseModel):
+    """A component suggested by AI, optionally matched to existing catalog."""
+    component_name: str
+    suggested_quantity: int = 1
+    suggested_role: str = "PRIMARY"
+    matched_variant_id: Optional[int] = None
+    matched_sku: Optional[str] = None
+    matched_name: Optional[str] = None
+    match_confidence: float = 0.0
+
+
+class AIClassifiedParent(BaseModel):
+    """A parent product this item may be a component of."""
+    parent_name: str
+    matched_variant_id: Optional[int] = None
+    matched_sku: Optional[str] = None
+    matched_name: Optional[str] = None
+    match_confidence: float = 0.0
+
+
+class AIDeepClassifyResponse(BaseModel):
+    """Response from AI deep product classification."""
+    variant_id: int
+    full_sku: str
+    current_type: str
+    suggested_type: str = Field(..., description="'Product', 'K', 'B', 'P'")
+    type_confidence: float = Field(..., ge=0.0, le=1.0)
+    type_reasoning: str
+    suggested_components: List[AIClassifiedComponent] = Field(default_factory=list)
+    suggested_parents: List[AIClassifiedParent] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
+
+class BundleParticipation(BaseModel):
+    """A bundle/kit that this product participates in."""
+    parent_variant_id: int
+    parent_sku: str
+    parent_name: Optional[str] = None
+    parent_type: str  # 'K' or 'B'
+    role: str
+    quantity_required: int = 1
+    sibling_components: List[ProductNode] = Field(default_factory=list)
+
+
+class BundleDiscoveryResponse(BaseModel):
+    """All bundles/kits this product participates in."""
+    variant_id: int
+    full_sku: str
+    participations: List[BundleParticipation] = Field(default_factory=list)
+
+
+# ============================================================================
+# 3D GALAXY UNIVERSE SCHEMAS
+# ============================================================================
+
+class UniverseProductNode(BaseModel):
+    variant_id: int
+    full_sku: str
+    variant_name: Optional[str] = None
+    identity_type: str = "Product"
+    family_id: int
+
+
+class UniverseFamilyNode(BaseModel):
+    product_id: int
+    family_code: str
+    base_name: str
+    brand_id: Optional[int] = None
+    brand_name: Optional[str] = None
+    products: List[UniverseProductNode] = Field(default_factory=list)
+
+
+class UniverseBrandNode(BaseModel):
+    brand_id: int
+    name: str
+    color: str = "#38bdf8"
+    families: List[UniverseFamilyNode] = Field(default_factory=list)
+
+
+class UniverseEdge(BaseModel):
+    source_sku: str
+    target_sku: str
+    relationship_type: str
+    color: str = "#f59e0b"
+
+
+class UniverseTopologyResponse(BaseModel):
+    brands: List[UniverseBrandNode] = Field(default_factory=list)
+    unassigned_families: List[UniverseFamilyNode] = Field(default_factory=list)
+    cross_links: List[UniverseEdge] = Field(default_factory=list)
+    total_brands: int = 0
+    total_families: int = 0
+    total_products: int = 0
+

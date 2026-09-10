@@ -160,6 +160,22 @@ async def test_start_with_no_eligible_orders_completes_immediately():
 
 
 @pytest.mark.asyncio
+async def test_auto_probe_defaults_off(monkeypatch):
+    """parcelsapp's block is a multi-hour per-address budget, not a throttle to
+    poll through, so a job must not start a probe loop unless explicitly asked."""
+    assert runner.settings.tracking_auto_probe_enabled is False
+    assert runner.TrackingJobState(job_id="x").auto_probe is False
+
+    job = await runner.start_job(_db_returning([]))  # no auto_probe argument
+    assert job.auto_probe is False
+
+    # ...and the setting is what decides, so it stays operator-controllable.
+    monkeypatch.setattr(runner.settings, "tracking_auto_probe_enabled", True)
+    job = await runner.start_job(_db_returning([]))
+    assert job.auto_probe is True
+
+
+@pytest.mark.asyncio
 async def test_persists_delivered_and_marks_dirty(monkeypatch):
     monkeypatch.setattr(runner.settings, "tracking_scraper_min_delay_seconds", 0.0)
     monkeypatch.setattr(runner.settings, "tracking_scraper_max_delay_seconds", 0.0)
