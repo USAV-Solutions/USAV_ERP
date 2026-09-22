@@ -222,8 +222,9 @@ class OrderCreate(BaseModel):
 
 
 class OrderStatusUpdate(BaseModel):
-    """Update the processing status of an order."""
-    status: OrderStatus
+    """Update the processing status and/or platform of an order."""
+    status: Optional[OrderStatus] = None
+    platform: Optional[OrderPlatform] = None
     notes: Optional[str] = None
 
 

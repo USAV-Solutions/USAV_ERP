@@ -30,7 +30,7 @@ from app.integrations.zoho.client import ZohoClient, RateLimitError
 from app.integrations.zoho.security import generate_payload_hash
 from app.models.entities import Customer, ProductVariant, ZohoSyncStatus
 from app.models.purchasing import PurchaseOrder, PurchaseOrderItem, Vendor
-from app.modules.orders.models import Order, OrderFulfillmentChannel, OrderItem
+from app.modules.orders.models import Order, OrderFulfillmentChannel, OrderItem, OrderPlatform
 
 logger = logging.getLogger(__name__)
 
@@ -55,29 +55,41 @@ VALID_ZOHO_CONTACT_SOURCE_VALUES = {
     "Ebay_Dragon",
     "Ebay_Mekong",
     "Ebay_USAV",
+    "Ebay_Purchasing",
     "ECWID",
     "Amazon",
+    "Amazon_Renew",
+    "Amazon FBA",
     "Other",
     "Walmart",
+    "Shopify",
+    "Walk-in",
 }
 
 VALID_ZOHO_SO_SOURCE_VALUES = {
     "Ebay_Dragon",
     "Ebay_Mekong",
     "Ebay_USAV",
+    "Ebay_Purchasing",
     "ECWID",
     "Amazon",
+    "Amazon_Renew",
+    "Amazon FBA",
     "Other",
     "Shopify",
     "Walmart",
+    "Walk-in",
 }
 
 _MARKETPLACE_ORDER_PLATFORMS = {
     "AMAZON",
+    "AMAZON_RENEW",
+    "AMAZON_FBA",
     "WALMART",
     "EBAY_MEKONG",
     "EBAY_USAV",
     "EBAY_DRAGON",
+    "EBAY_PURCHASING",
 }
 
 EXACT_ZOHO_CONTACT_SOURCE_MAP = {
@@ -87,12 +99,20 @@ EXACT_ZOHO_CONTACT_SOURCE_MAP = {
     "EBAY_MEKONG_API": "Ebay_Mekong",
     "EBAY_USAV": "Ebay_USAV",
     "EBAY_USAV_API": "Ebay_USAV",
+    "EBAY_PURCHASING": "Ebay_Purchasing",
+    "EBAY_PURCHASING_API": "Ebay_Purchasing",
     "WALMART": "Walmart",
     "WALMART_API": "Walmart",
     "ECWID": "ECWID",
     "ECWID_API": "ECWID",
     "AMAZON": "Amazon",
     "AMAZON_API": "Amazon",
+    "AMAZON_RENEW": "Amazon_Renew",
+    "AMAZON_FBA": "Amazon FBA",
+    "AMAZON_FBA_CSV": "Amazon FBA",
+    "WALK_IN": "Walk-in",
+    "WALK-IN": "Walk-in",
+    "WALKIN": "Walk-in",
     "MANUAL": "Other",
     "ZOHO_IMPORT": "Other",
 }
@@ -107,6 +127,9 @@ EXACT_ZOHO_PO_SOURCE_MAP = {
     "GOODWILL_PICKUP": "Goodwill",
     "ALIEXPRESS_JSON": "AliExpress",
     "ALIEXPRESS_CSV": "AliExpress",
+    "LCPU": "Local Pickup",
+    "LCPU_MANUAL": "Local Pickup",
+    "LOCAL_PICKUP": "Local Pickup",
     "MANUAL": "Other",
     "ZOHO_IMPORT": "Other",
 }
@@ -118,14 +141,23 @@ EXACT_ZOHO_SO_SOURCE_MAP = {
     "EBAY_MEKONG_API": "Ebay_Mekong",
     "EBAY_USAV": "Ebay_USAV",
     "EBAY_USAV_API": "Ebay_USAV",
+    "EBAY_PURCHASING": "Ebay_Purchasing",
+    "EBAY_PURCHASING_API": "Ebay_Purchasing",
+    "EBAY_SALE_ORDER_CSV": "Ebay_Purchasing",
     "WALMART": "Walmart",
     "WALMART_API": "Walmart",
     "ECWID": "ECWID",
     "ECWID_API": "ECWID",
     "AMAZON": "Amazon",
     "AMAZON_API": "Amazon",
+    "AMAZON_RENEW": "Amazon_Renew",
+    "AMAZON_FBA": "Amazon FBA",
+    "AMAZON_FBA_CSV": "Amazon FBA",
     "SHOPIFY": "Shopify",
     "SHOPIFY_API": "Shopify",
+    "WALK_IN": "Walk-in",
+    "WALK-IN": "Walk-in",
+    "WALKIN": "Walk-in",
     "MANUAL": "Other",
     "ZOHO_IMPORT": "Other",
 }
@@ -304,7 +336,7 @@ def _normalize_source_to_zoho_dropdown(source: str) -> str:
         return "Goodwill"
     if "ALIEXPRESS" in text:
         return "AliExpress"
-    if "LOCAL_PICKUP" in text or "LOCALPICKUP" in text:
+    if "LOCAL_PICKUP" in text or "LOCALPICKUP" in text or "LCPU" in text:
         return "Local Pickup"
     return "Other"
 
@@ -323,16 +355,28 @@ def _resolve_source_to_zoho_dropdown(source: str) -> str:
 
 def _normalize_customer_source_to_zoho_dropdown(source: str) -> str:
     text = str(source or "").strip().upper().replace("-", "_").replace(" ", "_")
+    if "WALK_IN" in text or "WALKIN" in text:
+        return "Walk-in"
+    if "EBAY_DRAGON" in text or "DRAGON" in text:
+        return "Ebay_Dragon"
+    if "EBAY_MEKONG" in text or "MEKONG" in text:
+        return "Ebay_Mekong"
+    if "EBAY_PURCHASING" in text or "PURCHASING" in text:
+        return "Ebay_Purchasing"
     if "EBAY" in text:
-        return "Ebay"
+        return "Ebay_USAV"
     if "WALMART" in text:
         return "Walmart"
     if "ECWID" in text:
-        return "Ecwid"
+        return "ECWID"
+    if "AMAZON_RENEW" in text or "RENEW" in text:
+        return "Amazon_Renew"
+    if "AMAZON_FBA" in text or "FBA" in text:
+        return "Amazon FBA"
     if "AMAZON" in text:
         return "Amazon"
-    if "SHIPSTATION" in text:
-        return "ShipStation"
+    if "SHOPIFY" in text:
+        return "Shopify"
     return "Other"
 
 
@@ -350,14 +394,22 @@ def _resolve_customer_source_to_zoho_dropdown(source: str) -> str:
 
 def _normalize_so_source_to_zoho_dropdown(source: str) -> str:
     text = str(source or "").strip().upper().replace("-", "_").replace(" ", "_")
-    if "EBAY_DRAGON" in text:
+    if "WALK_IN" in text or "WALKIN" in text:
+        return "Walk-in"
+    if "EBAY_DRAGON" in text or "DRAGON" in text:
         return "Ebay_Dragon"
-    if "EBAY_MEKONG" in text:
+    if "EBAY_MEKONG" in text or "MEKONG" in text:
         return "Ebay_Mekong"
-    if "EBAY_USAV" in text:
+    if "EBAY_PURCHASING" in text or "PURCHASING" in text:
+        return "Ebay_Purchasing"
+    if "EBAY_USAV" in text or "EBAY" in text:
         return "Ebay_USAV"
     if "ECWID" in text:
         return "ECWID"
+    if "AMAZON_RENEW" in text or "RENEW" in text:
+        return "Amazon_Renew"
+    if "AMAZON_FBA" in text or "FBA" in text:
+        return "Amazon FBA"
     if "AMAZON" in text:
         return "Amazon"
     if "SHOPIFY" in text:
@@ -381,6 +433,18 @@ def _resolve_so_source_to_zoho_dropdown(source: str) -> str:
 
 def _resolve_order_so_source_to_zoho_dropdown(order: Order) -> str:
     platform_value = getattr(getattr(order, "platform", None), "value", getattr(order, "platform", None))
+    fulfillment_channel = getattr(
+        getattr(order, "fulfillment_channel", None),
+        "value",
+        getattr(order, "fulfillment_channel", None),
+    )
+
+    if platform_value in {OrderPlatform.AMAZON_FBA, "AMAZON_FBA"} or fulfillment_channel in {
+        OrderFulfillmentChannel.AMAZON_FBA,
+        "AMAZON_FBA",
+    }:
+        return "Amazon FBA"
+
     platform_source = _resolve_so_source_to_zoho_dropdown(str(platform_value or ""))
     if platform_source != "Other":
         return platform_source
@@ -2012,6 +2076,7 @@ def order_to_zoho_payload(order: Order) -> dict[str, Any]:
         payload["reference_number"] = reference_number
     is_amazon_fba_order = (
         getattr(order, "fulfillment_channel", None) == OrderFulfillmentChannel.AMAZON_FBA
+        or getattr(order, "platform", None) in {OrderPlatform.AMAZON_FBA, "AMAZON_FBA"}
     )
     if order.shipped_at:
         payload["shipment_date"] = order.shipped_at.strftime("%Y-%m-%d")

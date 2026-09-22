@@ -12,7 +12,7 @@ def test_amazon_fba_csv_groups_rows_and_uses_weekly_columns():
     assert seen == 2
     assert skipped == 0
     assert len(rows) == 1
-    assert rows[0]["platform_name"] == "AMAZON"
+    assert rows[0]["platform_name"] == "AMAZON_FBA"
     assert rows[0]["platform_order_id"] == "114-1"
     assert rows[0]["platform_order_number"] == "MERCHANT-114"
     assert rows[0]["customer_name"] == "Alice"

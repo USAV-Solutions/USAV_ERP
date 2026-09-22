@@ -161,6 +161,7 @@ export type PurchaseFileImportSource =
   | 'ebay_purchasing'
   | 'ebay_usav'
   | 'ebay_dragon'
+  | 'lcpu'
 
 export interface PurchaseFileImportResponse {
   source: PurchaseFileImportSource

@@ -48,7 +48,20 @@ import {
   fetchBestSellingTrends,
 } from '../api/bestSellingDashboard'
 
-const platforms = ['AMAZON', 'EBAY_MEKONG', 'EBAY_USAV', 'EBAY_DRAGON', 'ECWID', 'SHOPIFY', 'WALMART', 'ZOHO', 'MANUAL']
+const platforms = [
+  'AMAZON',
+  'AMAZON_RENEW',
+  'AMAZON_FBA',
+  'EBAY_MEKONG',
+  'EBAY_USAV',
+  'EBAY_DRAGON',
+  'ECWID',
+  'SHOPIFY',
+  'WALMART',
+  'WALK_IN',
+  'ZOHO',
+  'MANUAL',
+]
 
 const sortOptions: { value: BestSellingSortBy; label: string }[] = [
   { value: 'qty_sold', label: 'Qty Sold' },

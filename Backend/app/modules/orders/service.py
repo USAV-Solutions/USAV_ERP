@@ -46,6 +46,8 @@ _NON_BLOCKING_AUTH_ERROR_MARKERS = (
 # Mapping from IntegrationState platform_name → OrderPlatform enum
 _PLATFORM_MAP: dict[str, OrderPlatform] = {
     "AMAZON": OrderPlatform.AMAZON,
+    "AMAZON_RENEW": OrderPlatform.AMAZON_RENEW,
+    "AMAZON_FBA": OrderPlatform.AMAZON_FBA,
     "EBAY_MEKONG": OrderPlatform.EBAY_MEKONG,
     "EBAY_USAV": OrderPlatform.EBAY_USAV,
     "EBAY_DRAGON": OrderPlatform.EBAY_DRAGON,
@@ -53,22 +55,28 @@ _PLATFORM_MAP: dict[str, OrderPlatform] = {
     "ECWID": OrderPlatform.ECWID,
     "SHOPIFY": OrderPlatform.SHOPIFY,
     "WALMART": OrderPlatform.WALMART,
+    "WALK_IN": OrderPlatform.WALK_IN,
     "MANUAL": OrderPlatform.MANUAL,
 }
 
 # Mapping from OrderPlatform → entities.Platform (for PLATFORM_LISTING lookups)
 _ORDER_TO_ENTITY_PLATFORM: dict[OrderPlatform, Platform] = {
     OrderPlatform.AMAZON: Platform.AMAZON,
+    OrderPlatform.AMAZON_RENEW: Platform.AMAZON_RENEW,
+    OrderPlatform.AMAZON_FBA: Platform.AMAZON_FBA,
     OrderPlatform.EBAY_MEKONG: Platform.EBAY_MEKONG,
     OrderPlatform.EBAY_USAV: Platform.EBAY_USAV,
     OrderPlatform.EBAY_DRAGON: Platform.EBAY_DRAGON,
     OrderPlatform.EBAY_PURCHASING: Platform.EBAY_PURCHASING,
     OrderPlatform.ECWID: Platform.ECWID,
     OrderPlatform.WALMART: Platform.WALMART,
+    OrderPlatform.WALK_IN: Platform.WALK_IN,
 }
 
 _MARKETPLACE_ORDER_PLATFORMS: set[OrderPlatform] = {
     OrderPlatform.AMAZON,
+    OrderPlatform.AMAZON_RENEW,
+    OrderPlatform.AMAZON_FBA,
     OrderPlatform.EBAY_MEKONG,
     OrderPlatform.EBAY_USAV,
     OrderPlatform.EBAY_DRAGON,

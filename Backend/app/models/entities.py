@@ -99,12 +99,15 @@ class BundleRole(str, enum.Enum):
 class Platform(str, enum.Enum):
     """Supported sales platforms."""
     AMAZON = "AMAZON"
+    AMAZON_RENEW = "AMAZON_RENEW"
+    AMAZON_FBA = "AMAZON_FBA"
     EBAY_MEKONG = "EBAY_MEKONG"
     EBAY_USAV = "EBAY_USAV"
     EBAY_DRAGON = "EBAY_DRAGON"
     EBAY_PURCHASING = "EBAY_PURCHASING"
     ECWID = "ECWID"
     WALMART = "WALMART"
+    WALK_IN = "WALK_IN"
 
 
 # ============================================================================

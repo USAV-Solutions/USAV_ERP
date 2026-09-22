@@ -1,4 +1,4 @@
-﻿# Backend\app\modules\purchasing
+# Backend\app\modules\purchasing
 
 ## What This Folder Does
 Purchase order domain: import pipelines, vendor workflows, receiving, matching, purchase-order/item mutation endpoints (including guarded deletes), and Zoho purchase-order-received-status delivery backfill.
@@ -19,6 +19,7 @@ Purchase order domain: import pipelines, vendor workflows, receiving, matching, 
 - Purchase item `unit_price` is derived storage only: backend recalculates it from `total_price / quantity` (up to 6 decimals) on create/update/import and raises if the derived value cannot round-trip back to the line total at cent precision. Do not treat request/import `unit_price` as the source of truth.
 - Purchase list endpoint supports approximate total search (`total_amount` with optional `total_amount_range`); frontend and backend must stay aligned on inclusive bounds (`total_amount - range` through `total_amount + range`).
 - Delivery-status backfill (`POST /purchases/backfill-delivery-status`) scans Zoho purchase orders in the requested date window (defaults: `2026-01-01` through today) and marks local POs as `DELIVERED` only when Zoho `received_status` is `received`; it does not auto-downgrade orders with other statuses.
+- Local Pickup POs use source `LCPU` (`PurchaseFileImportSource.LCPU`). Inbound Zoho PO import extracts `cf_source` and maps "Local Pickup" to `LCPU`. Outbound PO sync resolves `LCPU` to Zoho dropdown value "Local Pickup". Manual PO creation and updates via UI allow selecting/typing `LCPU`.
 
 ## Child Folders
 - `schemas/`

@@ -94,10 +94,13 @@ router = APIRouter(prefix="/orders", tags=["Orders"])
 
 _MARKETPLACE_ZOHO_EXCLUDE_TAX_PLATFORMS = {
     OrderPlatform.AMAZON,
+    OrderPlatform.AMAZON_RENEW,
+    OrderPlatform.AMAZON_FBA,
     OrderPlatform.WALMART,
     OrderPlatform.EBAY_MEKONG,
     OrderPlatform.EBAY_USAV,
     OrderPlatform.EBAY_DRAGON,
+    OrderPlatform.EBAY_PURCHASING,
 }
 
 
@@ -359,6 +362,10 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
         if row_data.get("Sales Record Number"):
             return "EBAY_PURCHASING"
         text = _platform_signal_text(row_data)
+        norm_text = text.replace("-", "_").replace(" ", "_")
+
+        if "WALK_IN" in norm_text or "WALKIN" in norm_text:
+            return "WALK_IN"
         if "SHOPIFY" in text:
             return "SHOPIFY"
         if "ECWID" in text:
@@ -366,13 +373,19 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
         if "WALMART" in text:
             return "WALMART"
         if "AMAZON" in text:
+            if "RENEW" in text:
+                return "AMAZON_RENEW"
+            if "FBA" in text:
+                return "AMAZON_FBA"
             return "AMAZON"
-        if "EBAY_USAV" in text:
-            return "EBAY_USAV"
-        if "EBAY_MEKONG" in text:
-            return "EBAY_MEKONG"
-        if "EBAY_DRAGON" in text:
+        if "DRAGON" in text:
             return "EBAY_DRAGON"
+        if "MEKONG" in text:
+            return "EBAY_MEKONG"
+        if "PURCHASING" in text:
+            return "EBAY_PURCHASING"
+        if "EBAY_USAV" in norm_text:
+            return "EBAY_USAV"
         if "EBAY" in text:
             return "EBAY_USAV"
         return "MANUAL"
@@ -638,7 +651,7 @@ def _parse_amazon_fba_csv(file_text: str) -> tuple[list[dict], int, int]:
         order_entry = grouped.get(order_id)
         if order_entry is None:
             order_entry = {
-                "platform_name": "AMAZON",
+                "platform_name": "AMAZON_FBA",
                 "platform_order_id": order_id,
                 "platform_order_number": _pick(row, "merchant-order-id", "order-id"),
                 "customer_name": _pick(row, "buyer-name", "buyer-id"),
@@ -2020,7 +2033,7 @@ async def update_order_status(
     order_repo: OrderRepository = Depends(get_order_repo),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update an order's processing status and/or notes."""
+    """Update an order's processing status, notes, and/or platform."""
     order = await order_repo.get_with_items(order_id)
     if order is None:
         raise HTTPException(
@@ -2028,17 +2041,26 @@ async def update_order_status(
             detail=f"Order {order_id} not found.",
         )
 
-    # Enforce that any order marked as SHIPPED or DELIVERED must have a tracking number
-    if body.status in {OrderStatus.SHIPPED, OrderStatus.DELIVERED}:
-        if not order.tracking_number:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Tracking number is required when setting status to SHIPPED or DELIVERED."
-            )
+    update_data: dict = {}
+    if body.status is not None:
+        # Enforce that any order marked as SHIPPED or DELIVERED must have a tracking number
+        if body.status in {OrderStatus.SHIPPED, OrderStatus.DELIVERED}:
+            if not order.tracking_number:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Tracking number is required when setting status to SHIPPED or DELIVERED."
+                )
+        update_data["status"] = body.status
 
-    update_data: dict = {"status": body.status}
     if body.notes is not None:
         update_data["processing_notes"] = body.notes
+
+    if body.platform is not None:
+        update_data["platform"] = body.platform
+        update_data["zoho_sync_status"] = ZohoSyncStatus.DIRTY
+
+    if not update_data:
+        return OrderDetail.model_validate(order)
 
     updated = await order_repo.update(order, update_data)
     await db.commit()

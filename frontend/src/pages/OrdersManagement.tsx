@@ -89,6 +89,8 @@ import TablePaginationWithPageJump from '../components/common/TablePaginationWit
 
 const PLATFORM_LABELS: Record<OrderPlatform, string> = {
   AMAZON: 'Amazon',
+  AMAZON_RENEW: 'Amazon Renew',
+  AMAZON_FBA: 'Amazon FBA',
   EBAY_MEKONG: 'eBay Mekong',
   EBAY_USAV: 'eBay USAV',
   EBAY_DRAGON: 'eBay Dragon',
@@ -96,6 +98,7 @@ const PLATFORM_LABELS: Record<OrderPlatform, string> = {
   ECWID: 'Ecwid',
   SHOPIFY: 'Shopify',
   WALMART: 'Walmart',
+  WALK_IN: 'Walk-in',
   ZOHO: 'Zoho',
   MANUAL: 'Manual',
 }
