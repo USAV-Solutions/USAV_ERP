@@ -212,7 +212,7 @@ async def main():
         logger.info(f"Updating {len(zoho_updates)} Sales Orders in Zoho to cf_source = 'Ebay_Dragon'...")
         for o in zoho_updates:
             try:
-                await zoho_client.update_sales_order(
+                await zoho_client.update_salesorder(
                     o["zoho_id"],
                     {
                         "custom_fields": [
