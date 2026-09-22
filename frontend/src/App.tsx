@@ -19,7 +19,16 @@ import Layout from './components/common/Layout'
 import RoleGuard from './components/guards/RoleGuard'
 import PhotoStation from './pages/PhotoStation'
 import EndOfDayVerification from './pages/EndOfDayVerification'
+import PhotoStationDiagnostics from './pages/PhotoStationDiagnostics'
 
+
+function HomeRedirect() {
+  const { user } = useAuth()
+  if (user?.role === 'PACKER') {
+    return <Navigate to="/scan/photo-station" replace />
+  }
+  return <Dashboard />
+}
 
 function App() {
   const { isAuthenticated } = useAuth()
@@ -36,18 +45,19 @@ function App() {
       {/* Protected Routes */}
       <Route
         element={
-          <RoleGuard allowedRoles={['ADMIN', 'WAREHOUSE_OP', 'SALES_REP', 'ACCOUNTANT']}>
+          <RoleGuard allowedRoles={['ADMIN', 'WAREHOUSE_OP', 'PACKER', 'SALES_REP', 'ACCOUNTANT']}>
             <Layout />
           </RoleGuard>
         }
       >
-        <Route path="/" element={<Dashboard />} />
+        <Route path="/" element={<HomeRedirect />} />
 
-        {/* Warehouse Routes */}
-        <Route element={<RoleGuard allowedRoles={['ADMIN', 'WAREHOUSE_OP']} />}>
+        {/* Warehouse & Scanner Routes */}
+        <Route element={<RoleGuard allowedRoles={['ADMIN', 'WAREHOUSE_OP', 'PACKER']} />}>
           <Route path="/warehouse/ops" element={<WarehouseOps />} />
           <Route path="/scan" element={<WarehouseScan />} />
           <Route path="/scan/photo-station" element={<PhotoStation />} />
+          <Route path="/scan/photo-station/test-diagnostics" element={<PhotoStationDiagnostics />} />
           <Route path="/scan/end-of-day" element={<EndOfDayVerification />} />
         </Route>
 
@@ -60,7 +70,7 @@ function App() {
         </Route>
 
         {/* Orders Routes */}
-        <Route element={<RoleGuard allowedRoles={['ADMIN', 'SALES_REP', 'WAREHOUSE_OP']} />}>
+        <Route element={<RoleGuard allowedRoles={['ADMIN', 'SALES_REP', 'WAREHOUSE_OP', 'PACKER']} />}>
           <Route path="/orders" element={<OrdersManagement />} />
           <Route path="/returns" element={<ReturnsManagement />} />
           <Route path="/purchasing" element={<PurchasingManagement />} />

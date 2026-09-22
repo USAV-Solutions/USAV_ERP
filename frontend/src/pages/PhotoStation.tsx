@@ -1,39 +1,30 @@
-import { useState, useRef, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import {
   Box,
-  Button,
-  CircularProgress,
-  Grid,
-  Typography,
   TextField,
-  Alert,
-  AlertTitle,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
+  Typography,
   Paper,
+  Button,
+  Grid,
   Chip,
+  Alert,
+  CircularProgress,
+  Card,
+  CardContent,
   IconButton,
-  InputAdornment,
 } from '@mui/material'
 import {
   CameraAlt,
-  Replay,
-  CloudUpload,
   CheckCircle,
-  Warning,
-  Close,
-  Search,
+  Error as ErrorIcon,
+  Cameraswitch,
+  QrCodeScanner,
+  VolumeUp,
   Refresh,
+  Image,
 } from '@mui/icons-material'
-import axios from 'axios'
+import axiosClient from '../api/axiosClient'
+import { useAuth } from '../hooks/useAuth'
 
 interface PendingOrder {
   id: number
@@ -41,51 +32,70 @@ interface PendingOrder {
   external_order_number?: string
   platform: string
   ordered_at?: string
-  total_amount: string | number | null
+  total_amount: number
   tracking_number?: string
 }
 
 export default function PhotoStation() {
+  const { user } = useAuth()
+  const [orderNumber, setOrderNumber] = useState('')
+  const [trackingNumber, setTrackingNumber] = useState('')
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([])
-  const [isLoadingOrders, setIsLoadingOrders] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
+  const [isLoadingPending, setIsLoadingPending] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false)
   
-  // Modal states
-  const [isModalOpen, setIsModalOpen] = useState(false)
-  const [selectedOrder, setSelectedOrder] = useState<PendingOrder | null>(null)
+  // Camera State
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment')
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
+  const [slipPhotoData, setSlipPhotoData] = useState<string | null>(null)
+  const [boxPhotoData, setBoxPhotoData] = useState<string | null>(null)
   
-  // Capture states inside modal
-  const [captureStep, setCaptureStep] = useState<1 | 2 | 3>(1) // 1: Slip, 2: Box, 3: Save
-  const [slipPhoto, setSlipPhoto] = useState<string | null>(null)
-  const [boxPhoto, setBoxPhoto] = useState<string | null>(null)
-  
-  // OCR and extraction results
-  const [detectedOrder, setDetectedOrder] = useState('')
-  const [detectedTracking, setDetectedTracking] = useState('')
-  const [detectedPlatform, setDetectedPlatform] = useState('')
-  const [isOcrLoading, setIsOcrLoading] = useState(false)
-  const [ocrError, setOcrError] = useState<string | null>(null)
-  
-  // Submit states
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [submitResult, setSubmitResult] = useState<{
-    success: boolean
-    message: string
-    verify_status: string
-  } | null>(null)
+  // Feedback Status
+  const [statusState, setStatusState] = useState<'IDLE' | 'VERIFIED' | 'ERROR_MISSING_TRACKING' | 'ERROR_NOT_FOUND'>('IDLE')
+  const [statusMessage, setStatusMessage] = useState('')
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
-  // Fetch pending verification queue
-  const fetchPendingOrders = async () => {
-    setIsLoadingOrders(true)
+  // Audio tone generator
+  const playSound = (type: 'success' | 'error') => {
     try {
-      const res = await axios.get('/api/v1/orders/photo-station/pending')
-      setPendingOrders(res.data)
-    } catch (err) {
-      console.error('Failed to fetch pending orders:', err)
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
+      if (!AudioCtx) return
+      const ctx = new AudioCtx()
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+
+      if (type === 'success') {
+        osc.type = 'sine'
+        osc.frequency.setValueAtTime(880, ctx.currentTime) // High A note
+        gain.gain.setValueAtTime(0.2, ctx.currentTime)
+        osc.start()
+        osc.stop(ctx.currentTime + 0.12)
+      } else {
+        osc.type = 'sawtooth'
+        osc.frequency.setValueAtTime(160, ctx.currentTime) // Low buzz
+        gain.gain.setValueAtTime(0.3, ctx.currentTime)
+        osc.start()
+        osc.stop(ctx.currentTime + 0.35)
+      }
+    } catch (e) {
+      console.warn('Audio feedback failed:', e)
+    }
+  }
+
+  // Load pending orders
+  const fetchPendingOrders = async () => {
+    setIsLoadingPending(true)
+    try {
+      const res = await axiosClient.get('/orders/photo-station/pending')
+      setPendingOrders(res.data || [])
+    } catch (e) {
+      console.error('Failed to fetch pending verification orders', e)
     } finally {
-      setIsLoadingOrders(false)
+      setIsLoadingPending(false)
     }
   }
 
@@ -93,632 +103,370 @@ export default function PhotoStation() {
     fetchPendingOrders()
   }, [])
 
-  const handleOpenCapture = (order: PendingOrder) => {
-    setSelectedOrder(order)
-    setCaptureStep(1)
-    setSlipPhoto(null)
-    setBoxPhoto(null)
-    setDetectedOrder('')
-    setDetectedTracking('')
-    setDetectedPlatform('')
-    setOcrError(null)
-    setSubmitResult(null)
-    setIsModalOpen(true)
-  }
-
-  const handleCloseModal = () => {
-    setIsModalOpen(false)
-    setSelectedOrder(null)
-  }
-
-  const triggerFileCapture = () => {
-    fileInputRef.current?.click()
-  }
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    const reader = new FileReader()
-    reader.onloadend = () => {
-      const dataUrl = reader.result as string
-      if (captureStep === 1) {
-        setSlipPhoto(dataUrl)
-        runOCR(dataUrl)
-      } else {
-        setBoxPhoto(dataUrl)
-        setCaptureStep(3)
-      }
-    }
-    reader.readAsDataURL(file)
-    e.target.value = ''
-  }
-
-  // Advanced Gemini Vision AI-based OCR extractor
-  const runOCR = async (dataUrl: string) => {
-    setIsOcrLoading(true)
-    setOcrError(null)
+  // Setup camera stream
+  const startCamera = async () => {
     try {
-      // 1. Convert captured base64 dataUrl to binary Blob
-      const res = await fetch(dataUrl)
-      const blob = await res.blob()
-      
-      // 2. Append to FormData
-      const fd = new FormData()
-      fd.append('file', blob, 'slip.jpg')
-      
-      // 3. Post to backend AI extraction endpoint
-      const response = await axios.post('/api/v1/orders/photo-station/extract-ocr', fd, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      })
-      
-      const { success, platform, order_id, tracking_number, message } = response.data
-      
-      if (success) {
-        setDetectedPlatform(platform || 'UNKNOWN')
-        setDetectedOrder(order_id || '')
-        setDetectedTracking(tracking_number || '')
-        
-        if (!order_id && !tracking_number) {
-          setOcrError('Gemini analyzed the image, but could not locate the Order ID or Tracking Number. Please check lighting or input manually.')
-        }
-      } else {
-        setOcrError(message || 'AI extraction failed. Please enter details manually.')
+      if (cameraStream) {
+        cameraStream.getTracks().forEach((track) => track.stop())
       }
-    } catch (err: any) {
-      console.error('AI OCR analysis failed:', err)
-      const errMsg = err.response?.data?.detail || err.message || 'Failed to connect to AI server.'
-      setOcrError(`AI OCR failed: ${errMsg}. Please enter details manually.`)
-    } finally {
-      setIsOcrLoading(false)
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: facingMode },
+      })
+      setCameraStream(stream)
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+      }
+    } catch (err) {
+      console.warn('Camera stream not accessible:', err)
     }
   }
 
-  const handleUploadAndSave = async () => {
-    if (!selectedOrder) return
-    const orderIdToVerify = (detectedOrder || selectedOrder.external_order_id || '').trim()
-    if (!orderIdToVerify) {
-      alert('Please detect or manually enter the Order Number reference first.')
-      return
+  useEffect(() => {
+    startCamera()
+    return () => {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach((track) => track.stop())
+      }
     }
+  }, [facingMode])
 
-    setIsSubmitting(true)
-    setSubmitResult(null)
+  // Maintain input focus for scanner guns
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  const handleBlur = () => {
+    setTimeout(() => inputRef.current?.focus(), 150)
+  }
+
+  const toggleCamera = () => {
+    setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'))
+  }
+
+  const capturePhoto = (target: 'slip' | 'box') => {
+    if (!videoRef.current) return
+    const canvas = document.createElement('canvas')
+    canvas.width = videoRef.current.videoWidth || 640
+    canvas.height = videoRef.current.videoHeight || 480
+    const ctx = canvas.getContext('2d')
+    if (ctx) {
+      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height)
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.8)
+      if (target === 'slip') {
+        setSlipPhotoData(dataUrl)
+      } else {
+        setBoxPhotoData(dataUrl)
+      }
+    }
+  }
+
+  const handleVerifySubmit = async (targetOrderNum?: string) => {
+    const activeOrderNum = (targetOrderNum || orderNumber).trim()
+    if (!activeOrderNum) return
+
+    setIsProcessing(true)
+    setStatusState('IDLE')
+    setStatusMessage('')
 
     try {
-      // 1. Convert captured data URLs to binary Blobs
-      const slipBlob = await fetch(slipPhoto!).then((r) => r.blob())
-      const boxBlob = await fetch(boxPhoto!).then((r) => r.blob())
-
-      // 2. Upload Slip
-      const fd1 = new FormData()
-      fd1.append('file', slipBlob, `${orderIdToVerify}_slip.jpg`)
-      const res1 = await axios.post('/api/v1/orders/photo-station/upload', fd1)
-      const slipPath = res1.data.path
-
-      // 3. Upload Box
-      const fd2 = new FormData()
-      fd2.append('file', boxBlob, `${orderIdToVerify}_box.jpg`)
-      const res2 = await axios.post('/api/v1/orders/photo-station/upload', fd2)
-      const boxPath = res2.data.path
-
-      // 4. Verify & save tracking in Backend
-      const verifyRes = await axios.post('/api/v1/orders/photo-station/verify', {
-        order_number: orderIdToVerify,
-        slip_photo_path: slipPath,
-        box_photo_path: boxPath,
-        extracted_tracking_number: detectedTracking || null
-      })
-
-      setSubmitResult(verifyRes.data)
-      if (verifyRes.data.success) {
-        fetchPendingOrders() // Refresh pending list
+      const payload = {
+        order_number: activeOrderNum,
+        slip_photo_path: slipPhotoData || `/volume1/photo/${activeOrderNum}_slip.jpg`,
+        box_photo_path: boxPhotoData || `/volume1/photo/${activeOrderNum}_box.jpg`,
+        extracted_tracking_number: trackingNumber.trim() || undefined,
       }
-    } catch (err: any) {
-      console.error('Save failed:', err)
-      setSubmitResult({
-        success: false,
-        message: err.response?.data?.detail || 'Photo Station upload failed.',
-        verify_status: 'ERROR_MISSING_TRACKING',
-      })
+
+      const res = await axiosClient.post('/orders/photo-station/verify', payload)
+      const { success, verify_status, message } = res.data
+
+      if (success && verify_status === 'VERIFIED') {
+        setStatusState('VERIFIED')
+        setStatusMessage(message || 'Order Verified Successfully!')
+        playSound('success')
+        fetchPendingOrders()
+        // Reset form for next order
+        setOrderNumber('')
+        setTrackingNumber('')
+        setSlipPhotoData(null)
+        setBoxPhotoData(null)
+      } else if (verify_status === 'ERROR_MISSING_TRACKING') {
+        setStatusState('ERROR_MISSING_TRACKING')
+        setStatusMessage('Order found, but Tracking Number is MISSING!')
+        playSound('error')
+      } else {
+        setStatusState('ERROR_NOT_FOUND')
+        setStatusMessage(message || 'Order not found in the system.')
+        playSound('error')
+      }
+    } catch (e: any) {
+      setStatusState('ERROR_NOT_FOUND')
+      setStatusMessage(e?.response?.data?.detail || 'Verification error occurred.')
+      playSound('error')
     } finally {
-      setIsSubmitting(false)
+      setIsProcessing(false)
+      inputRef.current?.focus()
     }
-  }
-
-  const triggerMockCapture = () => {
-    if (!selectedOrder) return
-    const orderId = selectedOrder.external_order_id || `SO-${Math.floor(100000 + Math.random() * 900000)}`
-    if (captureStep === 1) {
-      setSlipPhoto('https://via.placeholder.com/640x480.png?text=Mock+Slip+Photo')
-      setDetectedOrder(orderId)
-      setDetectedPlatform(selectedOrder.platform || 'MANUAL')
-      setDetectedTracking(`94001${Math.floor(10000000000000000 + Math.random() * 9000000000000000)}`)
-    } else {
-      setBoxPhoto('https://via.placeholder.com/640x480.png?text=Mock+Box+Photo')
-      setCaptureStep(3)
-    }
-  }
-
-  // Filter orders by typing last 4 to 6 characters (smart suffix matching)
-  const filteredOrders = pendingOrders.filter((order) => {
-    if (!searchQuery) return true
-    const query = searchQuery.trim().toLowerCase()
-    
-    // Exact match, partial match, or suffix matching for order number
-    const extId = order.external_order_id.toLowerCase()
-    const extNum = (order.external_order_number || '').toLowerCase()
-    
-    return (
-      extId.includes(query) ||
-      extNum.includes(query) ||
-      extId.endsWith(query) ||
-      extNum.endsWith(query)
-    )
-  })
-
-  const renderCapturePanel = (
-    photo: string | null,
-    title: string,
-    onRetake: () => void
-  ) => {
-    return (
-      <Box sx={{ width: '100%', position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        {!photo ? (
-          <Box
-            onClick={triggerFileCapture}
-            sx={{
-              width: '100%',
-              minHeight: 320,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              p: 3,
-              textAlign: 'center',
-              color: '#888',
-              '&:hover': { color: '#bbb' }
-            }}
-          >
-            <CameraAlt sx={{ fontSize: 64, mb: 2 }} />
-            <Typography variant="body1" sx={{ color: '#fff', mb: 1 }}>
-              {title}
-            </Typography>
-            <Typography variant="caption" color="textSecondary">
-              Click the shutter button below or tap this screen to take photo
-            </Typography>
-          </Box>
-        ) : (
-          <Box sx={{ position: 'relative', width: '100%' }}>
-            <img src={photo} alt={title} style={{ width: '100%', display: 'block', maxHeight: 400, objectFit: 'contain' }} />
-            <Button
-              variant="contained"
-              color="error"
-              size="small"
-              startIcon={<Replay />}
-              onClick={onRetake}
-              sx={{ position: 'absolute', top: 12, right: 12, bgcolor: 'rgba(211, 47, 47, 0.9)' }}
-            >
-              Retake
-            </Button>
-          </Box>
-        )}
-
-        {/* Shutter Bar Overlay */}
-        {!photo && (
-          <Box
-            sx={{
-              width: '100%',
-              bgcolor: 'rgba(0,0,0,0.85)',
-              py: 2,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 4,
-              position: 'relative'
-            }}
-          >
-            <Button
-              variant="text"
-              sx={{ color: '#aaa', minWidth: 80 }}
-              onClick={triggerMockCapture}
-            >
-              Mock
-            </Button>
-
-            {/* iOS Circular Shutter Button */}
-            <Box
-              onClick={triggerFileCapture}
-              sx={{
-                width: 72,
-                height: 72,
-                borderRadius: '50%',
-                border: '4px solid #fff',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                transition: 'transform 0.1s ease',
-                '&:active': { transform: 'scale(0.92)' }
-              }}
-            >
-              <Box
-                sx={{
-                  width: 54,
-                  height: 54,
-                  borderRadius: '50%',
-                  bgcolor: '#fff',
-                }}
-              />
-            </Box>
-
-            <Box sx={{ minWidth: 80 }} />
-          </Box>
-        )}
-      </Box>
-    )
   }
 
   return (
-    <Box sx={{ p: 1 }}>
-      <Typography variant="h5" sx={{ mb: 2 }}>
-        Photo Station Verification Queue
-      </Typography>
-
-      {/* Filter and Refresh Row */}
-      <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
-        <TextField
-          sx={{ flexGrow: 1, maxWidth: 500 }}
-          placeholder="Smart Filter (type last 4-6 digits of Order ID...)"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <Search />
-              </InputAdornment>
-            ),
-          }}
-        />
-        <Button
-          variant="outlined"
-          startIcon={<Refresh />}
-          onClick={fetchPendingOrders}
-          disabled={isLoadingOrders}
-        >
-          Refresh List
-        </Button>
-        <Button
-          variant="contained"
-          color="secondary"
-          startIcon={<CameraAlt />}
-          onClick={() => handleOpenCapture({
-            id: 0,
-            external_order_id: '',
-            platform: 'MANUAL',
-            total_amount: 0
-          })}
-        >
-          Direct Capture
-        </Button>
-      </Box>
-
-      {isLoadingOrders ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
-          <CircularProgress />
+    <Box sx={{ p: { xs: 1, md: 3 } }} onClick={() => inputRef.current?.focus()}>
+      {/* Header Banner */}
+      <Paper
+        elevation={0}
+        sx={{
+          p: 2,
+          mb: 2,
+          bgcolor: 'primary.dark',
+          color: 'white',
+          borderRadius: 2,
+          display: 'flex',
+          justify: 'space-between',
+          alignItems: 'center',
+        }}
+      >
+        <Box>
+          <Typography variant="h5" fontWeight="bold" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <CameraAlt /> Photo Station & Order Verification
+          </Typography>
+          <Typography variant="body2" sx={{ opacity: 0.9 }}>
+            Operator: {user?.username} ({user?.role})
+          </Typography>
         </Box>
-      ) : (
-        <TableContainer component={Paper}>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>Platform</TableCell>
-                <TableCell>Order ID</TableCell>
-                <TableCell>Order Number</TableCell>
-                <TableCell>Date Placed</TableCell>
-                <TableCell>Total Amount</TableCell>
-                <TableCell align="right">Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {filteredOrders.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 6 }}>
-                    No pending unverified orders.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filteredOrders.map((order) => (
-                  <TableRow key={order.id} hover>
-                    <TableCell>
-                      <Chip
-                        label={order.platform}
-                        color={
-                          order.platform === 'AMAZON'
-                            ? 'primary'
-                            : order.platform === 'EBAY'
-                            ? 'secondary'
-                            : 'default'
-                        }
-                        size="small"
-                      />
-                    </TableCell>
-                    <TableCell sx={{ fontWeight: 'bold' }}>{order.external_order_id}</TableCell>
-                    <TableCell>{order.external_order_number || '-'}</TableCell>
-                    <TableCell>
-                      {order.ordered_at ? new Date(order.ordered_at).toLocaleDateString() : '-'}
-                    </TableCell>
-                    <TableCell>${parseFloat(order.total_amount ?? 0).toFixed(2)}</TableCell>
-                    <TableCell align="right">
-                      <Button
-                        variant="contained"
-                        color="primary"
-                        startIcon={<CameraAlt />}
-                        onClick={() => handleOpenCapture(order)}
-                      >
-                        Capture Pack
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
+        <Chip
+          icon={<VolumeUp sx={{ color: 'white !important' }} />}
+          label="Audio Feedback Active"
+          color="success"
+          variant="filled"
+        />
+      </Paper>
+
+      {/* Instant Feedback Status Flash Banner */}
+      {statusState !== 'IDLE' && (
+        <Paper
+          elevation={4}
+          sx={{
+            p: 2.5,
+            mb: 3,
+            borderRadius: 2,
+            bgcolor:
+              statusState === 'VERIFIED'
+                ? '#2e7d32'
+                : statusState === 'ERROR_MISSING_TRACKING'
+                ? '#d32f2f'
+                : '#ed6c02',
+            color: 'white',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 2,
+          }}
+        >
+          {statusState === 'VERIFIED' ? (
+            <CheckCircle sx={{ fontSize: 44 }} />
+          ) : (
+            <ErrorIcon sx={{ fontSize: 44 }} />
+          )}
+          <Box>
+            <Typography variant="h6" fontWeight="bold">
+              {statusState === 'VERIFIED'
+                ? 'ORDER VERIFIED & PACKED'
+                : statusState === 'ERROR_MISSING_TRACKING'
+                ? 'ERROR: MISSING TRACKING NUMBER'
+                : 'ORDER NOT FOUND'}
+            </Typography>
+            <Typography variant="body1">{statusMessage}</Typography>
+          </Box>
+        </Paper>
       )}
 
-      {/* Modal Dialog for Camera Capture */}
-      <Dialog
-        open={isModalOpen}
-        onClose={handleCloseModal}
-        maxWidth="md"
-        fullWidth
-        disableEscapeKeyDown
-      >
-        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Typography variant="h6">
-            Pack Verification: {selectedOrder?.external_order_id || 'Direct Capture'} ({selectedOrder?.platform || 'MANUAL'})
-          </Typography>
-          <IconButton onClick={handleCloseModal}>
-            <Close />
-          </IconButton>
-        </DialogTitle>
+      <Grid container spacing={2}>
+        {/* Left Column: Camera Feed & Photo Snapshots */}
+        <Grid item xs={12} md={6}>
+          <Card elevation={2} sx={{ borderRadius: 2 }}>
+            <CardContent>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                <Typography variant="h6" fontWeight="bold">
+                  Camera Feed
+                </Typography>
+                <IconButton onClick={toggleCamera} color="primary" title="Switch Rear/Front Camera">
+                  <Cameraswitch />
+                </IconButton>
+              </Box>
 
-        <DialogContent dividers>
-          <Grid container spacing={2}>
-            {/* Camera Viewport / Captured Preview */}
-            <Grid item xs={12} md={7}>
+              {/* WebRTC Video Viewport */}
               <Box
                 sx={{
-                  width: '100%',
-                  bgcolor: '#121212',
-                  borderRadius: 2,
-                  overflow: 'hidden',
                   position: 'relative',
-                  minHeight: 280,
+                  width: '100%',
+                  height: 240,
+                  bgcolor: 'black',
+                  borderRadius: 1,
+                  overflow: 'hidden',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}
               >
-                {captureStep === 1 && renderCapturePanel(
-                  slipPhoto,
-                  'Ready to Capture Slip & Label',
-                  () => {
-                    setSlipPhoto(null)
-                    setDetectedOrder('')
-                    setDetectedTracking('')
-                    setDetectedPlatform('')
-                  }
-                )}
-
-                {captureStep === 2 && renderCapturePanel(
-                  boxPhoto,
-                  'Ready to Capture Packed Box',
-                  () => setBoxPhoto(null)
-                )}
-
-                {captureStep === 3 && (
-                  <Grid container spacing={0}>
-                    <Grid item xs={6}>
-                      <Typography align="center" variant="caption" sx={{ display: 'block', bgcolor: '#333', color: 'white', py: 0.5 }}>
-                        Slip & Label
-                      </Typography>
-                      <img src={slipPhoto || ''} alt="Slip" style={{ width: '100%', display: 'block', maxHeight: 300, objectFit: 'contain' }} />
-                    </Grid>
-                    <Grid item xs={6}>
-                      <Typography align="center" variant="caption" sx={{ display: 'block', bgcolor: '#333', color: 'white', py: 0.5 }}>
-                        Box Photo
-                      </Typography>
-                      <img src={boxPhoto || ''} alt="Box" style={{ width: '100%', display: 'block', maxHeight: 300, objectFit: 'contain' }} />
-                    </Grid>
-                  </Grid>
-                )}
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
               </Box>
-            </Grid>
 
-            {/* Instruction / Metadata Verification info */}
-            <Grid item xs={12} md={5}>
-              {captureStep === 1 && (
-                <Box>
-                  <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold' }}>
-                    Step 1: Capture Packing Slip & Label
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" paragraph>
-                    Capture both paper forms in one frame. The smart OCR engine will extract Order ID, Platform, and Tracking barcodes.
-                  </Typography>
-
-                  {isOcrLoading && (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, my: 2 }}>
-                      <CircularProgress size={20} />
-                      <Typography variant="body2">Analyzing packing parameters...</Typography>
-                    </Box>
-                  )}
-
-                  {ocrError && (
-                    <Alert severity="warning" sx={{ mb: 2 }}>
-                      <AlertTitle>Image Quality Notice</AlertTitle>
-                      {ocrError}
-                    </Alert>
-                  )}
-
-                  {/* Detected Metadata Fields */}
-                  <TextField
-                    fullWidth
-                    size="small"
-                    label="OCR Detected Order ID"
-                    value={detectedOrder}
-                    onChange={(e) => setDetectedOrder(e.target.value)}
-                    sx={{ mb: 2 }}
-                    helperText={detectedOrder ? `Extracted from document` : `Enter manually if undetected`}
-                  />
-
-                  <TextField
-                    fullWidth
-                    size="small"
-                    label="OCR Detected Tracking Barcode"
-                    value={detectedTracking}
-                    onChange={(e) => setDetectedTracking(e.target.value)}
-                    sx={{ mb: 2 }}
-                    helperText={detectedTracking ? `Carrier Tracking Number` : `Enter manually if barcode undetected`}
-                  />
-
-                  {detectedPlatform && (
-                    <Alert severity="info" sx={{ mb: 2, py: 0 }}>
-                      Recognized platform source: <strong>{detectedPlatform}</strong>
-                    </Alert>
-                  )}
-
-                  {slipPhoto && (
-                    <Button
-                      fullWidth
-                      variant="contained"
-                      onClick={() => setCaptureStep(2)}
-                      disabled={isOcrLoading}
-                    >
-                      Next: Capture Packed Box
-                    </Button>
-                  )}
-                </Box>
-              )}
-
-              {captureStep === 2 && (
-                <Box>
-                  <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold' }}>
-                    Step 2: Capture Finished Packed Box
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" paragraph>
-                    Align the finished shipping package inside the frame and snap the packed photo presentation.
-                  </Typography>
-
+              {/* Photo Capture Touch Buttons */}
+              <Grid container spacing={1} sx={{ mt: 1.5 }}>
+                <Grid item xs={6}>
                   <Button
                     fullWidth
-                    variant="outlined"
-                    startIcon={<Replay />}
-                    onClick={() => setCaptureStep(1)}
+                    variant={slipPhotoData ? 'contained' : 'outlined'}
+                    color={slipPhotoData ? 'success' : 'primary'}
+                    startIcon={<CameraAlt />}
+                    onClick={() => capturePhoto('slip')}
+                    size="large"
                   >
-                    Go Back to Slip
+                    {slipPhotoData ? 'Slip Captured ✓' : 'Snap Slip'}
                   </Button>
-                </Box>
-              )}
-
-              {captureStep === 3 && (
-                <Box>
-                  <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold' }}>
-                    Step 3: Save Verification Status
-                  </Typography>
-
-                  <TextField
+                </Grid>
+                <Grid item xs={6}>
+                  <Button
                     fullWidth
-                    size="small"
-                    label="Final Order Number Reference"
-                    value={detectedOrder || selectedOrder?.external_order_id}
-                    onChange={(e) => setDetectedOrder(e.target.value)}
-                    sx={{ mb: 2 }}
-                  />
+                    variant={boxPhotoData ? 'contained' : 'outlined'}
+                    color={boxPhotoData ? 'success' : 'primary'}
+                    startIcon={<CameraAlt />}
+                    onClick={() => capturePhoto('box')}
+                    size="large"
+                  >
+                    {boxPhotoData ? 'Box Captured ✓' : 'Snap Box'}
+                  </Button>
+                </Grid>
+              </Grid>
 
-                  <TextField
-                    fullWidth
-                    size="small"
-                    label="Final Tracking Barcode"
-                    value={detectedTracking}
-                    onChange={(e) => setDetectedTracking(e.target.value)}
-                    sx={{ mb: 3 }}
-                  />
+              {/* Captured Photo Previews */}
+              <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
+                {slipPhotoData && (
+                  <Box sx={{ width: '50%', textAlign: 'center' }}>
+                    <Typography variant="caption" color="text.secondary">Packing Slip</Typography>
+                    <img src={slipPhotoData} alt="Slip" style={{ width: '100%', height: 90, objectFit: 'cover', borderRadius: 4 }} />
+                  </Box>
+                )}
+                {boxPhotoData && (
+                  <Box sx={{ width: '50%', textAlign: 'center' }}>
+                    <Typography variant="caption" color="text.secondary">Box Photo</Typography>
+                    <img src={boxPhotoData} alt="Box" style={{ width: '100%', height: 90, objectFit: 'cover', borderRadius: 4 }} />
+                  </Box>
+                )}
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
 
-                  {isSubmitting ? (
-                    <Box sx={{ textAlign: 'center', my: 2 }}>
-                      <CircularProgress size={28} />
-                      <Typography variant="body2" sx={{ mt: 1 }}>Uploading files to Synology NAS...</Typography>
+        {/* Right Column: Scan & Order Verification Panel */}
+        <Grid item xs={12} md={6}>
+          <Card elevation={2} sx={{ borderRadius: 2, mb: 2 }}>
+            <CardContent>
+              <Typography variant="h6" fontWeight="bold" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                <QrCodeScanner color="primary" /> Scan & Verify Order
+              </Typography>
+
+              {/* Barcode Scanner Auto-Focus Field */}
+              <TextField
+                inputRef={inputRef}
+                fullWidth
+                label="Scan Order ID / Tracking Barcode"
+                placeholder="Scan or type Order Number..."
+                value={orderNumber}
+                onChange={(e) => setOrderNumber(e.target.value)}
+                onBlur={handleBlur}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleVerifySubmit()
+                  }
+                }}
+                sx={{ mb: 2 }}
+                autoFocus
+              />
+
+              <TextField
+                fullWidth
+                label="Optional Tracking Number (OCR / Manual)"
+                placeholder="Tracking #..."
+                value={trackingNumber}
+                onChange={(e) => setTrackingNumber(e.target.value)}
+                sx={{ mb: 2 }}
+              />
+
+              <Button
+                fullWidth
+                variant="contained"
+                color="primary"
+                size="large"
+                disabled={isProcessing || !orderNumber.trim()}
+                onClick={() => handleVerifySubmit()}
+                sx={{ py: 1.5, fontSize: '1.1rem', fontWeight: 'bold' }}
+              >
+                {isProcessing ? <CircularProgress size={24} color="inherit" /> : 'VERIFY & PACK ORDER'}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Pending Queue List */}
+          <Paper elevation={1} sx={{ p: 2, borderRadius: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+              <Typography variant="subtitle1" fontWeight="bold">
+                Unverified Orders Queue ({pendingOrders.length})
+              </Typography>
+              <IconButton size="small" onClick={fetchPendingOrders} disabled={isLoadingPending}>
+                <Refresh fontSize="small" />
+              </IconButton>
+            </Box>
+
+            <Box sx={{ maxHeight: 220, overflowY: 'auto' }}>
+              {pendingOrders.length === 0 ? (
+                <Typography variant="body2" color="text.secondary" align="center" sx={{ py: 2 }}>
+                  All orders verified & ready for shipment!
+                </Typography>
+              ) : (
+                pendingOrders.map((ord) => (
+                  <Paper
+                    key={ord.id}
+                    variant="outlined"
+                    sx={{
+                      p: 1.2,
+                      mb: 1,
+                      display: 'flex',
+                      justify: 'space-between',
+                      alignItems: 'center',
+                      cursor: 'pointer',
+                      '&:hover': { bgcolor: 'action.hover' },
+                    }}
+                    onClick={() => {
+                      setOrderNumber(ord.external_order_id)
+                      if (ord.tracking_number) setTrackingNumber(ord.tracking_number)
+                      inputRef.current?.focus()
+                    }}
+                  >
+                    <Box>
+                      <Typography variant="body2" fontWeight="bold">
+                        {ord.external_order_id}
+                      </Typography>
+                      <Chip label={ord.platform} size="small" sx={{ fontSize: '0.7rem', height: 18 }} />
                     </Box>
-                  ) : (
-                    <>
-                      {!submitResult ? (
-                        <Button
-                          fullWidth
-                          variant="contained"
-                          color="primary"
-                          startIcon={<CloudUpload />}
-                          onClick={handleUploadAndSave}
-                          size="large"
-                        >
-                          Upload & Validate
-                        </Button>
-                      ) : (
-                        <Box>
-                          {submitResult.success ? (
-                            <Alert
-                              severity="success"
-                              icon={<CheckCircle fontSize="inherit" />}
-                              sx={{ mb: 2 }}
-                            >
-                              <AlertTitle>Verification Completed</AlertTitle>
-                              {submitResult.message}
-                            </Alert>
-                          ) : (
-                            <Alert
-                              severity="error"
-                              icon={<Warning fontSize="inherit" />}
-                              sx={{ mb: 2 }}
-                            >
-                              <AlertTitle>Verification Alert</AlertTitle>
-                              {submitResult.message}
-                            </Alert>
-                          )}
-                          <Button
-                            fullWidth
-                            variant="contained"
-                            color="secondary"
-                            onClick={handleCloseModal}
-                          >
-                            Close & Continue
-                          </Button>
-                        </Box>
-                      )}
-                    </>
-                  )}
-                </Box>
+                    <Button size="small" variant="contained" color="info" onClick={(e) => {
+                      e.stopPropagation()
+                      setOrderNumber(ord.external_order_id)
+                      handleVerifySubmit(ord.external_order_id)
+                    }}>
+                      Verify
+                    </Button>
+                  </Paper>
+                ))
               )}
-            </Grid>
-          </Grid>
-        </DialogContent>
-
-        <DialogActions>
-          <Button onClick={handleCloseModal} color="inherit">
-            Cancel
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <input
-        type="file"
-        accept="image/*"
-        capture="environment"
-        ref={fileInputRef}
-        style={{ display: 'none' }}
-        onChange={handleFileChange}
-      />
+            </Box>
+          </Paper>
+        </Grid>
+      </Grid>
     </Box>
   )
 }

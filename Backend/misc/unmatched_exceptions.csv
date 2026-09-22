@@ -1,1 +1,1 @@
-Order - Number,Item - Name,Item - Qty,Item - Price,Amount - Order Total,Amount - Order Tax,Source Platform
+Order - Number,Bill To - Name,Ship To - Address 1,Ship To - Postal Code,Item - Name,Item - SKU,Item - Qty,Item - Price,Amount - Order Total,Amount - Shipping Cost,Amount - Order Shipping,Date - Order Date,Tracking Number,Source

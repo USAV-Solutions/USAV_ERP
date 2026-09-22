@@ -658,6 +658,7 @@ export default function PurchasingManagement() {
     shipping_amount: 0,
     handling_amount: 0,
     currency: 'USD',
+    source: 'MANUAL',
     is_stationery: false,
     notes: '',
     items: [],
@@ -1680,6 +1681,13 @@ export default function PurchasingManagement() {
               multiline
               minRows={2}
             />
+            <TextField
+              label="Source"
+              value={poForm.source || 'MANUAL'}
+              onChange={(e) => setPoForm((prev) => ({ ...prev, source: e.target.value }))}
+              placeholder="e.g. MANUAL or LCPU"
+              helperText="Use LCPU for Local Pickup"
+            />
             <FormControlLabel
               control={
                 <Checkbox
@@ -2108,6 +2116,7 @@ export default function PurchasingManagement() {
               >
                 <MenuItem value="ALL">All</MenuItem>
                 <MenuItem value="MANUAL">MANUAL</MenuItem>
+                <MenuItem value="LCPU">LCPU (Local Pickup)</MenuItem>
                 <MenuItem value="GOODWILL_SHIPPED">GOODWILL_SHIPPED</MenuItem>
                 <MenuItem value="GOODWILL_PICKUP">GOODWILL_PICKUP</MenuItem>
                 <MenuItem value="AMAZON_CSV">AMAZON_CSV</MenuItem>

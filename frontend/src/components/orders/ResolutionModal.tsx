@@ -48,11 +48,16 @@ import type { OrderDetail, OrderItemDetail } from '../../types/orders'
 
 const PLATFORM_LABELS: Record<string, string> = {
   AMAZON: 'Amazon',
+  AMAZON_RENEW: 'Amazon Renew',
+  AMAZON_FBA: 'Amazon FBA',
   EBAY_MEKONG: 'eBay Mekong',
   EBAY_USAV: 'eBay USAV',
   EBAY_DRAGON: 'eBay Dragon',
+  EBAY_PURCHASING: 'eBay Purchasing',
   ECWID: 'Ecwid',
+  SHOPIFY: 'Shopify',
   WALMART: 'Walmart',
+  WALK_IN: 'Walk-in',
   ZOHO: 'Zoho',
   MANUAL: 'Manual',
 }

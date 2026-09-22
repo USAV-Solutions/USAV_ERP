@@ -6,6 +6,7 @@ from app.integrations.zoho.sync_engine import (
     _is_salesorder_transaction_level_location_error,
     _strip_salesorder_location_fields,
     order_to_zoho_payload,
+    purchase_order_to_zoho_payload,
 )
 from app.modules.orders.models import OrderFulfillmentChannel, OrderPlatform
 
@@ -135,3 +136,75 @@ def test_order_to_zoho_payload_omits_item_id_for_unmatched_items():
     # order.items[0].variant is None
     payload = order_to_zoho_payload(order)
     assert "item_id" not in payload["line_items"][0]
+
+
+def test_amazon_renew_order_maps_to_amazon_renew_so_source():
+    order = _build_order(
+        platform=OrderPlatform.AMAZON_RENEW,
+        source="SHIPSTATION_CSV",
+        tax_amount="5.00",
+        shipping_amount="0.00",
+        total_amount="128.88",
+    )
+    payload = order_to_zoho_payload(order)
+    assert payload["custom_fields"] == [{"api_name": "cf_source", "value": "Amazon_Renew"}]
+    assert payload["adjustment_description"] == "Handling fee"
+
+
+def test_amazon_fba_platform_order_maps_to_amazon_fba_so_source_and_sets_location_id():
+    order = _build_order(
+        platform=OrderPlatform.AMAZON_FBA,
+        source="AMAZON_FBA_CSV",
+        tax_amount="5.00",
+        shipping_amount="0.00",
+        total_amount="128.88",
+    )
+    payload = order_to_zoho_payload(order)
+    assert payload["custom_fields"] == [{"api_name": "cf_source", "value": "Amazon FBA"}]
+    assert payload["line_items"][0]["location_id"] == "5623409000001937413"
+
+
+def test_ebay_purchasing_order_maps_to_ebay_purchasing_so_source():
+    order = _build_order(
+        platform=OrderPlatform.EBAY_PURCHASING,
+        source="EBAY_SALE_ORDER_CSV",
+        tax_amount="0.00",
+        shipping_amount="0.00",
+        total_amount="128.88",
+    )
+    payload = order_to_zoho_payload(order)
+    assert payload["custom_fields"] == [{"api_name": "cf_source", "value": "Ebay_Purchasing"}]
+
+
+def test_walk_in_order_maps_to_walk_in_so_source():
+    order = _build_order(
+        platform=OrderPlatform.WALK_IN,
+        source="MANUAL",
+        tax_amount="8.00",
+        shipping_amount="0.00",
+        total_amount="136.88",
+    )
+    payload = order_to_zoho_payload(order)
+    assert payload["custom_fields"] == [{"api_name": "cf_source", "value": "Walk-in"}]
+
+
+def test_purchase_order_lcpu_source_maps_to_local_pickup():
+    vendor = SimpleNamespace(zoho_id="vendor-1", name="Local Seller")
+    po = SimpleNamespace(
+        po_number="PO-2001",
+        vendor=vendor,
+        order_date=datetime(2026, 6, 2).date(),
+        currency="USD",
+        tracking_number=None,
+        expected_delivery_date=None,
+        tax_amount=Decimal("0.00"),
+        shipping_amount=Decimal("0.00"),
+        handling_amount=Decimal("0.00"),
+        source="LCPU",
+        is_stationery=False,
+        notes="",
+        items=[],
+    )
+    payload = purchase_order_to_zoho_payload(po)
+    cf_source = next((cf["value"] for cf in payload.get("custom_fields", []) if cf.get("api_name") == "cf_source"), None)
+    assert cf_source == "Local Pickup"

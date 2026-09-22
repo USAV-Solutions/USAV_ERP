@@ -9,6 +9,8 @@
 
 export type OrderPlatform =
   | 'AMAZON'
+  | 'AMAZON_RENEW'
+  | 'AMAZON_FBA'
   | 'EBAY_MEKONG'
   | 'EBAY_USAV'
   | 'EBAY_DRAGON'
@@ -16,6 +18,7 @@ export type OrderPlatform =
   | 'ECWID'
   | 'SHOPIFY'
   | 'WALMART'
+  | 'WALK_IN'
   | 'ZOHO'
   | 'MANUAL'
 
@@ -211,7 +214,8 @@ export interface OrderListResponse {
 }
 
 export interface OrderStatusUpdate {
-  status: OrderStatus
+  status?: OrderStatus
+  platform?: OrderPlatform
   notes?: string
 }
 

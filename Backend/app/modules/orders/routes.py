@@ -97,10 +97,13 @@ router = APIRouter(prefix="/orders", tags=["Orders"])
 
 _MARKETPLACE_ZOHO_EXCLUDE_TAX_PLATFORMS = {
     OrderPlatform.AMAZON,
+    OrderPlatform.AMAZON_RENEW,
+    OrderPlatform.AMAZON_FBA,
     OrderPlatform.WALMART,
     OrderPlatform.EBAY_MEKONG,
     OrderPlatform.EBAY_USAV,
     OrderPlatform.EBAY_DRAGON,
+    OrderPlatform.EBAY_PURCHASING,
 }
 
 
@@ -345,6 +348,10 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
         if row_data.get("Sales Record Number"):
             return "EBAY_PURCHASING"
         text = _platform_signal_text(row_data)
+        norm_text = text.replace("-", "_").replace(" ", "_")
+
+        if "WALK_IN" in norm_text or "WALKIN" in norm_text:
+            return "WALK_IN"
         if "SHOPIFY" in text:
             return "SHOPIFY"
         if "ECWID" in text:
@@ -352,13 +359,19 @@ def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
         if "WALMART" in text:
             return "WALMART"
         if "AMAZON" in text:
+            if "RENEW" in text:
+                return "AMAZON_RENEW"
+            if "FBA" in text:
+                return "AMAZON_FBA"
             return "AMAZON"
-        if "EBAY_USAV" in text:
-            return "EBAY_USAV"
-        if "EBAY_MEKONG" in text:
-            return "EBAY_MEKONG"
-        if "EBAY_DRAGON" in text:
+        if "DRAGON" in text:
             return "EBAY_DRAGON"
+        if "MEKONG" in text:
+            return "EBAY_MEKONG"
+        if "PURCHASING" in text:
+            return "EBAY_PURCHASING"
+        if "EBAY_USAV" in norm_text:
+            return "EBAY_USAV"
         if "EBAY" in text:
             return "EBAY_USAV"
         return "MANUAL"
@@ -624,7 +637,7 @@ def _parse_amazon_fba_csv(file_text: str) -> tuple[list[dict], int, int]:
         order_entry = grouped.get(order_id)
         if order_entry is None:
             order_entry = {
-                "platform_name": "AMAZON",
+                "platform_name": "AMAZON_FBA",
                 "platform_order_id": order_id,
                 "platform_order_number": _pick(row, "merchant-order-id", "order-id"),
                 "customer_name": _pick(row, "buyer-name", "buyer-id"),
@@ -1946,7 +1959,7 @@ async def update_order_status(
     order_repo: OrderRepository = Depends(get_order_repo),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update an order's processing status and/or notes."""
+    """Update an order's processing status, notes, and/or platform."""
     order = await order_repo.get_with_items(order_id)
     if order is None:
         raise HTTPException(
@@ -1954,17 +1967,26 @@ async def update_order_status(
             detail=f"Order {order_id} not found.",
         )
 
-    # Enforce that any order marked as SHIPPED or DELIVERED must have a tracking number
-    if body.status in {OrderStatus.SHIPPED, OrderStatus.DELIVERED}:
-        if not order.tracking_number:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Tracking number is required when setting status to SHIPPED or DELIVERED."
-            )
+    update_data: dict = {}
+    if body.status is not None:
+        # Enforce that any order marked as SHIPPED or DELIVERED must have a tracking number
+        if body.status in {OrderStatus.SHIPPED, OrderStatus.DELIVERED}:
+            if not order.tracking_number:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Tracking number is required when setting status to SHIPPED or DELIVERED."
+                )
+        update_data["status"] = body.status
 
-    update_data: dict = {"status": body.status}
     if body.notes is not None:
         update_data["processing_notes"] = body.notes
+
+    if body.platform is not None:
+        update_data["platform"] = body.platform
+        update_data["zoho_sync_status"] = ZohoSyncStatus.DIRTY
+
+    if not update_data:
+        return OrderDetail.model_validate(order)
 
     updated = await order_repo.update(order, update_data)
     await db.commit()
@@ -2482,3 +2504,165 @@ async def upload_photo_station_file(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Upload failed: {str(e)}"
         )
+
+
+@router.post("/photo-station/diagnose")
+async def diagnose_packing_photo(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Diagnose a packing station photo using Gemini 3.5 Flash Vision AI.
+    Extracts document OCR (Order ID, Tracking, SKU) and compares physical item with ERP records.
+    """
+    from app.modules.orders.diagnose import diagnose_packaging_photo_bytes
+    
+    image_bytes = await file.read()
+    res = await diagnose_packaging_photo_bytes(
+        image_bytes=image_bytes,
+        filename=file.filename or "sample_photo.jpg",
+        mime_type=file.content_type or "image/jpeg",
+        db=db,
+        include_image_data_url=True,
+    )
+    return res
+
+
+class NASDiagnoseRequest(BaseModel):
+    folder_path: str = "/USAV Media/Packing Shipping/Packing Photos/Packing Station 2/2026/Q2 26"
+    limit: int = 5
+
+
+class NASSingleFileRequest(BaseModel):
+    file_path: str
+
+
+@router.get("/photo-station/nas-files")
+async def list_nas_folder_files(
+    folder_path: str = "/USAV Media/Packing Shipping/Packing Photos/Packing Station 2/2026/Q2 26",
+    offset: int = 0,
+    limit: int = 10,
+):
+    """
+    List files available in a Synology NAS folder with offset pagination.
+    """
+    from app.core.synology import list_synology_files
+    try:
+        nas_files = list_synology_files(folder_path)
+        filtered = [f for f in nas_files if f.lower().endswith((".jpg", ".jpeg", ".png"))]
+        sliced = filtered[offset:offset + limit]
+        return {
+            "folder_path": folder_path,
+            "total_in_folder": len(filtered),
+            "offset": offset,
+            "limit": limit,
+            "files": sliced,
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to list Synology NAS folder: {str(e)}"
+        )
+
+
+# In-memory diagnostic cache to prevent duplicate NAS/Gemini execution
+nas_file_diag_cache: dict = {}
+
+@router.post("/photo-station/clear-cache")
+async def clear_nas_diagnostic_cache():
+    """
+    Clear in-memory NAS diagnostic cache.
+    """
+    global nas_file_diag_cache
+    count = len(nas_file_diag_cache)
+    nas_file_diag_cache.clear()
+    logger.info(f"[NAS DIAG API] Cleared {count} entries from diagnostic cache.")
+    return {"message": f"Cleared {count} cached diagnostic items."}
+
+@router.post("/photo-station/diagnose-nas-file")
+async def diagnose_single_nas_file(
+    req: NASSingleFileRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Diagnose a single file from Synology NAS and return result with base64 thumbnail URL.
+    Uses a 120-second in-memory cache to prevent duplicate processing of the same file.
+    """
+    import os
+    import time
+    from app.core.synology import download_synology_file
+    from app.modules.orders.diagnose import diagnose_packaging_photo_bytes
+
+    now = time.time()
+    logger.info(f"[NAS DIAG API] Incoming POST request for file_path='{req.file_path}' (Cache Size: {len(nas_file_diag_cache)})")
+
+    # Check cache (120 seconds TTL)
+    if req.file_path in nas_file_diag_cache:
+        cached_time, cached_res = nas_file_diag_cache[req.file_path]
+        age = round(now - cached_time, 2)
+        if age < 120:
+            logger.info(f"[NAS DIAG API - CACHE HIT] Returning cached result for '{req.file_path}' (Age: {age}s)")
+            return cached_res
+        else:
+            logger.info(f"[NAS DIAG API - CACHE EXPIRED] Cache age {age}s > 120s for '{req.file_path}', re-diagnosing.")
+
+    logger.info(f"[NAS DIAG API - CACHE MISS] Downloading & analyzing NAS file '{req.file_path}' with Gemini 3.5 Flash")
+    try:
+        image_bytes = download_synology_file(req.file_path)
+        filename = os.path.basename(req.file_path)
+        res = await diagnose_packaging_photo_bytes(
+            image_bytes=image_bytes,
+            filename=filename,
+            mime_type="image/jpeg",
+            db=db,
+            include_image_data_url=True,
+        )
+        nas_file_diag_cache[req.file_path] = (now, res)
+        logger.info(f"[NAS DIAG API - SUCCESS] Finished diagnosis for '{filename}' in {res.latency_ms}ms (Status: {res.status})")
+        return res
+    except Exception as e:
+        logger.error(f"[NAS DIAG API - ERROR] Failed to diagnose '{req.file_path}': {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to diagnose NAS file {req.file_path}: {str(e)}"
+        )
+
+
+@router.post("/photo-station/diagnose-nas")
+async def diagnose_nas_folder(
+    req: NASDiagnoseRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Bulk diagnose historical sample photos from Synology NAS folder over QuickConnect WebAPI.
+    Returns results with embedded image previews for live rendering in the UI.
+    """
+    import os
+    from app.core.synology import list_synology_files, download_synology_file
+    from app.modules.orders.diagnose import diagnose_packaging_photo_bytes
+
+    try:
+        nas_files = list_synology_files(req.folder_path)
+        nas_files = [f for f in nas_files if f.lower().endswith((".jpg", ".jpeg", ".png"))][:req.limit]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to fetch files from Synology NAS: {str(e)}"
+        )
+
+    results = []
+    for file_path in nas_files:
+        try:
+            image_bytes = download_synology_file(file_path)
+            res = await diagnose_packaging_photo_bytes(
+                image_bytes=image_bytes,
+                filename=os.path.basename(file_path),
+                mime_type="image/jpeg",
+                db=db,
+                include_image_data_url=True,
+            )
+            results.append(res)
+        except Exception as e:
+            logger.error(f"Failed to diagnose NAS file {file_path}: {e}")
+
+    return results

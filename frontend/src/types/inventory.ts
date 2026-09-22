@@ -169,8 +169,18 @@ export interface BundleComponent {
   role: 'Primary' | 'Accessory' | 'Satellite'
 }
 
-// Platform types
-export type Platform = 'AMAZON' | 'EBAY_MEKONG' | 'EBAY_USAV' | 'EBAY_DRAGON' | 'EBAY_PURCHASING' | 'ECWID' | 'SHOPIFY' | 'WALMART'
+export type Platform =
+  | 'AMAZON'
+  | 'AMAZON_RENEW'
+  | 'AMAZON_FBA'
+  | 'EBAY_MEKONG'
+  | 'EBAY_USAV'
+  | 'EBAY_DRAGON'
+  | 'EBAY_PURCHASING'
+  | 'ECWID'
+  | 'SHOPIFY'
+  | 'WALMART'
+  | 'WALK_IN'
 export type PlatformSyncStatus = 'PENDING' | 'SYNCED' | 'ERROR'
 
 export interface PlatformListing {

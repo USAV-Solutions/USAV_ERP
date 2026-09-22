@@ -371,6 +371,48 @@ def _extract_custom_field_decimal(po_payload: dict, *keys: str) -> Decimal:
     return Decimal("0")
 
 
+def _extract_custom_field_string(po_payload: dict, *keys: str) -> str | None:
+    aliases = _build_custom_field_aliases(*keys)
+    custom_hash = po_payload.get("custom_field_hash") or {}
+    if isinstance(custom_hash, dict):
+        for key, raw_value in custom_hash.items():
+            normalized = _normalize_custom_field_key(key)
+            if normalized.endswith("_unformatted"):
+                normalized = normalized[: -len("_unformatted")]
+            if normalized in aliases:
+                val = str(raw_value or "").strip()
+                if val:
+                    return val
+
+    custom_fields = po_payload.get("custom_fields") or []
+    if isinstance(custom_fields, list):
+        for field in custom_fields:
+            if not isinstance(field, dict):
+                continue
+            candidates = {
+                _normalize_custom_field_key(field.get("api_name")),
+                _normalize_custom_field_key(field.get("label")),
+                _normalize_custom_field_key(field.get("field_name")),
+            }
+            if candidates.isdisjoint(aliases):
+                continue
+            for val_key in ("value_formatted", "value", "value_unformatted"):
+                if val_key in field and field.get(val_key) is not None:
+                    val = str(field.get(val_key) or "").strip()
+                    if val:
+                        return val
+
+    for key in keys:
+        norm = _normalize_custom_field_key(key)
+        if norm in po_payload and po_payload.get(norm):
+            return str(po_payload.get(norm)).strip()
+        cf_key = f"cf_{norm}" if not norm.startswith("cf_") else norm
+        if cf_key in po_payload and po_payload.get(cf_key):
+            return str(po_payload.get(cf_key)).strip()
+
+    return None
+
+
 def _sum_line_item_tax_amounts(po_payload: dict) -> Decimal:
     tax_total = Decimal("0")
     line_items = po_payload.get("line_items") or []
@@ -528,6 +570,10 @@ async def create_purchase_order(
     po_payload["total_amount"] = Decimal("0")
     po_payload["zoho_sync_status"] = ZohoSyncStatus.DIRTY
     po_payload["zoho_sync_error"] = None
+    if po_payload.get("source"):
+        po_payload["source"] = str(po_payload["source"]).strip().upper()
+    else:
+        po_payload["source"] = "MANUAL"
     po = await po_repo.create(po_payload)
 
     for item in body.items:
@@ -592,6 +638,9 @@ async def update_purchase_order(
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="po_number already exists")
 
         payload["po_number"] = normalized_number
+
+    if "source" in payload and payload["source"]:
+        payload["source"] = str(payload["source"]).strip().upper()
 
     payload["zoho_sync_status"] = ZohoSyncStatus.DIRTY
     payload["zoho_sync_error"] = None
@@ -950,7 +999,21 @@ async def import_purchasing_from_zoho(
                 "tax_amount": tax_amount,
                 "shipping_amount": shipping_amount,
                 "handling_amount": handling_amount,
-                "source": "ZOHO_IMPORT",
+                "source": (
+                    "LCPU"
+                    if (
+                        (cf_source_val := (
+                            _extract_custom_field_string(zoho_po_detail, "source", "po_source", "cf_source")
+                            or _extract_custom_field_string(zoho_po, "source", "po_source", "cf_source")
+                        ))
+                        and ("LOCAL" in cf_source_val.upper() or "LCPU" in cf_source_val.upper())
+                    )
+                    else (
+                        existing_po.source
+                        if existing_po is not None and existing_po.source and existing_po.source != "ZOHO_IMPORT"
+                        else "ZOHO_IMPORT"
+                    )
+                ),
                 "notes": zoho_po_detail.get("notes") or zoho_po_detail.get("terms") or zoho_po.get("notes") or zoho_po.get("terms"),
                 "zoho_id": zoho_po_id or None,
                 "zoho_sync_status": ZohoSyncStatus.SYNCED,

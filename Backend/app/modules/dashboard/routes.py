@@ -23,7 +23,7 @@ from app.modules.orders.models import OrderPlatform
 router = APIRouter(
     prefix="/dashboard/best-selling",
     tags=["Best Selling Dashboard"],
-    dependencies=[Depends(require_roles(UserRole.ADMIN, UserRole.SALES_REP, UserRole.ACCOUNTANT, UserRole.WAREHOUSE_OP))],
+    dependencies=[Depends(require_roles(UserRole.ADMIN, UserRole.SALES_REP, UserRole.ACCOUNTANT, UserRole.WAREHOUSE_OP, UserRole.PACKER))],
 )
 
 

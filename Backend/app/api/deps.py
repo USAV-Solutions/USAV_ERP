@@ -136,11 +136,23 @@ async def require_admin_or_sales(
 async def require_admin_or_warehouse(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> User:
-    """Require ADMIN or WAREHOUSE_OP role."""
-    if not current_user.is_superuser and current_user.role not in [UserRole.ADMIN, UserRole.WAREHOUSE_OP]:
+    """Require ADMIN, WAREHOUSE_OP, or PACKER role."""
+    if not current_user.is_superuser and current_user.role not in [UserRole.ADMIN, UserRole.WAREHOUSE_OP, UserRole.PACKER]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin or Warehouse Operator access required",
+            detail="Admin, Warehouse Operator, or Packer access required",
+        )
+    return current_user
+
+
+async def require_packer(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    """Require ADMIN, WAREHOUSE_OP, or PACKER role."""
+    if not current_user.is_superuser and current_user.role not in [UserRole.ADMIN, UserRole.WAREHOUSE_OP, UserRole.PACKER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Packer or Warehouse access required",
         )
     return current_user
 
@@ -151,3 +163,4 @@ OptionalUser = Annotated[Optional[User], Depends(get_current_user_optional)]
 AdminUser = Annotated[User, Depends(require_admin)]
 AdminOrSalesUser = Annotated[User, Depends(require_admin_or_sales)]
 AdminOrWarehouseUser = Annotated[User, Depends(require_admin_or_warehouse)]
+PackerUser = Annotated[User, Depends(require_packer)]

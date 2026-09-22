@@ -38,6 +38,7 @@ import {
   QrCodeScanner,
   Add as AddIcon,
   CameraAlt,
+  AutoAwesome,
   Hub,
 } from '@mui/icons-material'
 import { useAuth } from '../../hooks/useAuth'
@@ -50,22 +51,23 @@ interface NavItem {
   title: string
   path?: string
   icon: React.ReactNode
-  roles: ('ADMIN' | 'WAREHOUSE_OP' | 'SALES_REP' | 'ACCOUNTANT')[]
+  roles: ('ADMIN' | 'WAREHOUSE_OP' | 'PACKER' | 'SALES_REP' | 'ACCOUNTANT')[]
   children?: NavItem[]
 }
 
 const navItems: NavItem[] = [
   { title: 'Orbit', path: '/catalog/listings/graph', icon: <Hub />, roles: ['ADMIN', 'SALES_REP', 'WAREHOUSE_OP'] },
   { title: 'Dashboard', path: '/', icon: <Dashboard />, roles: ['ADMIN', 'WAREHOUSE_OP', 'SALES_REP', 'ACCOUNTANT'] },
-  { title: 'Warehouse Operations', path: '/warehouse/ops', icon: <Search />, roles: ['ADMIN', 'WAREHOUSE_OP'] },
+  { title: 'Warehouse Operations', path: '/warehouse/ops', icon: <Search />, roles: ['ADMIN', 'WAREHOUSE_OP', 'PACKER'] },
   {
     title: 'Barcode Scanner',
     icon: <QrCodeScanner />,
-    roles: ['ADMIN', 'WAREHOUSE_OP'],
+    roles: ['ADMIN', 'WAREHOUSE_OP', 'PACKER'],
     children: [
-      { title: 'Scan Barcodes', path: '/scan', icon: <QrCodeScanner />, roles: ['ADMIN', 'WAREHOUSE_OP'] },
-      { title: 'Photo Station', path: '/scan/photo-station', icon: <CameraAlt />, roles: ['ADMIN', 'WAREHOUSE_OP'] },
-      { title: 'End-of-Day Verification', path: '/scan/end-of-day', icon: <LocalShipping />, roles: ['ADMIN', 'WAREHOUSE_OP'] },
+      { title: 'Scan Barcodes', path: '/scan', icon: <QrCodeScanner />, roles: ['ADMIN', 'WAREHOUSE_OP', 'PACKER'] },
+      { title: 'Photo Station', path: '/scan/photo-station', icon: <CameraAlt />, roles: ['ADMIN', 'WAREHOUSE_OP', 'PACKER'] },
+      { title: 'AI Diagnostic Sandbox', path: '/scan/photo-station/test-diagnostics', icon: <AutoAwesome />, roles: ['ADMIN', 'WAREHOUSE_OP', 'PACKER'] },
+      { title: 'End-of-Day Verification', path: '/scan/end-of-day', icon: <LocalShipping />, roles: ['ADMIN', 'WAREHOUSE_OP', 'PACKER'] },
     ],
   },
   { title: 'Inventory Management', path: '/catalog/inventory', icon: <Inventory />, roles: ['ADMIN', 'SALES_REP'] },
@@ -78,7 +80,7 @@ const navItems: NavItem[] = [
       { title: 'Create New Listing', path: '/catalog/listings/create', icon: <AddIcon />, roles: ['ADMIN', 'SALES_REP'] },
     ],
   },
-  { title: 'Orders', path: '/orders', icon: <ShoppingCart />, roles: ['ADMIN', 'SALES_REP', 'WAREHOUSE_OP'] },
+  { title: 'Orders', path: '/orders', icon: <ShoppingCart />, roles: ['ADMIN', 'SALES_REP', 'WAREHOUSE_OP', 'PACKER'] },
   { title: 'Returns', path: '/returns', icon: <AssignmentReturn />, roles: ['ADMIN', 'SALES_REP', 'WAREHOUSE_OP'] },
   { title: 'Purchasing', path: '/purchasing', icon: <LocalShipping />, roles: ['ADMIN', 'SALES_REP', 'WAREHOUSE_OP'] },
   {

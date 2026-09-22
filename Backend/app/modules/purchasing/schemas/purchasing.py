@@ -169,6 +169,7 @@ class PurchaseFileImportSource(str, Enum):
     EBAY_PURCHASING = "ebay_purchasing"
     EBAY_USAV = "ebay_usav"
     EBAY_DRAGON = "ebay_dragon"
+    LCPU = "lcpu"
 
 
 class PurchaseFileImportResponse(BaseModel):

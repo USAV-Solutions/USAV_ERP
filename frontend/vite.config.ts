@@ -6,6 +6,7 @@ export default defineConfig({
   server: {
     port: 3636,
     host: '0.0.0.0',
+    allowedHosts: true,
     watch: {
       usePolling: true,
     },

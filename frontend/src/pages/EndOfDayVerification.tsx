@@ -12,8 +12,8 @@ import {
   AlertTitle,
   Divider,
 } from '@mui/material'
-import { CameraAlt, CloudUpload, CheckCircle, Warning, Cached } from '@mui/icons-material'
-import axios from 'axios'
+import { CameraAlt, CloudUpload, CheckCircle, Warning, Cached, LocalShipping } from '@mui/icons-material'
+import axiosClient from '../api/axiosClient'
 
 export default function EndOfDayVerification() {
   const [shelfPhoto, setShelfPhoto] = useState<string | null>(null)
@@ -40,7 +40,6 @@ export default function EndOfDayVerification() {
   }, [])
 
   const startCamera = async () => {
-    stopCamera()
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true })
       streamRef.current = stream
@@ -48,239 +47,146 @@ export default function EndOfDayVerification() {
         videoRef.current.srcObject = stream
       }
     } catch (err) {
-      console.error('Error accessing camera:', err)
+      console.warn("Could not access camera for shelf verification:", err)
     }
   }
 
   const stopCamera = () => {
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop())
-      streamRef.current = null
+      streamRef.current.getTracks().forEach(track => track.stop())
     }
   }
 
   const capturePhoto = () => {
-    if (!videoRef.current || !canvasRef.current) return
-    const video = videoRef.current
-    const canvas = canvasRef.current
-    const context = canvas.getContext('2d')
-    if (!context) return
-
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
-    context.drawImage(video, 0, 0, canvas.width, canvas.height)
-    const dataUrl = canvas.toDataURL('image/jpeg')
-    setShelfPhoto(dataUrl)
-    stopCamera()
+    if (videoRef.current && canvasRef.current) {
+      const context = canvasRef.current.getContext('2d')
+      if (context) {
+        canvasRef.current.width = videoRef.current.videoWidth
+        canvasRef.current.height = videoRef.current.videoHeight
+        context.drawImage(videoRef.current, 0, 0)
+        const dataUrl = canvasRef.current.toDataURL('image/jpeg')
+        setShelfPhoto(dataUrl)
+      }
+    }
   }
 
-  const handleVerify = async () => {
-    if (!shelfPhoto && !manualCount) {
-      alert('Please take a shelf photo or enter a manual box count.')
-      return
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file) {
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        setShelfPhoto(reader.result as string)
+      }
+      reader.readAsDataURL(file)
     }
+  }
 
+  const handleSubmit = async () => {
     setIsSubmitting(true)
     setResult(null)
 
     try {
-      let uploadedPath = ''
-      if (shelfPhoto) {
-        // Convert captured data URL to a binary Blob
-        const blob = await fetch(shelfPhoto).then((r) => r.blob())
-        const fd = new FormData()
-        fd.append('file', blob, 'packed_shelf.jpg')
-        const uploadRes = await axios.post('/api/v1/orders/photo-station/upload', fd)
-        uploadedPath = uploadRes.data.path
+      const payload = {
+        photo_path: shelfPhoto || '/volume1/photo/shelf_end_of_day.jpg',
+        manual_box_count: manualCount.trim() ? parseInt(manualCount.trim(), 10) : undefined,
       }
 
-      // Verify box counts against verified orders database
-      const verifyRes = await axios.post('/api/v1/orders/photo-station/verify-shelf', {
-        photo_path: uploadedPath || '/volume1/photo/shelf.jpg',
-        manual_box_count: manualCount ? parseInt(manualCount, 10) : null,
-      })
-
-      setResult(verifyRes.data)
-    } catch (err: any) {
-      console.error('EOD Verification failed:', err)
+      const res = await axiosClient.post('/orders/photo-station/verify-shelf', payload)
+      setResult(res.data)
+    } catch (e: any) {
       setResult({
         success: false,
-        box_count: manualCount ? parseInt(manualCount, 10) : 0,
+        box_count: 0,
         verified_orders_count: 0,
         mismatch: true,
-        message: err.response?.data?.detail || 'EOD verification request failed.',
+        message: e?.response?.data?.detail || 'Shelf count verification failed.',
       })
     } finally {
       setIsSubmitting(false)
     }
   }
 
-  const resetVerification = () => {
-    setShelfPhoto(null)
-    setManualCount('')
-    setResult(null)
-    startCamera()
-  }
-
-  const triggerMockCapture = () => {
-    setShelfPhoto('https://via.placeholder.com/640x480.png?text=Mock+Packed+Shelf+Photo')
-    stopCamera()
-  }
-
   return (
-    <Box sx={{ maxWidth: 850, mx: 'auto', p: 2 }}>
-      <Typography variant="h4" align="center" gutterBottom>
-        End-of-Day Box Count Verification
+    <Box sx={{ p: { xs: 2, md: 4 }, maxWidth: 1000, margin: '0 auto' }}>
+      <Typography variant="h4" gutterBottom sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}>
+        <LocalShipping color="primary" fontSize="large" /> End-of-Day Shelf Verification
       </Typography>
-      <Typography variant="body1" align="center" color="text.secondary" paragraph>
-        Warehouse Manager: Snap a photo of the completed shelf boxes ready for pickup to run automatic verification.
+      <Typography variant="body1" color="text.secondary" paragraph>
+        Audit physical shelf box count against verified orders before dispatch.
       </Typography>
 
-      <Grid container spacing={3} sx={{ mt: 1 }}>
-        {/* Left Side: Photo Capture */}
-        <Grid item xs={12} md={7}>
-          <Card raised sx={{ bgcolor: '#1e1e1e', color: 'white', minHeight: 320 }}>
-            <CardContent sx={{ position: 'relative', p: 0, '&:last-child': { pb: 0 } }}>
-              {!shelfPhoto ? (
-                <Box sx={{ position: 'relative' }}>
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    style={{ width: '100%', height: 'auto', display: 'block' }}
-                  />
-                  <Box
-                    sx={{
-                      position: 'absolute',
-                      bottom: 16,
-                      left: '50%',
-                      transform: 'translateX(-50%)',
-                      display: 'flex',
-                      gap: 2,
-                    }}
-                  >
-                    <Button
-                      variant="contained"
-                      color="secondary"
-                      startIcon={<CameraAlt />}
-                      onClick={capturePhoto}
-                      size="large"
-                    >
-                      Capture Shelf Photo
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      color="inherit"
-                      onClick={triggerMockCapture}
-                      sx={{ bgcolor: 'rgba(0,0,0,0.5)' }}
-                    >
-                      Mock Capture
-                    </Button>
-                  </Box>
-                </Box>
-              ) : (
-                <Box>
-                  <img
-                    src={shelfPhoto}
-                    alt="Packed shelf"
-                    style={{ width: '100%', height: 'auto', display: 'block' }}
-                  />
-                  <Button
-                    fullWidth
-                    variant="text"
-                    color="inherit"
-                    onClick={resetVerification}
-                    startIcon={<Cached />}
-                    sx={{ py: 1, bgcolor: '#333' }}
-                  >
-                    Retake Photo
-                  </Button>
-                </Box>
-              )}
+      {result && (
+        <Alert
+          severity={result.success ? "success" : "error"}
+          icon={result.success ? <CheckCircle fontSize="inherit" /> : <Warning fontSize="inherit" />}
+          sx={{ mb: 3 }}
+        >
+          <AlertTitle sx={{ fontWeight: 'bold' }}>
+            {result.success ? "SHELF COUNT MATCHED — READY TO SHIP" : "COUNT MISMATCH WARNING"}
+          </AlertTitle>
+          {result.message} — Verified Orders: <strong>{result.verified_orders_count}</strong> | Shelf Count: <strong>{result.box_count}</strong>
+        </Alert>
+      )}
+
+      <Grid container spacing={3}>
+        <Grid item xs={12} md={6}>
+          <Card elevation={3}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Shelf Photo Stream
+              </Typography>
+              <Box sx={{ position: 'relative', width: '100%', height: 260, bgcolor: 'black', borderRadius: 1, overflow: 'hidden', mb: 2 }}>
+                <video ref={videoRef} autoPlay playsInline muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                <canvas ref={canvasRef} style={{ display: 'none' }} />
+              </Box>
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button fullWidth variant="contained" startIcon={<CameraAlt />} onClick={capturePhoto}>
+                  Snap Shelf
+                </Button>
+                <Button component="label" variant="outlined" startIcon={<CloudUpload />}>
+                  Upload
+                  <input type="file" accept="image/*" hidden onChange={handleFileUpload} />
+                </Button>
+              </Box>
             </CardContent>
           </Card>
         </Grid>
 
-        {/* Right Side: Counting Validation Actions */}
-        <Grid item xs={12} md={5}>
-          <Card sx={{ height: '100%' }}>
+        <Grid item xs={12} md={6}>
+          <Card elevation={3}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
-                Validation Engine
+                Manual Audit & Run
               </Typography>
-              <Divider sx={{ mb: 2 }} />
+
+              {shelfPhoto && (
+                <Box sx={{ mb: 2, textAlign: 'center' }}>
+                  <Typography variant="caption" display="block">Captured Shelf Image</Typography>
+                  <img src={shelfPhoto} alt="Shelf Preview" style={{ width: '100%', maxHeight: 120, objectFit: 'cover', borderRadius: 4 }} />
+                </Box>
+              )}
 
               <TextField
                 fullWidth
-                label="Manual Box Count Override"
                 type="number"
+                label="Manual Shelf Box Count (Optional)"
+                placeholder="Enter box count on shelf..."
                 value={manualCount}
                 onChange={(e) => setManualCount(e.target.value)}
-                placeholder="Optional manual count override"
                 sx={{ mb: 3 }}
-                helperText="Leave empty to use NVIDIA Locate Anything AI counting"
               />
 
-              {isSubmitting ? (
-                <Box sx={{ textAlign: 'center', my: 4 }}>
-                  <CircularProgress />
-                  <Typography sx={{ mt: 2 }}>Running AI Locate Anything object counts...</Typography>
-                </Box>
-              ) : (
-                <>
-                  {!result ? (
-                    <Button
-                      fullWidth
-                      variant="contained"
-                      color="primary"
-                      size="large"
-                      startIcon={<CloudUpload />}
-                      onClick={handleVerify}
-                    >
-                      Run Verification
-                    </Button>
-                  ) : (
-                    <Box>
-                      {result.success ? (
-                        <Alert
-                          severity="success"
-                          icon={<CheckCircle fontSize="inherit" />}
-                          sx={{ mb: 3 }}
-                        >
-                          <AlertTitle>Count Verified</AlertTitle>
-                          {result.message}
-                          <Box sx={{ mt: 1 }}>
-                            <strong>Shelf Box Count:</strong> {result.box_count} <br />
-                            <strong>Verified Orders in DB:</strong> {result.verified_orders_count}
-                          </Box>
-                        </Alert>
-                      ) : (
-                        <Alert
-                          severity="error"
-                          icon={<Warning fontSize="inherit" />}
-                          sx={{ mb: 3 }}
-                        >
-                          <AlertTitle>Discrepancy Warning</AlertTitle>
-                          {result.message}
-                          <Box sx={{ mt: 1 }}>
-                            <strong>Shelf Box Count:</strong> {result.box_count} <br />
-                            <strong>Verified Orders in DB:</strong> {result.verified_orders_count}
-                          </Box>
-                        </Alert>
-                      )}
-
-                      <Button
-                        fullWidth
-                        variant="contained"
-                        color="secondary"
-                        onClick={resetVerification}
-                      >
-                        Reset / Start New Verification
-                      </Button>
-                    </Box>
-                  )}
-                </>
-              )}
+              <Button
+                fullWidth
+                variant="contained"
+                color="primary"
+                size="large"
+                disabled={isSubmitting}
+                onClick={handleSubmit}
+                sx={{ py: 1.5, fontWeight: 'bold' }}
+              >
+                {isSubmitting ? <CircularProgress size={24} color="inherit" /> : 'RUN SHELF VERIFICATION'}
+              </Button>
             </CardContent>
           </Card>
         </Grid>

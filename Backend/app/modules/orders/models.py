@@ -47,6 +47,8 @@ if TYPE_CHECKING:
 class OrderPlatform(str, enum.Enum):
     """Supported order source platforms."""
     AMAZON = "AMAZON"
+    AMAZON_RENEW = "AMAZON_RENEW"
+    AMAZON_FBA = "AMAZON_FBA"
     EBAY_MEKONG = "EBAY_MEKONG"
     EBAY_USAV = "EBAY_USAV"
     EBAY_DRAGON = "EBAY_DRAGON"
@@ -55,6 +57,7 @@ class OrderPlatform(str, enum.Enum):
     SHOPIFY = "SHOPIFY"
     WALMART = "WALMART"
     ZOHO = "ZOHO"
+    WALK_IN = "WALK_IN"
     MANUAL = "MANUAL"
 
 

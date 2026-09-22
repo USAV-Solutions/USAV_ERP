@@ -13,7 +13,9 @@ services:
       POSTGRES_PASSWORD: ${DB_PASS:-devpassword123}
       POSTGRES_DB: ${DB_NAME:-inventory_system}
     ports:
-      - "5432:5432"
+      # Proxmox CT 102 Production default: "5432:5432"
+      # Synology NAS Demo override: set DB_PORT=5433 in .env
+      - "${DB_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-inventory_system}"]
       interval: 10s
@@ -71,8 +73,14 @@ services:
       - WALMART_CLIENT_SECRET=${WALMART_CLIENT_SECRET:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - SYNOLOGY_NAS_IP=${SYNOLOGY_NAS_IP:-}
+      - SYNOLOGY_NAS_PORT=${SYNOLOGY_NAS_PORT:-5000}
+      - SYNOLOGY_NAS_USER=${SYNOLOGY_NAS_USER:-}
+      - SYNOLOGY_NAS_PASSWORD=${SYNOLOGY_NAS_PASSWORD:-}
     ports:
-      - "8080:8080"
+      # Proxmox CT 102 Production default: "8080:8080"
+      # Synology NAS Demo override: set BACKEND_PORT=8081 in .env
+      - "${BACKEND_PORT:-8080}:8080"
     depends_on:
       db:
         condition: service_healthy
@@ -132,11 +140,17 @@ services:
       - WALMART_CLIENT_SECRET=${WALMART_CLIENT_SECRET:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - SYNOLOGY_NAS_IP=${SYNOLOGY_NAS_IP:-}
+      - SYNOLOGY_NAS_PORT=${SYNOLOGY_NAS_PORT:-5000}
+      - SYNOLOGY_NAS_USER=${SYNOLOGY_NAS_USER:-}
+      - SYNOLOGY_NAS_PASSWORD=${SYNOLOGY_NAS_PASSWORD:-}
       - ZOHO_AUTO_OUTBOUND_SYNC_ENABLED=false
       - ZOHO_AUTO_INBOUND_SYNC_ENABLED=false
       - PRODUCT_IMAGES_PATH=/tmp/usav_product_images
     ports:
-      - "8080:8080"
+      # Proxmox CT 102 Production default: "8080:8080"
+      # Synology NAS Demo override: set BACKEND_PORT=8081 in .env
+      - "${BACKEND_PORT:-8080}:8080"
     depends_on:
       db:
         condition: service_healthy
@@ -182,7 +196,9 @@ services:
     container_name: usav_backup
     restart: always
     volumes:
-      - ./backups:/backups
+      # Proxmox / Production default: postgres_backups named volume
+      # Prevents root-owned backup files from cluttering the Git working directory
+      - postgres_backups:/backups
     environment:
       POSTGRES_HOST: db
       POSTGRES_DB: ${DB_NAME:-inventory_system}
@@ -214,9 +230,13 @@ services:
       - prod
     restart: unless-stopped
     volumes:
-      - /mnt/product_images:/mnt/product_images:ro
+      # Proxmox CT 102 Production default: /mnt/product_images:/mnt/product_images:ro
+      # Synology NAS Demo override: set PRODUCT_IMAGES_HOST_PATH=/tmp/usav_product_images in .env
+      - ${PRODUCT_IMAGES_HOST_PATH:-/mnt/product_images}:/mnt/product_images:ro
     ports:
-      - "3636:3636"
+      # Proxmox CT 102 Production default: "3636:3636"
+      # Synology NAS Demo override: set FRONTEND_PORT=3637 in .env
+      - "${FRONTEND_PORT:-3636}:3636"
     depends_on:
       backend:
         condition: service_healthy
@@ -251,7 +271,9 @@ services:
       - VITE_SEATALK_REDIRECT_URI=http://localhost:3636/auth/seatalk/callback
       - VITE_DISABLE_PRODUCT_IMAGES=true
     ports:
-      - "3636:3636"
+      # Proxmox CT 102 Production default: "3636:3636"
+      # Synology NAS Demo override: set FRONTEND_PORT=3637 in .env
+      - "${FRONTEND_PORT:-3636}:3636"
     depends_on:
       backend-dev:
         condition: service_healthy
@@ -314,5 +336,6 @@ networks:
 # =============================================================================
 volumes:
   postgres_data:
+  postgres_backups:
   pgadmin_data:
   fba_profile:

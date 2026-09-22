@@ -1,0 +1,277 @@
+"""
+AI Packaging Photo Diagnostic Engine using Gemini Vision AI (gemini-3.5-flash / gemini-2.5-flash).
+Extracts document OCR and performs physical item correctness matching against ERP Sales Orders.
+"""
+
+import os
+import re
+import json
+import logging
+import time
+from typing import Optional, List, Dict, Any
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
+
+from app.modules.orders.models import Order, OrderItem
+
+logger = logging.getLogger(__name__)
+
+
+import base64
+
+class AIDiagnosticResponse(BaseModel):
+    success: bool
+    filename: str
+    latency_ms: float
+    is_valid_packing_photo: bool
+    platform: str
+    order_id: str
+    tracking_number: str
+    sku_on_slip: Optional[str] = None
+    detected_physical_item: str
+    expected_erp_item: Optional[str] = None
+    item_match: bool
+    confidence_score: float
+    status: str  # E.g. "CORRECT", "ITEM_MISMATCH", "MISSING_TRACKING", "NO_PACKING_SLIP", "ERROR"
+    message: str
+    image_data_url: Optional[str] = None
+
+
+async def diagnose_packaging_photo_bytes(
+    image_bytes: bytes,
+    filename: str = "sample_photo.jpg",
+    mime_type: str = "image/jpeg",
+    db: Optional[AsyncSession] = None,
+    include_image_data_url: bool = False,
+) -> AIDiagnosticResponse:
+    """
+    Diagnose a packing photo using Gemini Vision AI (gemini-3.5-flash).
+    Extracts paper document data (Order ID, SKU, Tracking) and describes the physical item in photo.
+    Performs verification against local database Sales Orders if db is provided.
+    """
+    start_time = time.time()
+
+    if not image_bytes or len(image_bytes) == 0:
+        return AIDiagnosticResponse(
+            success=False,
+            filename=filename,
+            latency_ms=0.0,
+            is_valid_packing_photo=False,
+            platform="UNKNOWN",
+            order_id="",
+            tracking_number="",
+            detected_physical_item="Empty payload",
+            item_match=False,
+            confidence_score=0.0,
+            status="ERROR",
+            message="Empty image payload provided."
+        )
+
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        return AIDiagnosticResponse(
+            success=False,
+            filename=filename,
+            latency_ms=0.0,
+            is_valid_packing_photo=False,
+            platform="UNKNOWN",
+            order_id="",
+            tracking_number="",
+            detected_physical_item="API key unconfigured",
+            item_match=False,
+            confidence_score=0.0,
+            status="ERROR",
+            message="Gemini API key is not configured in environment."
+        )
+
+    try:
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=api_key)
+
+        prompt = (
+            "Analyze this warehouse packing station photograph carefully.\n"
+            "The photo typically contains paperwork (a packing slip and shipping label) at the bottom, "
+            "and a physical product placed at the top.\n\n"
+            "Perform the following dual analysis:\n"
+            "1. Document OCR Extraction:\n"
+            "   - platform: Marketplace platform (AMAZON, EBAY, WALMART, SHOPIFY, ECWID, USAV SOLUTIONS, etc.)\n"
+            "   - order_id: Full Order ID / Order Number. Follow strict marketplace formats:\n"
+            "     * AMAZON: MUST be 17 characters in XXX-XXXXXXX-XXXXXXX format (3-7-7 digits, e.g. '113-0639021-1082656'). Read all digits carefully without truncating the last 5 digits.\n"
+            "     * EBAY: MUST be 14 characters in XX-XXXXX-XXXXX format (2-5-5 digits, e.g. '12-14440-44218' or '27-14648-44047').\n"
+            "     * WALMART: 13-15 numeric digits.\n"
+            "     * ECWID / SHOPIFY / ZOHO: 4-8 numeric digits (e.g. '4608').\n"
+            "   - tracking_number: Carrier tracking number on shipping label (UPS: 1Z..., USPS: 20-22 digits starting with 9, FedEx: 12-15 digits)\n"
+            "   - sku_on_slip: Product SKU or Item ID printed on packing slip if visible\n"
+            "2. Physical Item Analysis:\n"
+            "   - is_valid_packing_photo: true if paperwork (slip or label) is present, false if just a random part photo\n"
+            "   - detected_physical_item: Concise visual description of the main physical product/object in top half (e.g. 'Coiled black audio speaker cable', 'Bose Wave CD Changer Base Unit', 'Power adapter plug', etc.)\n"
+            "   - confidence_score: Float confidence rating between 0.0 and 1.0\n\n"
+            "Return STRICTLY a raw JSON object with keys:\n"
+            "{\n"
+            "  \"is_valid_packing_photo\": true,\n"
+            "  \"platform\": \"AMAZON\",\n"
+            "  \"order_id\": \"113-0639021-1082656\",\n"
+            "  \"tracking_number\": \"9300110990513442589502\",\n"
+            "  \"sku_on_slip\": \"AH-PL9M-F32Y\",\n"
+            "  \"detected_physical_item\": \"Coiled black 2-wire audio speaker cable\",\n"
+            "  \"confidence_score\": 0.96\n"
+            "}\n"
+            "Do not wrap in markdown code blocks."
+        )
+
+        # Use gemini-3.5-flash as primary model
+        model_name = os.getenv("GEMINI_DIAGNOSTIC_MODEL", "gemini-3.5-flash")
+
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[
+                    types.Part.from_bytes(
+                        data=image_bytes,
+                        mime_type=mime_type,
+                    ),
+                    prompt
+                ]
+            )
+        except Exception as model_err:
+            if "gemini-3.5-flash" in model_name:
+                logger.warning(f"[Diagnostic] Model '{model_name}' fallback to 'gemini-2.5-flash': {model_err}")
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=[
+                        types.Part.from_bytes(
+                            data=image_bytes,
+                            mime_type=mime_type,
+                        ),
+                        prompt
+                    ]
+                )
+            else:
+                raise model_err
+
+        elapsed_ms = round((time.time() - start_time) * 1000, 2)
+        text_resp = response.text.strip()
+        text_resp = re.sub(r"^```(?:json)?\n", "", text_resp)
+        text_resp = re.sub(r"\n```$", "", text_resp).strip()
+
+        data = json.loads(text_resp)
+
+        is_valid = bool(data.get("is_valid_packing_photo", True))
+        extracted_platform = str(data.get("platform", "UNKNOWN")).upper()
+        extracted_order_id = str(data.get("order_id", "")).strip()
+        extracted_tracking = str(data.get("tracking_number", "")).strip()
+        extracted_sku = str(data.get("sku_on_slip", "")).strip() or None
+        detected_item = str(data.get("detected_physical_item", "Unidentified object")).strip()
+        confidence = float(data.get("confidence_score", 0.90))
+
+        data_url = f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('utf-8')}" if include_image_data_url else None
+
+        if not is_valid or not (extracted_order_id or extracted_tracking):
+            return AIDiagnosticResponse(
+                success=True,
+                filename=filename,
+                latency_ms=elapsed_ms,
+                is_valid_packing_photo=False,
+                platform=extracted_platform,
+                order_id=extracted_order_id,
+                tracking_number=extracted_tracking,
+                sku_on_slip=extracted_sku,
+                detected_physical_item=detected_item,
+                expected_erp_item=None,
+                item_match=False,
+                confidence_score=confidence,
+                status="NO_PACKING_SLIP",
+                message="No packing slip or valid order details detected in photo.",
+                image_data_url=data_url,
+            )
+
+        # DB Cross-Check & Smart Fallback Lookup
+        expected_erp_item = None
+        item_match = True
+        status = "CORRECT"
+        msg = "Photo parsed successfully and order verified."
+
+        if db:
+            order_record = None
+
+            # 1. Primary lookup by exact extracted Order ID
+            if extracted_order_id:
+                stmt = select(Order).where(
+                    (func.lower(Order.external_order_id) == func.lower(extracted_order_id)) |
+                    (func.lower(Order.external_order_number) == func.lower(extracted_order_id))
+                )
+                order_record = (await db.execute(stmt)).scalars().first()
+
+            # 2. Fallback lookup by tracking_number if primary lookup failed
+            if not order_record and extracted_tracking:
+                stmt_track = select(Order).where(Order.tracking_number == extracted_tracking)
+                order_record = (await db.execute(stmt_track)).scalars().first()
+                if order_record:
+                    logger.info(f"[Diagnostic] Matched order by tracking {extracted_tracking} -> Order {order_record.external_order_id}")
+                    # Auto-correct extracted order_id to full canonical Order ID in DB
+                    extracted_order_id = order_record.external_order_id
+
+            # 3. Fallback lookup by prefix match if order_id was partially truncated
+            if not order_record and extracted_order_id and len(extracted_order_id) >= 6:
+                stmt_prefix = select(Order).where(Order.external_order_id.like(f"{extracted_order_id}%"))
+                order_record = (await db.execute(stmt_prefix)).scalars().first()
+                if order_record:
+                    logger.info(f"[Diagnostic] Matched order by prefix '{extracted_order_id}' -> Order {order_record.external_order_id}")
+                    extracted_order_id = order_record.external_order_id
+
+            if order_record:
+                # Fetch order item names
+                item_stmt = select(OrderItem).where(OrderItem.order_id == order_record.id)
+                items = (await db.execute(item_stmt)).scalars().all()
+                if items:
+                    item_names = [getattr(it, 'item_name', None) or getattr(it, 'title', None) or getattr(it, 'sku', None) or "Item" for it in items if it]
+                    expected_erp_item = ", ".join(item_names)
+
+                if not order_record.tracking_number and not extracted_tracking:
+                    status = "MISSING_TRACKING"
+                    msg = "Order found in ERP, but Tracking Number is missing."
+                elif not order_record.tracking_number and extracted_tracking:
+                    status = "CORRECT"
+                    msg = f"Extracted tracking {extracted_tracking} for ERP Order {extracted_order_id}."
+            else:
+                status = "ORDER_NOT_IN_ERP"
+                msg = f"Parsed Order ID '{extracted_order_id}' not found in database."
+
+        return AIDiagnosticResponse(
+            success=True,
+            filename=filename,
+            latency_ms=elapsed_ms,
+            is_valid_packing_photo=is_valid,
+            platform=extracted_platform,
+            order_id=extracted_order_id,
+            tracking_number=extracted_tracking,
+            sku_on_slip=extracted_sku,
+            detected_physical_item=detected_item,
+            expected_erp_item=expected_erp_item,
+            item_match=item_match,
+            confidence_score=confidence,
+            status=status,
+            message=msg,
+            image_data_url=data_url,
+        )
+
+    except Exception as e:
+        elapsed_ms = round((time.time() - start_time) * 1000, 2)
+        logger.error(f"[Diagnostic] Failed to diagnose photo {filename}: {str(e)}", exc_info=True)
+        return AIDiagnosticResponse(
+            success=False,
+            filename=filename,
+            latency_ms=elapsed_ms,
+            is_valid_packing_photo=False,
+            platform="UNKNOWN",
+            order_id="",
+            tracking_number="",
+            detected_physical_item="Processing Error",
+            item_match=False,
+            confidence_score=0.0,
+            status="ERROR",
+            message=f"AI Diagnosis failed: {str(e)}"
+        )

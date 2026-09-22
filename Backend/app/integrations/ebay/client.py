@@ -856,10 +856,13 @@ class EbayClient(BasePlatformClient):
             # Payload is the Order object
             return self._convert_order(payload)
         except httpx.HTTPStatusError as e:
-            logger.error(
-                f"eBay {self.store_name}: get_order HTTP {e.response.status_code} - {e.response.text}",
-                exc_info=True,
-            )
+            if e.response.status_code in {400, 404}:
+                logger.debug(f"eBay {self.store_name}: order {order_id} not found ({e.response.status_code})")
+            else:
+                logger.error(
+                    f"eBay {self.store_name}: get_order HTTP {e.response.status_code} - {e.response.text}",
+                    exc_info=True,
+                )
             return None
         except Exception as e:
             logger.error(

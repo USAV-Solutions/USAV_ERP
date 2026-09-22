@@ -1,11 +1,14 @@
 export type ReturnPlatform =
   | 'AMAZON'
+  | 'AMAZON_RENEW'
+  | 'AMAZON_FBA'
   | 'EBAY_MEKONG'
   | 'EBAY_USAV'
   | 'EBAY_DRAGON'
   | 'ECWID'
   | 'SHOPIFY'
   | 'WALMART'
+  | 'WALK_IN'
   | 'ZOHO'
   | 'MANUAL'
 
