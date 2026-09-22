@@ -162,6 +162,12 @@ class Settings(BaseSettings):
     ecwid_store_id: str = ""
     ecwid_secret: str = ""
     ecwid_api_base_url: str = "https://app.ecwid.com/api/v3"
+
+    # Shopify Integration
+    shopify_shop_url: str = ""
+    shopify_access_token: str = ""
+    shopify_api_version: str = "2024-10"
+    shopify_price_sync_enabled: bool = False
     
     # Walmart Integration
     walmart_client_id: str = ""
@@ -170,11 +176,73 @@ class Settings(BaseSettings):
     
     # Google AISTUDIO
     gemini_api_key: str = ""
-    gemini_model_name: str = "gemini-2.5-flash-lite"
+    gemini_model_name: str = "gemini-2.5-flash"
 
     # Product Images
     product_images_path: str = "/mnt/product_images"
     listing_public_base_url: str = ""
+
+    # Tracking status scraper (parcelsapp.com)
+    # parcelsapp blocks headless browsers — production runs headed inside a
+    # virtual X display (Xvfb via pyvirtualdisplay). Only set True for local
+    # debugging where you have a real display.
+    tracking_scraper_headless: bool = False
+    tracking_scraper_min_delay_seconds: float = 2.0
+    tracking_scraper_max_delay_seconds: float = 5.0
+    # Consecutive "information has not been found yet" hits before the job pauses.
+    tracking_rate_limit_threshold: int = 3
+    # Advisory cooldown shown after a rate-limit pause (minutes). Not enforced —
+    # resume is gated on a successful probe, not on this timer. 24h because that
+    # is what was actually measured: an address blocked at 09-07 09:08 was still
+    # blocked at 09-08 06:24 — through verified-silent 20- and 60-minute windows
+    # (120 samples, zero connections, zero browsers). The old 30 told the
+    # operator to come back in half an hour, which was never true and is why
+    # "still throttled?" kept getting re-tested all day.
+    tracking_cooldown_minutes: int = 1440
+    # Auto-probe is OFF by default. parcelsapp's block is not a short throttle:
+    # it is a per-egress-address budget (~55-60 lookups), after which that exact
+    # address stops getting API bodies for many hours. Measured on the deploy
+    # host: blocked at 09-07 09:08, still blocked 09-08 05:18 after a verified
+    # 20-minute silent window — while a *different* address in the same /64
+    # answered normally. Probing on a 25-minute timer through that window can
+    # only re-offend, and because probe() used to log nothing it did so
+    # invisibly for 20 hours. The correct response to exhaustion is to stop
+    # touching the service and let the queue drain over subsequent days.
+    tracking_auto_probe_enabled: bool = False
+    # How often auto-probe retries while paused, and its backoff ceiling. Only
+    # used if an operator deliberately turns auto-probe back on; sized in hours,
+    # not minutes, so re-enabling it cannot recreate the 25-minute knocking.
+    tracking_auto_probe_interval_minutes: int = 360
+    tracking_auto_probe_max_interval_minutes: int = 1440
+    # Orders checked more recently than this are skipped when (re)building the queue.
+    tracking_freshness_hours: int = 6
+
+    # FBA order import (app/modules/fba)
+    # Server-side port of the local FBA/ pipeline: merge All-Orders + Fulfilment
+    # reports, scrape missing buyer names from Seller Central, feed the result
+    # through the existing AMAZON_FBA_CSV ingestion.
+    #
+    # The buyer-name scraper drives a *persistent* Chromium profile (Amazon needs
+    # a logged-in session). That profile lives on a mounted volume — never in the
+    # image, never under PLAYWRIGHT_BROWSERS_PATH. See Docs/FBA_Import_Handoff.md.
+    fba_chrome_profile_path: str = "/data/fba-profile"
+    # Headed-in-Xvfb by default. A headless Chromium advertises
+    # "HeadlessChrome/<ver>" in its User-Agent, and Seller Central refuses to
+    # honour a valid session for that UA: every page bounces to /ap/signin with a
+    # password prompt (openid.pape.max_auth_age re-auth), which the runner then
+    # reports as AUTH_EXPIRED. Verified against a known-good profile — headless
+    # got the sign-in page, headed got the dashboard, same cookies, same minute.
+    # The scraper still falls back to headless if the headed launch fails, and
+    # spoofs a non-headless UA in that path (see scraper.py _HEADLESS_UA).
+    fba_scraper_headless: bool = False
+    # Escape hatch for networks where Chromium's DNS resolver fails but the OS
+    # resolver works (some Docker/VPN setups). Passed verbatim as Chromium's
+    # --host-resolver-rules, e.g. "MAP * 1.2.3.4". Leave blank in production.
+    fba_scraper_host_resolver_rules: str = ""
+    fba_scraper_min_delay_seconds: float = 1.0
+    fba_scraper_max_delay_seconds: float = 10.0
+    # Give up scraping a single order's buyer name after this many page loads.
+    fba_scraper_max_attempts_per_order: int = 2
 
     @model_validator(mode="after")
     def _apply_dev_overrides(self) -> "Settings":

@@ -46,6 +46,8 @@ export interface ListOrdersParams {
   ordered_at_to?: string
   zoho_sync_status?: ZohoSyncStatus
   source?: string
+  total_amount?: number
+  total_amount_range?: number
   sort_by?: 'ordered_at' | 'created_at' | 'total_amount' | 'external_order_id'
   sort_dir?: 'asc' | 'desc'
   search?: string
@@ -63,6 +65,12 @@ export async function listOrders(params: ListOrdersParams = {}): Promise<OrderLi
   if (params.ordered_at_to) query.set('ordered_at_to', params.ordered_at_to)
   if (params.zoho_sync_status) query.set('zoho_sync_status', params.zoho_sync_status)
   if (params.source) query.set('source', params.source)
+  if (params.total_amount !== undefined && Number.isFinite(params.total_amount)) {
+    query.set('total_amount', String(params.total_amount))
+  }
+  if (params.total_amount_range !== undefined && Number.isFinite(params.total_amount_range)) {
+    query.set('total_amount_range', String(params.total_amount_range))
+  }
   if (params.sort_by) query.set('sort_by', params.sort_by)
   if (params.sort_dir) query.set('sort_dir', params.sort_dir)
   if (params.search) query.set('search', params.search)

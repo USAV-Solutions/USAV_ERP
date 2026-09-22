@@ -43,7 +43,9 @@ import {
   Link as LinkIcon,
   LinkOff,
   UploadFile,
+  Hub,
 } from '@mui/icons-material'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axiosClient from '../api/axiosClient'
 import { CATALOG, LISTINGS } from '../api/endpoints'
@@ -66,7 +68,9 @@ const PLATFORMS: { value: Platform; label: string }[] = [
   { value: 'EBAY_MEKONG', label: 'eBay Mekong' },
   { value: 'EBAY_USAV', label: 'eBay USAV' },
   { value: 'EBAY_DRAGON', label: 'eBay Dragon' },
+  { value: 'EBAY_PURCHASING', label: 'eBay Purchasing' },
   { value: 'ECWID', label: 'ECWID' },
+  { value: 'SHOPIFY', label: 'Shopify' },
   { value: 'WALMART', label: 'Walmart' },
 ]
 
@@ -427,6 +431,7 @@ export default function ProductListings() {
   const importInputRef = useRef<HTMLInputElement | null>(null)
   const { hasRole } = useAuth()
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
 
   const { data: listingsResponse, isLoading: listingsLoading, isFetching: listingsFetching } = useQuery({
     queryKey: ['listings', page, rowsPerPage, platformFilter, statusFilter],
@@ -470,6 +475,31 @@ export default function ProductListings() {
     },
   })
 
+  // Create listing mutation
+  const createMutation = useMutation({
+    mutationFn: async (data: PlatformListingCreate) => {
+      const response = await axiosClient.post(LISTINGS.LIST, data)
+      return response.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['listings'] })
+      setCreateDialogOpen(false)
+    },
+  })
+
+  // Update listing mutation
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: number; data: PlatformListingUpdate }) => {
+      const response = await axiosClient.put(LISTINGS.LISTING(id), data)
+      return response.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['listings'] })
+      setEditDialogOpen(false)
+      setEditingListing(null)
+    },
+  })
+
   // Delete mutation
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
@@ -490,7 +520,9 @@ export default function ProductListings() {
   })
   const matchMutation = useMutation({
     mutationFn: async ({ listingId, variantId }: { listingId: number; variantId: number }) => {
-      const response = await axiosClient.post(LISTINGS.MATCH(listingId), { variant_id: variantId })
+      const response = await axiosClient.post(LISTINGS.MATCH(listingId), null, {
+        params: { variant_id: variantId },
+      })
       return response.data
     },
     onSuccess: () => {
@@ -500,14 +532,12 @@ export default function ProductListings() {
     },
   })
   const unmatchMutation = useMutation({
-    mutationFn: async (listingId: number) => {
-      const response = await axiosClient.post(LISTINGS.UNMATCH(listingId))
+    mutationFn: async (id: number) => {
+      const response = await axiosClient.post(LISTINGS.UNMATCH(id))
       return response.data
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['listings'] })
-      setMatchingListingId(null)
-      setSelectedMatchVariant(null)
     },
   })
   const importCsvMutation = useMutation({
@@ -567,14 +597,15 @@ export default function ProductListings() {
 
   // Enhanced listings with variant/identity/family data
   const enhancedListings: EnhancedListing[] = useMemo(() => {
-    if (!listingsResponse?.items) return []
+    const items = listingsResponse?.items || []
+    if (enhancedVariants.length === 0) return items
     
-    const variantMap = new Map<number, any>()
+    const variantMap = new Map<number, Variant & { identity?: ProductIdentity & { family?: ProductFamily } }>()
     enhancedVariants.forEach((v: any) => variantMap.set(v.id, v))
     
-    return listingsResponse.items.map((l: PlatformListing) => ({
-      ...l,
-      variant: variantMap.get(l.variant_id),
+    return items.map((listing: any) => ({
+      ...listing,
+      variant: listing.variant_id ? variantMap.get(listing.variant_id) : undefined,
     }))
   }, [listingsResponse, enhancedVariants])
 
@@ -597,6 +628,7 @@ export default function ProductListings() {
 
   interface SkuGroup {
     key: string
+    variantId?: number | null
     sku: string
     name: string
     thumbnail?: string
@@ -614,10 +646,11 @@ export default function ProductListings() {
       if (!groups.has(key)) {
         groups.set(key, {
           key,
+          variantId: listing.variant_id,
           sku: listing.variant?.full_sku || 'Unmatched Listings',
           name: listing.variant?.identity?.family?.base_name || 'Listings with no matched SKU',
-          thumbnail: listing.variant?.thumbnail_url,
-          type: listing.variant?.identity?.identity_type || '-',
+          thumbnail: listing.variant?.thumbnail_url || undefined,
+          type: listing.variant?.identity?.type || '-',
           condition: listing.listing_condition || listing.variant?.condition_code || '-',
           color: listing.variant?.color_code || '-',
           listings: [],
@@ -664,6 +697,8 @@ export default function ProductListings() {
 
   const buildListingLink = (listing: EnhancedListing) => {
     const externalRef = (listing.external_ref_id || '').trim()
+    if (listing.platform === 'SHOPIFY') return 'https://usav-solutions.myshopify.com/admin/products'
+    if (listing.platform === 'ECWID') return 'https://my.ecwid.com/store/65842880#products'
     if (!externalRef) return null
     if (listing.platform.startsWith('EBAY_')) return `https://www.ebay.com/itm/${externalRef}`
     if (listing.platform === 'AMAZON') return `https://amazon.com/dp/${externalRef}`
@@ -693,6 +728,23 @@ export default function ProductListings() {
           <TableCell>{getSyncStatusChip(listing.sync_status, listing.sync_error_message)}</TableCell>
           <TableCell>
             <Box sx={{ display: 'flex', gap: 0.5 }}>
+              <Tooltip title={listing.variant_id ? "View Knowledge Graph" : "Open Knowledge Graph"}>
+                <span>
+                  <IconButton
+                    size="small"
+                    color="info"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      const url = listing.variant_id
+                        ? `/catalog/listings/graph?variantId=${listing.variant_id}`
+                        : '/catalog/listings/graph'
+                      navigate(url)
+                    }}
+                  >
+                    <Hub fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
               <Tooltip title="Queue Sync">
                 <span>
                   <IconButton
@@ -819,6 +871,19 @@ export default function ProductListings() {
         <Typography variant="h4">Active Listings</Typography>
         {hasRole(['ADMIN', 'SALES_REP']) && (
           <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button
+              variant="contained"
+              startIcon={<Hub />}
+              onClick={() => navigate('/catalog/listings/graph')}
+              sx={{
+                background: 'linear-gradient(135deg, #1d4ed8 0%, #3b82f6 100%)',
+                color: '#fff',
+                fontWeight: 'bold',
+                '&:hover': { background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' },
+              }}
+            >
+              Knowledge Graph
+            </Button>
             <Button
               variant="outlined"
               startIcon={<UploadFile />}
@@ -967,9 +1032,25 @@ export default function ProductListings() {
                           <IconButton size="small">{isExpanded ? <ExpandLess /> : <ExpandMore />}</IconButton>
                         </TableCell>
                         <TableCell>
-                          <Typography variant="body2" fontFamily="monospace">
-                            {group.sku}
-                          </Typography>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Typography variant="body2" fontFamily="monospace">
+                              {group.sku}
+                            </Typography>
+                            {group.variantId && (
+                              <Tooltip title="View Multi-Channel Knowledge Graph">
+                                <IconButton
+                                  size="small"
+                                  color="info"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    navigate(`/catalog/listings/graph?variantId=${group.variantId}`)
+                                  }}
+                                >
+                                  <Hub fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                          </Box>
                         </TableCell>
                         <TableCell>{group.name}</TableCell>
                         <TableCell>

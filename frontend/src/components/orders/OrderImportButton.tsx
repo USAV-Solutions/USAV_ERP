@@ -21,6 +21,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { importOrdersFromApi, importOrdersFromFile } from '../../api/orders'
 import type { OrderFulfillmentChannel, SalesImportApiSource } from '../../types/orders'
+import FbaOrderImportButton from './FbaOrderImportButton'
 
 const API_SOURCES: SalesImportApiSource[] = [
   'ECWID',
@@ -28,6 +29,7 @@ const API_SOURCES: SalesImportApiSource[] = [
   'EBAY_USAV',
   'EBAY_DRAGON',
   'EBAY_PURCHASING',
+  'SHOPIFY',
   'WALMART',
 ]
 
@@ -52,6 +54,14 @@ interface OrderImportButtonProps {
 }
 
 export default function OrderImportButton({ fulfillmentChannel }: OrderImportButtonProps) {
+  // The FBA tab has its own two-file (raw report) import + server-side pipeline.
+  if (fulfillmentChannel === 'AMAZON_FBA') {
+    return <FbaOrderImportButton />
+  }
+  return <SalesOrderImportButton fulfillmentChannel={fulfillmentChannel} />
+}
+
+function SalesOrderImportButton({ fulfillmentChannel }: OrderImportButtonProps) {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
   const [mode, setMode] = useState<ImportMode>(
@@ -85,7 +95,11 @@ export default function OrderImportButton({ fulfillmentChannel }: OrderImportBut
         until: toApiUntilIso(until),
       }),
     onSuccess: (data) => {
-      setMessage(`Imported ${data.new_orders} orders (${data.new_items} items).`)
+      if (!data.success && data.errors && data.errors.length > 0) {
+        setError(data.errors.join('; '))
+      } else {
+        setMessage(`Imported ${data.new_orders} orders (${data.new_items} items).`)
+      }
       queryClient.invalidateQueries({ queryKey: ['orders'] })
       queryClient.invalidateQueries({ queryKey: ['syncStatus'] })
     },

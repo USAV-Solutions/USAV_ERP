@@ -1029,15 +1029,6 @@ def _build_ebay_bill_payload(po: PurchaseOrder) -> dict[str, Any]:
     else:
         payload["line_items"] = line_items
 
-    charge_total = (
-        _to_decimal(getattr(po, "tax_amount", 0), "0")
-        + _to_decimal(getattr(po, "shipping_amount", 0), "0")
-        + _to_decimal(getattr(po, "handling_amount", 0), "0")
-    )
-    if charge_total != Decimal("0"):
-        payload["adjustment"] = float(charge_total)
-        payload["adjustment_description"] = "Shipping Fee + Tax + Handling Fee"
-
     if po.notes:
         payload["notes"] = str(po.notes)
 
@@ -2238,6 +2229,22 @@ async def sync_order_outbound(order_id: int) -> None:
                 order._updated_by_sync = True
                 await db.commit()
                 return
+
+        # ---- DEPENDENCY: No unmatched line items ----
+        unmatched_items = [
+            item for item in (order.items or [])
+            if item.variant_id is None
+        ]
+        if unmatched_items:
+            order.zoho_sync_error = "Cannot sync order: contains unmatched items."
+            order.zoho_sync_status = ZohoSyncStatus.ERROR
+            order._updated_by_sync = True
+            await db.commit()
+            logger.warning(
+                "sync_order_outbound: order %s contains %d unmatched items, skipping sync",
+                order_id, len(unmatched_items),
+            )
+            return
 
         # ---- DEPENDENCY: All line-item variants must have zoho_item_id ----
         missing_variants: list[int] = []

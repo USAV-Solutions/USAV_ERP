@@ -81,11 +81,12 @@ import VariantSearchAutocomplete from '../components/common/VariantSearchAutocom
 import HoldActionPromptDialog from '../components/common/HoldActionPromptDialog'
 import LongPressTableRow from '../components/common/LongPressTableRow'
 import TablePaginationWithPageJump from '../components/common/TablePaginationWithPageJump'
+import ZohoSyncStatusChip from '../components/common/ZohoSyncStatusChip'
 import OrderSummaryCards from '../components/common/OrderSummaryCards'
 import type { VariantSearchResult } from '../types/orders'
 
 const statusColor: Record<PurchaseDeliverStatus, 'default' | 'success' | 'warning' | 'error' | 'info'> = {
-  CREATED: 'default',
+  UNRECEIVED: 'warning',
   BILLED: 'warning',
   DELIVERED: 'success',
   CANCELLED: 'error',
@@ -602,7 +603,7 @@ export default function PurchasingManagement() {
   const [sortBy, setSortBy] = useState<'order_date' | 'po_number' | 'total_amount' | 'created_at'>('order_date')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [deliverStatusFilter, setDeliverStatusFilter] = useState<PurchaseDeliverStatus | 'ALL'>(
-    isDelayedFilterApplied ? 'CREATED' : 'ALL'
+    isDelayedFilterApplied ? 'UNRECEIVED' : 'ALL'
   )
   const [itemMatchFilter, setItemMatchFilter] = useState<'ALL' | 'MATCHED' | 'UNMATCHED'>('ALL')
   const [zohoSyncFilter, setZohoSyncFilter] = useState<ZohoSyncStatus | 'ALL'>('ALL')
@@ -665,7 +666,7 @@ export default function PurchasingManagement() {
   const [editPoForm, setEditPoForm] = useState<PurchaseOrderMetadataForm>({
     po_number: '',
     vendor_id: 0,
-    deliver_status: 'CREATED',
+    deliver_status: 'UNRECEIVED',
     order_date: new Date().toISOString().slice(0, 10),
     expected_delivery_date: '',
     tax_amount: 0,
@@ -680,7 +681,7 @@ export default function PurchasingManagement() {
 
   useEffect(() => {
     if (searchParams.get('filter') === 'delayed') {
-      setDeliverStatusFilter('CREATED')
+      setDeliverStatusFilter('UNRECEIVED')
       setOrderDateTo(dateDaysAgo(6))
       setOrderDateFrom('')
       setItemMatchFilter('ALL')
@@ -699,7 +700,7 @@ export default function PurchasingManagement() {
     queryKey: ['delayed-purchases-count'],
     queryFn: () =>
       listPurchaseOrdersPaged({
-        deliverStatus: 'CREATED',
+        deliverStatus: 'UNRECEIVED',
         orderDateTo: dateDaysAgo(6),
         limit: 100,
       }),
@@ -1218,8 +1219,8 @@ export default function PurchasingManagement() {
           }
         >
           {delayedPurchasesQuery.data.length === 1
-            ? "1 purchase order has been in 'CREATED' status for over 6 days."
-            : `${delayedPurchasesQuery.data.length} purchase orders have been in 'CREATED' status for over 6 days.`}
+            ? "1 purchase order has been in 'UNRECEIVED' status for over 6 days."
+            : `${delayedPurchasesQuery.data.length} purchase orders have been in 'UNRECEIVED' status for over 6 days.`}
         </Alert>
       )}
 
@@ -1334,7 +1335,12 @@ export default function PurchasingManagement() {
                             <TableCell>{po.order_date}</TableCell>
                             <TableCell>{po.tracking_number || '-'}</TableCell>
                             <TableCell>
-                              <Chip size="small" color={statusColor[po.deliver_status]} label={po.deliver_status} />
+                              <Chip
+                                size="small"
+                                variant="outlined"
+                                color={statusColor[po.deliver_status]}
+                                label={po.deliver_status}
+                              />
                             </TableCell>
                             <TableCell align="center">
                               <Chip
@@ -1347,10 +1353,10 @@ export default function PurchasingManagement() {
                               {po.total_amount} {po.currency}
                             </TableCell>
                             <TableCell align="center">
-                              <Chip
+                              <ZohoSyncStatusChip
                                 size="small"
-                                color={zohoSyncColor[po.zoho_sync_status]}
-                                label={po.zoho_sync_status}
+                                variant="outlined"
+                                status={po.zoho_sync_status}
                                 title={po.zoho_sync_error || ''}
                               />
                             </TableCell>
@@ -1833,7 +1839,7 @@ export default function PurchasingManagement() {
                   setEditPoForm((prev) => ({ ...prev, deliver_status: e.target.value as PurchaseDeliverStatus }))
                 }
               >
-                <MenuItem value="CREATED">CREATED</MenuItem>
+                <MenuItem value="UNRECEIVED">UNRECEIVED</MenuItem>
                 <MenuItem value="BILLED">BILLED</MenuItem>
                 <MenuItem value="DELIVERED">DELIVERED</MenuItem>
                 <MenuItem value="CANCELLED">CANCELLED</MenuItem>
@@ -2052,7 +2058,7 @@ export default function PurchasingManagement() {
                 }}
               >
                 <MenuItem value="ALL">All</MenuItem>
-                <MenuItem value="CREATED">CREATED</MenuItem>
+                <MenuItem value="UNRECEIVED">UNRECEIVED</MenuItem>
                 <MenuItem value="BILLED">BILLED</MenuItem>
                 <MenuItem value="DELIVERED">DELIVERED</MenuItem>
                 <MenuItem value="CANCELLED">CANCELLED</MenuItem>

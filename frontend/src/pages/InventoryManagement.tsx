@@ -41,6 +41,7 @@ import {
   ExpandMore,
   ExpandLess,
   PhotoLibrary,
+  Hub,
 } from '@mui/icons-material'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AxiosError } from 'axios'
@@ -60,6 +61,8 @@ import HoldActionPromptDialog from '../components/common/HoldActionPromptDialog'
 import LongPressTableRow from '../components/common/LongPressTableRow'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { compileSearchMatcher } from '../utils/search'
+import ZohoSyncStatusChip from '../components/common/ZohoSyncStatusChip'
+import { useNavigate } from 'react-router-dom'
 
 type ViewMode = 'list' | 'grouped'
 type ListSortBy = 'name' | 'sku' | 'brand' | 'upis' | 'type' | 'color' | 'condition' | 'zoho'
@@ -78,6 +81,7 @@ interface ExpandedRowProps {
   onManageImages: (sku: string) => void
   canEditVariant: boolean
   onOpenHoldPrompt: (variant: EnhancedVariant) => void
+  onOpenListingGraph?: (variantId: number, sku: string) => void
 }
 
 type BundleRole = 'Primary' | 'Accessory' | 'Satellite'
@@ -156,15 +160,7 @@ const getTypeColor = (type: ProductType): 'primary' | 'secondary' | 'success' | 
 }
 
 const getSyncStatusChip = (status: string) => {
-  type ChipColor = 'success' | 'warning' | 'error' | 'default'
-  const configs: Record<string, { color: ChipColor; label: string }> = {
-    SYNCED: { color: 'success', label: '🟢 Synced' },
-    PENDING: { color: 'warning', label: '🟡 Pending' },
-    ERROR: { color: 'error', label: '🔴 Error' },
-    DIRTY: { color: 'warning', label: '🟡 Dirty' },
-  }
-  const config = configs[status] || { color: 'default' as ChipColor, label: status }
-  return <Chip size="small" color={config.color} label={config.label} />
+  return <ZohoSyncStatusChip status={status} />
 }
 
 function ExpandedRow({
@@ -176,6 +172,7 @@ function ExpandedRow({
   onManageImages,
   canEditVariant,
   onOpenHoldPrompt,
+  onOpenListingGraph,
 }: ExpandedRowProps) {
   const [gallerySku, setGallerySku] = useState<string | null>(null)
   const typeCounts = useMemo(() => {
@@ -272,6 +269,17 @@ function ExpandedRow({
                   <TableCell>{getSyncStatusChip(variant.zoho_sync_status)}</TableCell>
                   <TableCell align="right">
                     <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'flex-end' }}>
+                      {onOpenListingGraph && (
+                        <Tooltip title="View Multi-Channel Knowledge Graph">
+                          <IconButton
+                            size="small"
+                            color="info"
+                            onClick={() => onOpenListingGraph(variant.id, variant.full_sku)}
+                          >
+                            <Hub fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
                       <Button
                         size="small"
                         variant="outlined"
@@ -337,6 +345,7 @@ export default function InventoryManagement() {
   const [gallerySku, setGallerySku] = useState<string | null>(null)
   const [manageImagesSku, setManageImagesSku] = useState<string | null>(null)
   const [snackbarOpen, setSnackbarOpen] = useState(false)
+  const navigate = useNavigate()
   const [snackbarMessage, setSnackbarMessage] = useState('')
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success')
   const [exportingZohoCsv, setExportingZohoCsv] = useState(false)
@@ -1286,6 +1295,17 @@ export default function InventoryManagement() {
                       <TableCell>{getSyncStatusChip(variant.zoho_sync_status)}</TableCell>
                       <TableCell align="right">
                         <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'flex-end' }}>
+                          <Tooltip title="View Multi-Channel Knowledge Graph">
+                            <IconButton
+                              size="small"
+                              color="info"
+                              onClick={() => {
+                                navigate(`/catalog/listings/graph?variantId=${variant.id}`)
+                              }}
+                            >
+                              <Hub fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
                           <Button
                             size="small"
                             variant="outlined"
@@ -1375,6 +1395,9 @@ export default function InventoryManagement() {
                           onManageImages={(sku) => setManageImagesSku(sku)}
                           canEditVariant={canEditVariant}
                           onOpenHoldPrompt={openHoldPrompt}
+                          onOpenListingGraph={(id) => {
+                            navigate(`/catalog/listings/graph?variantId=${id}`)
+                          }}
                         />
                       )}
                     </Fragment>

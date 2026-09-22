@@ -38,9 +38,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.integrations.amazon.client import AmazonClient
-from app.integrations.base import BasePlatformClient, ExternalOrder, ExternalOrderItem
+from app.integrations.base import BasePlatformClient
 from app.integrations.ebay.client import EbayClient
 from app.integrations.ecwid.client import EcwidClient
+from app.integrations.shopify.client import ShopifyClient
 from app.integrations.walmart.client import WalmartClient
 from app.modules.orders.dependencies import (
     get_order_item_repo,
@@ -71,6 +72,7 @@ from app.modules.orders.schemas.orders import (
     OrderStatusUpdate,
     ShippingStatusUpdate,
 )
+from app.modules.orders.import_ingest import ingest_parsed_rows
 from app.modules.orders.schemas.sync import (
     IntegrationStateResponse,
     SalesImportApiRequest,
@@ -84,6 +86,7 @@ from app.modules.orders.schemas.sync import (
 )
 from app.models.entities import Customer, ProductVariant, ZohoSyncStatus
 from app.modules.orders.service import OrderSyncService
+from app.modules.tracking.status_mapping import map_scraped_status
 from app.repositories.orders.order_repository import OrderItemRepository, OrderRepository
 from app.repositories.orders.sync_repository import SyncRepository
 from app.api.deps import AdminOrSalesUser, AdminUser
@@ -171,6 +174,7 @@ _IMPORT_SOURCE_TO_PLATFORM: dict[SalesImportApiSource, str] = {
     SalesImportApiSource.EBAY_USAV: "EBAY_USAV",
     SalesImportApiSource.EBAY_DRAGON: "EBAY_DRAGON",
     SalesImportApiSource.EBAY_PURCHASING: "EBAY_PURCHASING",
+    SalesImportApiSource.SHOPIFY: "SHOPIFY",
     SalesImportApiSource.WALMART: "WALMART",
 }
 
@@ -262,37 +266,19 @@ def _build_platform_clients() -> dict[str, BasePlatformClient]:
     else:
         logger.debug("WALMART skipped (walmart credentials not set)")
 
+    # Shopify
+    if settings.shopify_shop_url and settings.shopify_access_token:
+        clients["SHOPIFY"] = ShopifyClient(
+            shop_url=settings.shopify_shop_url,
+            access_token=settings.shopify_access_token,
+            api_version=settings.shopify_api_version,
+        )
+        logger.debug("✓ SHOPIFY client built")
+    else:
+        logger.debug("✗ SHOPIFY skipped (shopify credentials not set)")
+
     logger.debug(f"[DEBUG.INTERNAL_API] Platform clients built: {list(clients.keys())}")
     return clients
-
-
-class _StaticImportClient(BasePlatformClient):
-    def __init__(self, platform_name: str, orders: list):
-        self._platform_name = platform_name
-        self._orders = orders
-
-    @property
-    def platform_name(self) -> str:
-        return self._platform_name
-
-    async def authenticate(self) -> bool:
-        return True
-
-    async def fetch_orders(self, since=None, until=None, status=None):
-        _ = (since, until, status)
-        return self._orders
-
-    async def get_order(self, order_id: str):
-        _ = order_id
-        return None
-
-    async def update_stock(self, updates):
-        _ = updates
-        return []
-
-    async def update_tracking(self, order_id: str, tracking_number: str, carrier: str) -> bool:
-        _ = (order_id, tracking_number, carrier)
-        return False
 
 
 def _parse_order_csv(file_text: str) -> tuple[list[dict], int, int]:
@@ -1261,18 +1247,9 @@ async def import_orders_from_file(
             if order_number in processed_orders:
                 continue
                 
-            shipping_status = ShippingStatus.PENDING
-            if scraped_status == "DELIVERED":
-                shipping_status = ShippingStatus.DELIVERED
-            elif scraped_status in {"SHIPPED", "SHIPPING"}:
-                shipping_status = ShippingStatus.SHIPPING
-            elif scraped_status == "RETURNED":
-                shipping_status = ShippingStatus.RETURNED
-            elif scraped_status == "REFUNDED":
-                shipping_status = ShippingStatus.REFUNDED
-            elif scraped_status == "CANCELLED":
-                shipping_status = ShippingStatus.CANCELLED
-                
+            # Shared with the server-side tracking scraper (app/modules/tracking).
+            shipping_status = map_scraped_status(scraped_status) or ShippingStatus.PENDING
+
             stmt = select(Order).where(
                 (Order.external_order_id == order_number) | (Order.external_order_number == order_number)
             )
@@ -1285,6 +1262,7 @@ async def import_orders_from_file(
                 if order.shipping_status == shipping_status:
                     continue
                 order.shipping_status = shipping_status
+                order.zoho_sync_status = ZohoSyncStatus.DIRTY
                 db.add(order)
                 updated_count += 1
             
@@ -1413,78 +1391,22 @@ async def import_orders_from_file(
         rows, rows_seen, rows_skipped = _parse_amazon_fba_csv(text)
     else:
         rows, rows_seen, rows_skipped = _parse_order_csv(text)
-    orders_by_platform: dict[str, list[ExternalOrder]] = {}
-    for row in rows:
-        items = [
-            ExternalOrderItem(
-                platform_item_id=item["platform_item_id"],
-                platform_sku=item["platform_sku"],
-                asin=item["asin"],
-                title=item["title"],
-                quantity=item["quantity"],
-                unit_price=item["unit_price"],
-                total_price=item["total_price"],
-                raw_data=item["raw_data"],
-            )
-            for item in row["items"]
-        ]
-        platform_name = row.get("platform_name") or "MANUAL"
-        external_order = ExternalOrder(
-            platform_order_id=row["platform_order_id"],
-            platform_order_number=row["platform_order_number"],
-            customer_name=row["customer_name"],
-            customer_email=row["customer_email"],
-            customer_external_id=row.get("customer_external_id"),
-            ship_address_line1=row["ship_address_line1"],
-            ship_address_line2=row["ship_address_line2"],
-            ship_address_line3=row["ship_address_line3"],
-            ship_city=row["ship_city"],
-            ship_state=row["ship_state"],
-            ship_postal_code=row["ship_postal_code"],
-            ship_country=row["ship_country"],
-            subtotal=row["subtotal"],
-            tax=row["tax"],
-            shipping=row["shipping"],
-            total=row["total"],
-            currency=row["currency"],
-            ordered_at=row["ordered_at"],
-            items=items,
-            raw_data=row["raw_data"],
-            customer_source=None,
-            tracking_number=row.get("tracking_number"),
-            carrier=row.get("carrier"),
-        )
-        orders_by_platform.setdefault(platform_name, []).append(external_order)
-    aggregate = {
-        "new_orders": 0,
-        "new_items": 0,
-        "auto_matched": 0,
-        "skipped_duplicates": 0,
-        "errors": [],
-        "success": True,
-    }
-    for platform_name, platform_orders in orders_by_platform.items():
-        client = _StaticImportClient(platform_name, platform_orders)
-        result = await service.sync_platform_range(
-            platform_name,
-            client,
-            datetime(1970, 1, 1, tzinfo=timezone.utc),
-            datetime.now(timezone.utc),
-            source="AMAZON_FBA_CSV" if source == SalesImportFileSource.AMAZON_FBA_CSV else "SHIPSTATION_CSV",
-            fulfillment_channel=(
-                OrderFulfillmentChannel.AMAZON_FBA
-                if source == SalesImportFileSource.AMAZON_FBA_CSV
-                else None
-            ),
-            skip_existing=source == SalesImportFileSource.CSV_GENERIC,
-        )
-        aggregate["new_orders"] += result.new_orders
-        aggregate["new_items"] += result.new_items
-        aggregate["auto_matched"] += result.auto_matched
-        aggregate["skipped_duplicates"] += result.skipped_duplicates
-        aggregate["errors"].extend(result.errors)
-        if not result.success:
-            aggregate["success"] = False
+
+    aggregate = await ingest_parsed_rows(
+        service,
+        rows,
+        source=(
+            "AMAZON_FBA_CSV"
+            if source == SalesImportFileSource.AMAZON_FBA_CSV
+            else "SHIPSTATION_CSV"
+        ),
+        fulfillment_channel=(
+            OrderFulfillmentChannel.AMAZON_FBA
+            if source == SalesImportFileSource.AMAZON_FBA_CSV
+            else None
+        ),
+        skip_existing=source == SalesImportFileSource.CSV_GENERIC,
+    )
 
     return SalesImportFileResponse(
         source=source,
@@ -1787,6 +1709,8 @@ async def list_orders(
     ordered_at_to: Annotated[Optional[datetime], Query()] = None,
     zoho_sync_status: Annotated[Optional[str], Query()] = None,
     source: Annotated[Optional[str], Query()] = None,
+    total_amount: Annotated[Decimal | None, Query(ge=0)] = None,
+    total_amount_range: Annotated[Decimal, Query(ge=0)] = Decimal("0"),
     sort_by: Annotated[str, Query(pattern="^(ordered_at|created_at|total_amount|external_order_id)$")] = "ordered_at",
     sort_dir: Annotated[str, Query(pattern="^(asc|desc)$")] = "desc",
     search: Annotated[Optional[str], Query()] = None,
@@ -1831,6 +1755,8 @@ async def list_orders(
         ordered_at_to=ordered_at_to,
         zoho_sync_status=zs_filter,
         source=source,
+        total_amount=total_amount,
+        total_amount_range=total_amount_range,
         sort_by=sort_by,
         sort_dir=sort_dir,
         search=search,

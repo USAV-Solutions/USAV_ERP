@@ -125,6 +125,19 @@ def test_strip_salesorder_location_fields_removes_transaction_level_location_onl
     assert sanitized["line_items"] == payload["line_items"]
 
 
+def test_order_to_zoho_payload_omits_item_id_for_unmatched_items():
+    order = _build_order(
+        platform=OrderPlatform.AMAZON,
+        source="SHIPSTATION_CSV",
+        tax_amount="0.00",
+        shipping_amount="0.00",
+        total_amount="128.88",
+    )
+    # order.items[0].variant is None
+    payload = order_to_zoho_payload(order)
+    assert "item_id" not in payload["line_items"][0]
+
+
 def test_amazon_renew_order_maps_to_amazon_renew_so_source():
     order = _build_order(
         platform=OrderPlatform.AMAZON_RENEW,

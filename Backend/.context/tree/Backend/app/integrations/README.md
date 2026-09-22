@@ -1,7 +1,7 @@
-﻿# Backend\app\integrations
+# Backend\app\integrations
 
 ## What This Folder Does
-External system adapters and normalization clients (Amazon/eBay/Ecwid/Walmart/Zoho).
+External system adapters and normalization clients (Amazon/eBay/Ecwid/Shopify/Walmart/Zoho).
 
 ## Typical Contents
 - Python modules, schemas, or support assets scoped to this domain.
@@ -19,6 +19,7 @@ External system adapters and normalization clients (Amazon/eBay/Ecwid/Walmart/Zo
 - `amazon/`
 - `ebay/`
 - `ecwid/`
+- `shopify/`
 - `walmart/`
 - `zoho/`
 

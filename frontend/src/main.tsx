@@ -6,6 +6,10 @@ import { ThemeProvider, CssBaseline } from '@mui/material'
 import App from './App'
 import { theme } from './theme'
 import { AuthProvider } from './hooks/useAuth'
+import { TrackingSyncProvider } from './context/TrackingSyncContext'
+import TrackingSyncPanel from './components/tracking/TrackingSyncPanel'
+import { FbaImportProvider } from './context/FbaImportContext'
+import FbaImportPanel from './components/fba/FbaImportPanel'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -23,7 +27,13 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <ThemeProvider theme={theme}>
           <CssBaseline />
           <AuthProvider>
-            <App />
+            <TrackingSyncProvider>
+              <FbaImportProvider>
+                <App />
+                <TrackingSyncPanel />
+                <FbaImportPanel />
+              </FbaImportProvider>
+            </TrackingSyncProvider>
           </AuthProvider>
         </ThemeProvider>
       </BrowserRouter>

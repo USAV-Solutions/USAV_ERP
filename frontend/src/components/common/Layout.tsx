@@ -39,8 +39,11 @@ import {
   Add as AddIcon,
   CameraAlt,
   AutoAwesome,
+  Hub,
 } from '@mui/icons-material'
 import { useAuth } from '../../hooks/useAuth'
+import GlobalTrackingChip from '../tracking/GlobalTrackingChip'
+import GlobalFbaImportChip from '../fba/GlobalFbaImportChip'
 
 const DRAWER_WIDTH = 240
 
@@ -53,6 +56,7 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
+  { title: 'Orbit', path: '/catalog/listings/graph', icon: <Hub />, roles: ['ADMIN', 'SALES_REP', 'WAREHOUSE_OP'] },
   { title: 'Dashboard', path: '/', icon: <Dashboard />, roles: ['ADMIN', 'WAREHOUSE_OP', 'SALES_REP', 'ACCOUNTANT'] },
   { title: 'Warehouse Operations', path: '/warehouse/ops', icon: <Search />, roles: ['ADMIN', 'WAREHOUSE_OP', 'PACKER'] },
   {
@@ -255,6 +259,8 @@ export default function Layout() {
           <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
             {getCurrentTitle()}
           </Typography>
+          <GlobalTrackingChip />
+          <GlobalFbaImportChip />
           <IconButton color="inherit" onClick={handleMenuOpen}>
             <Avatar sx={{ width: 32, height: 32, bgcolor: 'secondary.main' }}>
               {user?.username?.charAt(0).toUpperCase()}

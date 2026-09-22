@@ -81,7 +81,7 @@ class PurchaseOrderItemResponse(PurchaseOrderItemBase):
 class PurchaseOrderBase(BaseModel):
     po_number: str = Field(..., max_length=100)
     vendor_id: int
-    deliver_status: PurchaseDeliverStatus = PurchaseDeliverStatus.CREATED
+    deliver_status: PurchaseDeliverStatus = PurchaseDeliverStatus.UNRECEIVED
     order_date: date
     expected_delivery_date: Optional[date] = None
     currency: str = Field(default="USD", min_length=3, max_length=3)

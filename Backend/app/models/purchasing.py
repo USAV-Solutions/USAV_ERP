@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 class PurchaseDeliverStatus(str, enum.Enum):
     """Purchase order delivery lifecycle."""
 
-    CREATED = "CREATED"
+    UNRECEIVED = "UNRECEIVED"
     BILLED = "BILLED"
     DELIVERED = "DELIVERED"
     CANCELLED = "CANCELLED"
@@ -113,8 +113,8 @@ class PurchaseOrder(Base, ZohoSyncMixin, TimestampMixin):
     deliver_status: Mapped[PurchaseDeliverStatus] = mapped_column(
         Enum(PurchaseDeliverStatus, name="purchase_deliver_status_enum", create_constraint=False),
         nullable=False,
-        default=PurchaseDeliverStatus.CREATED,
-        server_default=PurchaseDeliverStatus.CREATED.value,
+        default=PurchaseDeliverStatus.UNRECEIVED,
+        server_default=PurchaseDeliverStatus.UNRECEIVED.value,
     )
     order_date: Mapped[date] = mapped_column(Date, nullable=False)
     expected_delivery_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)

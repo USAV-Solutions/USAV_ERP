@@ -1,5 +1,3 @@
-import { Platform } from './inventory'
-
 export interface EbayAspectValue {
   name: string
   values: string[]
