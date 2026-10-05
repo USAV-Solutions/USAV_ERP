@@ -3,6 +3,7 @@ name: Deploy
 on:
   push:
     branches: ["main"]
+  workflow_dispatch:
 
 concurrency:
   group: production-deploy
@@ -20,6 +21,10 @@ jobs:
           set -euo pipefail
 
           cd ~/USAV_Inventory
+
+          echo "Fixing file permissions if altered by containers..."
+          (echo 1 | sudo -S rm -rf backups 2>/dev/null) || sudo rm -rf backups 2>/dev/null || rm -rf backups 2>/dev/null || true
+          (echo 1 | sudo -S chown -R $(id -u):$(id -g) . 2>/dev/null) || sudo chown -R $(id -u):$(id -g) . 2>/dev/null || true
 
           echo "Fetching latest code..."
           git fetch origin main
