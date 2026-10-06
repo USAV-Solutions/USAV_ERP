@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+import app.modules.orders.routes as _orders_routes  # noqa: F401 - resolves circular import
 from app.integrations.base import ExternalOrder, ExternalOrderItem
 from app.modules.orders.models import OrderFulfillmentChannel, OrderPlatform
 from app.modules.orders.schemas.sync import SyncResponse
@@ -153,3 +154,68 @@ async def test_update_existing_order_upgrades_to_fba_and_later_api_sync_does_not
 
     assert existing.fulfillment_channel == OrderFulfillmentChannel.AMAZON_FBA
     assert changed is False
+
+
+@pytest.mark.asyncio
+async def test_update_existing_order_upgrades_platform_from_amazon_to_amazon_fba():
+    service = _build_service()
+    service._get_or_create_customer = AsyncMock(return_value=None)
+    service._upsert_existing_order_items = AsyncMock(return_value=False)
+    service._is_tracking_duplicate = AsyncMock(return_value=False)
+
+    existing = SimpleNamespace(
+        id=1,
+        platform=OrderPlatform.AMAZON,
+        customer_id=None,
+        source="SHIPSTATION_CSV",
+        fulfillment_channel=OrderFulfillmentChannel.AMAZON_FBA,
+        external_order_number="111-9125115-2573034",
+        ordered_at=datetime(2026, 10, 1, tzinfo=timezone.utc),
+        tracking_number=None,
+        carrier=None,
+        subtotal_amount=Decimal("27.88"),
+        tax_amount=Decimal("0.00"),
+        shipping_amount=Decimal("0.00"),
+        total_amount=Decimal("27.88"),
+        currency="USD",
+        platform_data={},
+    )
+    response = SyncResponse(platform="AMAZON_FBA")
+    ext = _build_external_order()
+
+    changed = await service._update_existing_order(
+        existing=existing,
+        ext=ext,
+        platform=OrderPlatform.AMAZON_FBA,
+        response=response,
+        source="AMAZON_FBA_CSV",
+        fulfillment_channel=OrderFulfillmentChannel.AMAZON_FBA,
+    )
+
+    assert changed is True
+    assert existing.platform == OrderPlatform.AMAZON_FBA
+
+
+@pytest.mark.asyncio
+async def test_order_repository_get_by_external_id_cross_amazon_platforms():
+    from app.repositories.orders.order_repository import OrderRepository
+    from unittest.mock import MagicMock
+
+    session = MagicMock()
+    mock_order = SimpleNamespace(
+        id=42,
+        platform=OrderPlatform.AMAZON,
+        external_order_id="111-9125115-2573034",
+        zoho_id="Z-100",
+    )
+    mock_scalars = MagicMock()
+    mock_scalars.first.return_value = mock_order
+    mock_result = MagicMock()
+    mock_result.scalars.return_value = mock_scalars
+    session.execute = AsyncMock(return_value=mock_result)
+
+    repo = OrderRepository(session)
+    found = await repo.get_by_external_id(OrderPlatform.AMAZON_FBA, "111-9125115-2573034")
+
+    assert found is mock_order
+    session.execute.assert_awaited_once()

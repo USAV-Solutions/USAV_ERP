@@ -690,6 +690,27 @@ class ZohoClient:
         if not target:
             return None
 
+        # 1. Try direct parameter lookup by salesorder_number
+        try:
+            res = await self._request("GET", "/salesorders", params={"salesorder_number": target})
+            orders = res.get("salesorders", [])
+            for so in orders:
+                if str(so.get("salesorder_number", "")).strip() == target or str(so.get("reference_number", "")).strip() == target:
+                    return so
+        except Exception as exc:
+            logger.debug("search_salesorder_by_reference direct query failed: %s", exc)
+
+        # 2. Try direct parameter lookup by search_text
+        try:
+            res = await self._request("GET", "/salesorders", params={"search_text": target})
+            orders = res.get("salesorders", [])
+            for so in orders:
+                if str(so.get("salesorder_number", "")).strip() == target or str(so.get("reference_number", "")).strip() == target:
+                    return so
+        except Exception as exc:
+            logger.debug("search_salesorder_by_reference search_text failed: %s", exc)
+
+        # 3. Fallback to scanning pages 1..3
         for page in range(1, 4):
             salesorders = await self.list_salesorders(page=page, per_page=200)
             match = next(
@@ -1122,6 +1143,30 @@ class ZohoClient:
         result = await self._request("GET", "/contacts", params={"email": email})
         contacts = result.get("contacts", [])
         return contacts[0] if contacts else None
+
+    async def get_contact_by_name(self, contact_name: str) -> Optional[dict]:
+        """Find a Zoho contact by contact_name."""
+        target = str(contact_name or "").strip()
+        if not target:
+            return None
+        try:
+            result = await self._request("GET", "/contacts", params={"contact_name": target})
+            contacts = result.get("contacts", [])
+            for c in contacts:
+                if str(c.get("contact_name", "")).strip().lower() == target.lower():
+                    return c
+        except Exception:
+            pass
+
+        try:
+            result = await self._request("GET", "/contacts", params={"search_text": target})
+            contacts = result.get("contacts", [])
+            for c in contacts:
+                if str(c.get("contact_name", "")).strip().lower() == target.lower():
+                    return c
+        except Exception:
+            pass
+        return None
 
     async def list_contacts(
         self,

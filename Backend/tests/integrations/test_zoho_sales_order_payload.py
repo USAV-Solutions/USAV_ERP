@@ -2,6 +2,8 @@ from datetime import datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pytest
+
 from app.integrations.zoho.sync_engine import (
     _is_salesorder_transaction_level_location_error,
     _strip_salesorder_location_fields,
@@ -208,3 +210,53 @@ def test_purchase_order_lcpu_source_maps_to_local_pickup():
     payload = purchase_order_to_zoho_payload(po)
     cf_source = next((cf["value"] for cf in payload.get("custom_fields", []) if cf.get("api_name") == "cf_source"), None)
     assert cf_source == "Local Pickup"
+
+
+def test_strip_salesorder_location_fields_removes_line_item_locations():
+    payload = {
+        "salesorder_number": "SO-1002",
+        "location_id": "5623409000001937413",
+        "line_items": [
+            {
+                "name": "FBA Item",
+                "quantity": 1,
+                "rate": 27.88,
+                "location_id": "5623409000001937413",
+                "branch_id": "branch-1",
+            }
+        ],
+    }
+    sanitized = _strip_salesorder_location_fields(payload)
+    assert "location_id" not in sanitized
+    assert "location_id" not in sanitized["line_items"][0]
+    assert "branch_id" not in sanitized["line_items"][0]
+    assert sanitized["line_items"][0]["name"] == "FBA Item"
+
+
+@pytest.mark.asyncio
+async def test_search_salesorder_by_reference_direct_lookup():
+    from unittest.mock import AsyncMock
+    from app.integrations.zoho.client import ZohoClient
+
+    client = ZohoClient()
+    client._request = AsyncMock(
+        return_value={"salesorders": [{"salesorder_id": "SO-999", "salesorder_number": "113-2610567-7984254"}]}
+    )
+    res = await client.search_salesorder_by_reference("113-2610567-7984254")
+    assert res is not None
+    assert res["salesorder_id"] == "SO-999"
+
+
+@pytest.mark.asyncio
+async def test_get_contact_by_name_direct_lookup():
+    from unittest.mock import AsyncMock
+    from app.integrations.zoho.client import ZohoClient
+
+    client = ZohoClient()
+    client._request = AsyncMock(
+        return_value={"contacts": [{"contact_id": "C-123", "contact_name": "Travis"}]}
+    )
+    res = await client.get_contact_by_name("Travis")
+    assert res is not None
+    assert res["contact_id"] == "C-123"
+

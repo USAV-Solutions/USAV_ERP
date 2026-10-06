@@ -8,7 +8,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional, Sequence
 
-from sqlalchemy import select, func, and_, desc, or_
+from sqlalchemy import select, func, and_, desc, or_, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -20,6 +20,7 @@ from app.modules.orders.models import (
     OrderItemStatus,
     OrderPlatform,
     OrderStatus,
+    ShippingStatus,
 )
 from app.repositories.base import BaseRepository
 
@@ -50,6 +51,25 @@ class OrderRepository(BaseRepository[Order]):
         external_order_id: str,
     ) -> Optional[Order]:
         """Look up an order by its platform-specific ID (dedup check)."""
+        amazon_platforms = {OrderPlatform.AMAZON, OrderPlatform.AMAZON_FBA, OrderPlatform.AMAZON_RENEW}
+        if platform in amazon_platforms:
+            stmt = (
+                select(Order)
+                .where(
+                    and_(
+                        Order.platform.in_(amazon_platforms),
+                        Order.external_order_id == external_order_id,
+                    )
+                )
+                .order_by(
+                    case((Order.platform == platform, 0), else_=1),
+                    case((Order.zoho_id.isnot(None), 0), else_=1),
+                    Order.id.asc(),
+                )
+            )
+            result = await self.session.execute(stmt)
+            return result.scalars().first()
+
         stmt = select(Order).where(
             and_(
                 Order.platform == platform,
@@ -85,6 +105,7 @@ class OrderRepository(BaseRepository[Order]):
         platform: Optional[OrderPlatform] = None,
         fulfillment_channel: Optional[OrderFulfillmentChannel] = None,
         status: Optional[OrderStatus] = None,
+        shipping_status: Optional[ShippingStatus] = None,
         item_status: Optional[OrderItemStatus] = None,
         ordered_at_from: Optional[datetime] = None,
         ordered_at_to: Optional[datetime] = None,
@@ -113,6 +134,8 @@ class OrderRepository(BaseRepository[Order]):
             stmt = stmt.where(Order.fulfillment_channel == fulfillment_channel)
         if status is not None:
             stmt = stmt.where(Order.status == status)
+        if shipping_status is not None:
+            stmt = stmt.where(Order.shipping_status == shipping_status)
         if item_status is not None:
             stmt = stmt.where(
                 Order.items.any(OrderItem.status == item_status)

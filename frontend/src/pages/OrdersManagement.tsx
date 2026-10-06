@@ -43,6 +43,8 @@ import {
   ListItem,
   ListItemIcon,
   ListItemText,
+  Popover,
+  Divider,
 } from '@mui/material'
 import {
   Refresh,
@@ -184,6 +186,7 @@ export default function OrdersManagement() {
   // Filters
   const [platformFilter, setPlatformFilter] = useState<OrderPlatform | ''>('')
   const [statusFilter, setStatusFilter] = useState<OrderStatus | ''>('')
+  const [shippingStatusFilter, setShippingStatusFilter] = useState<ShippingStatus | ''>('')
   const [itemStatusFilter, setItemStatusFilter] = useState<OrderItemStatus | ''>('')
   const [zohoSyncFilter, setZohoSyncFilter] = useState<ZohoSyncStatus | ''>('')
   const [sourceFilter, setSourceFilter] = useState('')
@@ -204,6 +207,13 @@ export default function OrdersManagement() {
   const priceRangeValue =
     priceSearchValue !== undefined ? Number(debouncedPriceRange || '0') || 0 : undefined
   const [filtersDialogOpen, setFiltersDialogOpen] = useState(false)
+
+  // Header filter anchor elements
+  const [platformAnchorEl, setPlatformAnchorEl] = useState<null | HTMLElement>(null)
+  const [shippingStatusAnchorEl, setShippingStatusAnchorEl] = useState<null | HTMLElement>(null)
+  const [zohoSyncAnchorEl, setZohoSyncAnchorEl] = useState<null | HTMLElement>(null)
+  const [unmatchedAnchorEl, setUnmatchedAnchorEl] = useState<null | HTMLElement>(null)
+  const [dateAnchorEl, setDateAnchorEl] = useState<null | HTMLElement>(null)
 
   // Expanded order rows
   const [expandedOrderId, setExpandedOrderId] = useState<number | null>(null)
@@ -249,14 +259,6 @@ export default function OrdersManagement() {
   // ── Queries ──────────────────────────────────────────────────────
 
   const {
-    data: syncStatus,
-  } = useQuery<SyncStatusResponse>({
-    queryKey: ['syncStatus', fulfillmentChannel],
-    queryFn: () => getSyncStatus(fulfillmentChannel),
-    refetchInterval: 15_000,
-  })
-
-  const {
     data: ordersData,
     isLoading: ordersLoading,
   } = useQuery<OrderListResponse>({
@@ -267,6 +269,7 @@ export default function OrdersManagement() {
       fulfillmentChannel,
       platformFilter,
       statusFilter,
+      shippingStatusFilter,
       itemStatusFilter,
       zohoSyncFilter,
       sourceFilter,
@@ -287,6 +290,7 @@ export default function OrdersManagement() {
         platform: platformFilter || undefined,
         fulfillment_channel: fulfillmentChannel,
         status: statusFilter || undefined,
+        shipping_status: shippingStatusFilter || undefined,
         item_status: itemStatusFilter || undefined,
         zoho_sync_status: zohoSyncFilter || undefined,
         source: sourceFilter || undefined,
@@ -304,6 +308,7 @@ export default function OrdersManagement() {
       fulfillmentChannel,
       platformFilter,
       statusFilter,
+      shippingStatusFilter,
       itemStatusFilter,
       zohoSyncFilter,
       sourceFilter,
@@ -320,6 +325,7 @@ export default function OrdersManagement() {
         fulfillment_channel: fulfillmentChannel,
         platform: platformFilter || undefined,
         status: statusFilter || undefined,
+        shipping_status: shippingStatusFilter || undefined,
         item_status: itemStatusFilter || undefined,
         zoho_sync_status: zohoSyncFilter || undefined,
         source: sourceFilter || undefined,
@@ -857,6 +863,7 @@ export default function OrdersManagement() {
   const resetFilters = () => {
     setPlatformFilter('')
     setStatusFilter('')
+    setShippingStatusFilter('')
     setItemStatusFilter('')
     setZohoSyncFilter('')
     setSourceFilter('')
@@ -884,6 +891,7 @@ export default function OrdersManagement() {
   const activeFilterCount = [
     platformFilter !== '',
     statusFilter !== '',
+    shippingStatusFilter !== '',
     itemStatusFilter !== '',
     zohoSyncFilter !== '',
     sourceFilter !== '',
@@ -1038,28 +1046,6 @@ export default function OrdersManagement() {
         unmatchedOrders={orderSummary?.unmatchedOrders ?? 0}
         unmatchedItems={orderSummary?.unmatchedItems ?? 0}
       />
-      {syncStatus && (
-        <Paper sx={{ p: 1.5, mb: 2 }}>
-          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-            {syncStatus.platforms.map((p) => (
-              <Chip
-                key={p.platform_name}
-                label={p.platform_name}
-                size="small"
-                color={
-                  p.current_status === 'SYNCING'
-                    ? 'primary'
-                    : p.current_status === 'ERROR'
-                      ? 'error'
-                      : 'default'
-                }
-                variant="outlined"
-              />
-            ))}
-          </Stack>
-        </Paper>
-      )}
-
       {/* Search + Filters */}
       <Paper sx={{ p: 2, mb: 2 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', md: 'center' }}>
@@ -1110,6 +1096,101 @@ export default function OrdersManagement() {
             Clear
           </Button>
         </Stack>
+        {activeFilterCount > 0 && (
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 1.5, pt: 1, borderTop: '1px solid', borderColor: 'divider' }}>
+            <Typography variant="caption" color="text.secondary" fontWeight={600}>
+              Active:
+            </Typography>
+            {platformFilter && (
+              <Chip
+                size="small"
+                label={`Platform: ${PLATFORM_LABELS[platformFilter] ?? platformFilter}`}
+                onDelete={() => {
+                  setPlatformFilter('')
+                  setPage(0)
+                }}
+                color="primary"
+                variant="outlined"
+              />
+            )}
+            {shippingStatusFilter && (
+              <Chip
+                size="small"
+                label={`Shipping: ${shippingStatusFilter.replace(/_/g, ' ')}`}
+                onDelete={() => {
+                  setShippingStatusFilter('')
+                  setPage(0)
+                }}
+                color="primary"
+                variant="outlined"
+              />
+            )}
+            {statusFilter && (
+              <Chip
+                size="small"
+                label={`Status: ${statusFilter.replace(/_/g, ' ')}`}
+                onDelete={() => {
+                  setStatusFilter('')
+                  setPage(0)
+                }}
+                color="primary"
+                variant="outlined"
+              />
+            )}
+            {itemStatusFilter && (
+              <Chip
+                size="small"
+                label={`Items: ${itemStatusFilter}`}
+                onDelete={() => {
+                  setItemStatusFilter('')
+                  setPage(0)
+                }}
+                color="primary"
+                variant="outlined"
+              />
+            )}
+            {zohoSyncFilter && (
+              <Chip
+                size="small"
+                label={`Zoho: ${zohoSyncFilter}`}
+                onDelete={() => {
+                  setZohoSyncFilter('')
+                  setPage(0)
+                }}
+                color="primary"
+                variant="outlined"
+              />
+            )}
+            {(orderedFromFilter || orderedToFilter) && (
+              <Chip
+                size="small"
+                label={`Date: ${orderedFromFilter || '...'} to ${orderedToFilter || '...'}`}
+                onDelete={() => {
+                  setOrderedFromFilter('')
+                  setOrderedToFilter('')
+                  setPage(0)
+                }}
+                color="primary"
+                variant="outlined"
+              />
+            )}
+            {priceSearch && (
+              <Chip
+                size="small"
+                label={`Price: $${priceSearch} (±${priceRange})`}
+                onDelete={() => {
+                  setPriceSearch('')
+                  setPage(0)
+                }}
+                color="primary"
+                variant="outlined"
+              />
+            )}
+            <Button size="small" onClick={resetFilters} sx={{ textTransform: 'none', py: 0, fontSize: '0.75rem' }}>
+              Clear all
+            </Button>
+          </Stack>
+        )}
       </Paper>
 
       {/* Orders Table */}
@@ -1117,17 +1198,481 @@ export default function OrdersManagement() {
         <TableContainer>
           <Table size="small">
             <TableHead>
-              <TableRow>
+              <TableRow sx={{ bgcolor: 'background.default' }}>
                 <TableCell sx={{ width: 40 }} />
-                <TableCell>Order #</TableCell>
-                <TableCell>Platform</TableCell>
-                <TableCell>Tracking</TableCell>
-                <TableCell>Customer</TableCell>
-                <TableCell align="center">Unmatched</TableCell>
-                <TableCell align="right">Platform Total</TableCell>
-                <TableCell>Shipping Status</TableCell>
-                <TableCell>Zoho Sync</TableCell>
-                <TableCell>Ordered</TableCell>
+
+                {/* Order # */}
+                <TableCell>
+                  <Box
+                    sx={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}
+                    onClick={() => {
+                      if (sortBy === 'external_order_id') {
+                        setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
+                      } else {
+                        setSortBy('external_order_id')
+                        setSortDir('desc')
+                      }
+                      setPage(0)
+                    }}
+                  >
+                    <Typography variant="caption" fontWeight={700} sx={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Order #
+                    </Typography>
+                    {sortBy === 'external_order_id' ? (
+                      sortDir === 'asc' ? <KeyboardArrowUp fontSize="small" color="primary" /> : <KeyboardArrowDown fontSize="small" color="primary" />
+                    ) : (
+                      <ArrowDropDown fontSize="small" sx={{ color: 'text.disabled', opacity: 0.5 }} />
+                    )}
+                  </Box>
+                </TableCell>
+
+                {/* Platform Filter */}
+                <TableCell>
+                  <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
+                    <Box
+                      sx={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}
+                      onClick={(e) => setPlatformAnchorEl(e.currentTarget)}
+                    >
+                      <Typography
+                        variant="caption"
+                        fontWeight={700}
+                        sx={{
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.04em',
+                          color: platformFilter ? 'primary.main' : 'text.primary',
+                        }}
+                      >
+                        Platform
+                      </Typography>
+                      <ArrowDropDown
+                        fontSize="small"
+                        sx={{ color: platformFilter ? 'primary.main' : 'text.secondary' }}
+                      />
+                    </Box>
+                    {platformFilter && (
+                      <Chip
+                        size="small"
+                        label={PLATFORM_LABELS[platformFilter] ?? platformFilter}
+                        color="primary"
+                        variant="filled"
+                        onDelete={(e) => {
+                          e.stopPropagation()
+                          setPlatformFilter('')
+                          setPage(0)
+                        }}
+                        sx={{ height: 20, fontSize: '0.7rem', fontWeight: 600 }}
+                      />
+                    )}
+                  </Box>
+                  <Menu
+                    anchorEl={platformAnchorEl}
+                    open={Boolean(platformAnchorEl)}
+                    onClose={() => setPlatformAnchorEl(null)}
+                    slotProps={{ paper: { sx: { maxHeight: 380, minWidth: 200 } } }}
+                  >
+                    <MenuItem
+                      selected={platformFilter === ''}
+                      onClick={() => {
+                        setPlatformFilter('')
+                        setPage(0)
+                        setPlatformAnchorEl(null)
+                      }}
+                    >
+                      All Platforms
+                    </MenuItem>
+                    <Divider />
+                    {(Object.keys(PLATFORM_LABELS) as OrderPlatform[]).map((p) => (
+                      <MenuItem
+                        key={p}
+                        selected={platformFilter === p}
+                        onClick={() => {
+                          setPlatformFilter(p)
+                          setPage(0)
+                          setPlatformAnchorEl(null)
+                        }}
+                      >
+                        {PLATFORM_LABELS[p]}
+                      </MenuItem>
+                    ))}
+                  </Menu>
+                </TableCell>
+
+                {/* Tracking */}
+                <TableCell>
+                  <Typography variant="caption" fontWeight={700} sx={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Tracking
+                  </Typography>
+                </TableCell>
+
+                {/* Customer */}
+                <TableCell>
+                  <Typography variant="caption" fontWeight={700} sx={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Customer
+                  </Typography>
+                </TableCell>
+
+                {/* Unmatched Filter */}
+                <TableCell align="center">
+                  <Box sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, flexWrap: 'wrap' }}>
+                    <Box
+                      sx={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}
+                      onClick={(e) => setUnmatchedAnchorEl(e.currentTarget)}
+                    >
+                      <Typography
+                        variant="caption"
+                        fontWeight={700}
+                        sx={{
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.04em',
+                          color: itemStatusFilter ? 'error.main' : 'text.primary',
+                        }}
+                      >
+                        Unmatched
+                      </Typography>
+                      <ArrowDropDown
+                        fontSize="small"
+                        sx={{ color: itemStatusFilter ? 'error.main' : 'text.secondary' }}
+                      />
+                    </Box>
+                    {itemStatusFilter && (
+                      <Chip
+                        size="small"
+                        label={itemStatusFilter}
+                        color={itemStatusFilter === 'UNMATCHED' ? 'error' : 'default'}
+                        variant="filled"
+                        onDelete={(e) => {
+                          e.stopPropagation()
+                          setItemStatusFilter('')
+                          setPage(0)
+                        }}
+                        sx={{ height: 20, fontSize: '0.7rem', fontWeight: 600 }}
+                      />
+                    )}
+                  </Box>
+                  <Menu
+                    anchorEl={unmatchedAnchorEl}
+                    open={Boolean(unmatchedAnchorEl)}
+                    onClose={() => setUnmatchedAnchorEl(null)}
+                  >
+                    <MenuItem
+                      selected={itemStatusFilter === ''}
+                      onClick={() => {
+                        setItemStatusFilter('')
+                        setPage(0)
+                        setUnmatchedAnchorEl(null)
+                      }}
+                    >
+                      All Items
+                    </MenuItem>
+                    <Divider />
+                    {ITEM_STATUS_OPTIONS.map((s) => (
+                      <MenuItem
+                        key={s}
+                        selected={itemStatusFilter === s}
+                        onClick={() => {
+                          setItemStatusFilter(s)
+                          setPage(0)
+                          setUnmatchedAnchorEl(null)
+                        }}
+                      >
+                        {s === 'UNMATCHED' ? 'UNMATCHED (Action Needed)' : s}
+                      </MenuItem>
+                    ))}
+                  </Menu>
+                </TableCell>
+
+                {/* Platform Total Sort */}
+                <TableCell align="right">
+                  <Box
+                    sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', cursor: 'pointer', userSelect: 'none' }}
+                    onClick={() => {
+                      if (sortBy === 'total_amount') {
+                        setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
+                      } else {
+                        setSortBy('total_amount')
+                        setSortDir('desc')
+                      }
+                      setPage(0)
+                    }}
+                  >
+                    <Typography
+                      variant="caption"
+                      fontWeight={700}
+                      sx={{
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.04em',
+                        color: sortBy === 'total_amount' ? 'primary.main' : 'text.primary',
+                      }}
+                    >
+                      Platform Total
+                    </Typography>
+                    {sortBy === 'total_amount' ? (
+                      sortDir === 'asc' ? <KeyboardArrowUp fontSize="small" color="primary" /> : <KeyboardArrowDown fontSize="small" color="primary" />
+                    ) : (
+                      <ArrowDropDown fontSize="small" sx={{ color: 'text.disabled', opacity: 0.5 }} />
+                    )}
+                  </Box>
+                </TableCell>
+
+                {/* Shipping Status Filter */}
+                <TableCell>
+                  <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
+                    <Box
+                      sx={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}
+                      onClick={(e) => setShippingStatusAnchorEl(e.currentTarget)}
+                    >
+                      <Typography
+                        variant="caption"
+                        fontWeight={700}
+                        sx={{
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.04em',
+                          color: shippingStatusFilter ? 'primary.main' : 'text.primary',
+                        }}
+                      >
+                        Shipping Status
+                      </Typography>
+                      <ArrowDropDown
+                        fontSize="small"
+                        sx={{ color: shippingStatusFilter ? 'primary.main' : 'text.secondary' }}
+                      />
+                    </Box>
+                    {shippingStatusFilter && (
+                      <Chip
+                        size="small"
+                        label={shippingStatusFilter.replace(/_/g, ' ')}
+                        color="primary"
+                        variant="filled"
+                        onDelete={(e) => {
+                          e.stopPropagation()
+                          setShippingStatusFilter('')
+                          setPage(0)
+                        }}
+                        sx={{ height: 20, fontSize: '0.7rem', fontWeight: 600 }}
+                      />
+                    )}
+                  </Box>
+                  <Menu
+                    anchorEl={shippingStatusAnchorEl}
+                    open={Boolean(shippingStatusAnchorEl)}
+                    onClose={() => setShippingStatusAnchorEl(null)}
+                    slotProps={{ paper: { sx: { maxHeight: 350, minWidth: 180 } } }}
+                  >
+                    <MenuItem
+                      selected={shippingStatusFilter === ''}
+                      onClick={() => {
+                        setShippingStatusFilter('')
+                        setPage(0)
+                        setShippingStatusAnchorEl(null)
+                      }}
+                    >
+                      All Shipping Statuses
+                    </MenuItem>
+                    <Divider />
+                    {SHIPPING_STATUS_OPTIONS.map((s) => (
+                      <MenuItem
+                        key={s}
+                        selected={shippingStatusFilter === s}
+                        onClick={() => {
+                          setShippingStatusFilter(s)
+                          setPage(0)
+                          setShippingStatusAnchorEl(null)
+                        }}
+                      >
+                        {s.replace(/_/g, ' ')}
+                      </MenuItem>
+                    ))}
+                  </Menu>
+                </TableCell>
+
+                {/* Zoho Sync Filter */}
+                <TableCell>
+                  <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
+                    <Box
+                      sx={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}
+                      onClick={(e) => setZohoSyncAnchorEl(e.currentTarget)}
+                    >
+                      <Typography
+                        variant="caption"
+                        fontWeight={700}
+                        sx={{
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.04em',
+                          color: zohoSyncFilter ? 'primary.main' : 'text.primary',
+                        }}
+                      >
+                        Zoho Sync
+                      </Typography>
+                      <ArrowDropDown
+                        fontSize="small"
+                        sx={{ color: zohoSyncFilter ? 'primary.main' : 'text.secondary' }}
+                      />
+                    </Box>
+                    {zohoSyncFilter && (
+                      <Chip
+                        size="small"
+                        label={zohoSyncFilter}
+                        color={zohoSyncFilter === 'ERROR' ? 'error' : zohoSyncFilter === 'SYNCED' ? 'success' : 'warning'}
+                        variant="filled"
+                        onDelete={(e) => {
+                          e.stopPropagation()
+                          setZohoSyncFilter('')
+                          setPage(0)
+                        }}
+                        sx={{ height: 20, fontSize: '0.7rem', fontWeight: 600 }}
+                      />
+                    )}
+                  </Box>
+                  <Menu
+                    anchorEl={zohoSyncAnchorEl}
+                    open={Boolean(zohoSyncAnchorEl)}
+                    onClose={() => setZohoSyncAnchorEl(null)}
+                  >
+                    <MenuItem
+                      selected={zohoSyncFilter === ''}
+                      onClick={() => {
+                        setZohoSyncFilter('')
+                        setPage(0)
+                        setZohoSyncAnchorEl(null)
+                      }}
+                    >
+                      All Sync Statuses
+                    </MenuItem>
+                    <Divider />
+                    {(['PENDING', 'DIRTY', 'QUEUED', 'SYNCING', 'SYNCED', 'ERROR'] as ZohoSyncStatus[]).map((s) => (
+                      <MenuItem
+                        key={s}
+                        selected={zohoSyncFilter === s}
+                        onClick={() => {
+                          setZohoSyncFilter(s)
+                          setPage(0)
+                          setZohoSyncAnchorEl(null)
+                        }}
+                      >
+                        {s}
+                      </MenuItem>
+                    ))}
+                  </Menu>
+                </TableCell>
+
+                {/* Ordered Sort & Date Filter */}
+                <TableCell>
+                  <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
+                    <Box
+                      sx={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}
+                      onClick={() => {
+                        if (sortBy === 'ordered_at') {
+                          setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
+                        } else {
+                          setSortBy('ordered_at')
+                          setSortDir('desc')
+                        }
+                        setPage(0)
+                      }}
+                    >
+                      <Typography
+                        variant="caption"
+                        fontWeight={700}
+                        sx={{
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.04em',
+                          color: sortBy === 'ordered_at' ? 'primary.main' : 'text.primary',
+                        }}
+                      >
+                        Ordered
+                      </Typography>
+                      {sortBy === 'ordered_at' ? (
+                        sortDir === 'asc' ? <KeyboardArrowUp fontSize="small" color="primary" /> : <KeyboardArrowDown fontSize="small" color="primary" />
+                      ) : (
+                        <ArrowDropDown fontSize="small" sx={{ color: 'text.disabled', opacity: 0.5 }} />
+                      )}
+                    </Box>
+                    <Tooltip title="Filter by date range">
+                      <IconButton
+                        size="small"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setDateAnchorEl(e.currentTarget)
+                        }}
+                        sx={{
+                          p: 0.25,
+                          color: (orderedFromFilter || orderedToFilter) ? 'primary.main' : 'text.secondary',
+                        }}
+                      >
+                        <DateRange sx={{ fontSize: 16 }} />
+                      </IconButton>
+                    </Tooltip>
+                    {(orderedFromFilter || orderedToFilter) && (
+                      <Chip
+                        size="small"
+                        label={`${orderedFromFilter || '...'} to ${orderedToFilter || '...'}`}
+                        color="primary"
+                        variant="filled"
+                        onDelete={(e) => {
+                          e.stopPropagation()
+                          setOrderedFromFilter('')
+                          setOrderedToFilter('')
+                          setPage(0)
+                        }}
+                        sx={{ height: 20, fontSize: '0.7rem', fontWeight: 600 }}
+                      />
+                    )}
+                  </Box>
+                  <Popover
+                    anchorEl={dateAnchorEl}
+                    open={Boolean(dateAnchorEl)}
+                    onClose={() => setDateAnchorEl(null)}
+                    anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+                  >
+                    <Box sx={{ p: 2, display: 'flex', flexDirection: 'column', gap: 1.5, minWidth: 220 }}>
+                      <Typography variant="subtitle2" fontWeight={600}>
+                        Filter by Order Date
+                      </Typography>
+                      <TextField
+                        size="small"
+                        type="date"
+                        label="From"
+                        value={orderedFromFilter}
+                        onChange={(e) => {
+                          setOrderedFromFilter(e.target.value)
+                          setPage(0)
+                        }}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                      <TextField
+                        size="small"
+                        type="date"
+                        label="To"
+                        value={orderedToFilter}
+                        onChange={(e) => {
+                          setOrderedToFilter(e.target.value)
+                          setPage(0)
+                        }}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                      <Stack direction="row" spacing={1} justifyContent="flex-end">
+                        <Button
+                          size="small"
+                          onClick={() => {
+                            setOrderedFromFilter('')
+                            setOrderedToFilter('')
+                            setPage(0)
+                            setDateAnchorEl(null)
+                          }}
+                        >
+                          Clear
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="contained"
+                          onClick={() => setDateAnchorEl(null)}
+                        >
+                          Done
+                        </Button>
+                      </Stack>
+                    </Box>
+                  </Popover>
+                </TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -1218,7 +1763,15 @@ export default function OrdersManagement() {
                           </FormControl>
                         </TableCell>
                         <TableCell>
-                          <ZohoSyncStatusChip status={order.zoho_sync_status} variant="outlined" />
+                          {order.zoho_sync_status === 'ERROR' && order.zoho_sync_error ? (
+                            <Tooltip title={order.zoho_sync_error} arrow placement="top">
+                              <span>
+                                <ZohoSyncStatusChip status={order.zoho_sync_status} variant="outlined" />
+                              </span>
+                            </Tooltip>
+                          ) : (
+                            <ZohoSyncStatusChip status={order.zoho_sync_status} variant="outlined" />
+                          )}
                         </TableCell>
                         <TableCell>
                           <Typography variant="body2">
@@ -1591,6 +2144,24 @@ export default function OrdersManagement() {
               >
                 <MenuItem value="">All</MenuItem>
                 {ORDER_STATUS_OPTIONS.map((s) => (
+                  <MenuItem key={s} value={s}>
+                    {s.replace(/_/g, ' ')}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl size="small" fullWidth>
+              <InputLabel>Shipping Status</InputLabel>
+              <Select
+                value={shippingStatusFilter}
+                onChange={(e) => {
+                  setShippingStatusFilter(e.target.value as ShippingStatus | '')
+                  setPage(0)
+                }}
+                label="Shipping Status"
+              >
+                <MenuItem value="">All</MenuItem>
+                {SHIPPING_STATUS_OPTIONS.map((s) => (
                   <MenuItem key={s} value={s}>
                     {s.replace(/_/g, ' ')}
                   </MenuItem>

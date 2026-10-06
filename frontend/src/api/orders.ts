@@ -41,6 +41,7 @@ export interface ListOrdersParams {
   platform?: OrderPlatform
   fulfillment_channel?: OrderFulfillmentChannel
   status?: OrderStatus
+  shipping_status?: ShippingStatus
   item_status?: OrderItemStatus
   ordered_at_from?: string
   ordered_at_to?: string
@@ -60,6 +61,7 @@ export async function listOrders(params: ListOrdersParams = {}): Promise<OrderLi
   if (params.platform) query.set('platform', params.platform)
   if (params.fulfillment_channel) query.set('fulfillment_channel', params.fulfillment_channel)
   if (params.status) query.set('status', params.status)
+  if (params.shipping_status) query.set('shipping_status', params.shipping_status)
   if (params.item_status) query.set('item_status', params.item_status)
   if (params.ordered_at_from) query.set('ordered_at_from', params.ordered_at_from)
   if (params.ordered_at_to) query.set('ordered_at_to', params.ordered_at_to)

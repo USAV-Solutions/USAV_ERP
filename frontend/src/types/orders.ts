@@ -148,6 +148,7 @@ export interface OrderBrief {
   status: OrderStatus
   shipping_status: ShippingStatus
   zoho_sync_status: ZohoSyncStatus
+  zoho_sync_error?: string | null
   customer_name: string | null
   tracking_number: string | null
   subtotal_amount: string
@@ -173,6 +174,7 @@ export interface OrderDetail {
   status: OrderStatus
   shipping_status: ShippingStatus
   zoho_sync_status: ZohoSyncStatus
+  zoho_sync_error?: string | null
 
   customer_name: string | null
   customer_email: string | null

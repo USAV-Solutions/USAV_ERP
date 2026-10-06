@@ -880,9 +880,16 @@ def _is_salesorder_transaction_level_location_error(exc: Exception) -> bool:
 
 
 def _strip_salesorder_location_fields(payload: dict[str, Any]) -> dict[str, Any]:
-    sanitized = dict(payload)
-    sanitized.pop("location_id", None)
-    sanitized.pop("branch_id", None)
+    sanitized: dict[str, Any] = {k: v for k, v in payload.items() if k not in {"location_id", "branch_id"}}
+    line_items = payload.get("line_items")
+    if isinstance(line_items, list):
+        sanitized_lines: list[dict[str, Any]] = []
+        for line in line_items:
+            if isinstance(line, dict):
+                sanitized_lines.append({k: v for k, v in line.items() if k not in {"location_id", "branch_id"}})
+            else:
+                sanitized_lines.append(line)
+        sanitized["line_items"] = sanitized_lines
     return sanitized
 
 
@@ -1541,12 +1548,15 @@ async def sync_customer_outbound(customer_id: int) -> None:
 
                 contact_name = _resolve_customer_contact_name(customer)
                 if not resolved_id and contact_name:
-                    # Fallback: scan first page of contacts for matching name
-                    contacts = await zoho.list_contacts(page=1, per_page=200)
-                    for c in contacts:
-                        if c.get("contact_name") == contact_name:
-                            resolved_id = str(c.get("contact_id", ""))
-                            break
+                    existing = await zoho.get_contact_by_name(contact_name)
+                    if existing:
+                        resolved_id = str(existing.get("contact_id", ""))
+                    else:
+                        contacts = await zoho.list_contacts(page=1, per_page=200)
+                        for c in contacts:
+                            if c.get("contact_name") == contact_name:
+                                resolved_id = str(c.get("contact_id", ""))
+                                break
 
                 if resolved_id:
                     customer.zoho_id = resolved_id
@@ -2322,35 +2332,19 @@ async def sync_order_outbound(order_id: int) -> None:
             # If we don't yet have a zoho_id, try to locate an existing SalesOrder
             # by salesorder_number first (fallback to legacy reference_number)
             # to avoid duplicates when re-queuing the same order.
+            target_salesorder_number = str(order.external_order_number or order.external_order_id or "").strip()
             if not order.zoho_id:
-                existing_so_id: Optional[str] = None
-                target_salesorder_number = str(order.external_order_number or order.external_order_id or "").strip()
-                legacy_reference_number = str(order.external_order_id or "").strip()
                 try:
-                    for page in range(1, 4):  # scan first ~600 orders to keep quota safe
-                        salesorders = await zoho.list_salesorders(page=page, per_page=200)
-                        match = next(
-                            (
-                                so
-                                for so in salesorders
-                                if str(so.get("salesorder_number", "")).strip() == target_salesorder_number
-                                or str(so.get("reference_number", "")).strip() == legacy_reference_number
-                            ),
-                            None,
-                        )
-                        if match:
-                            existing_so_id = str(match.get("salesorder_id", "")) or None
-                            break
-                        if len(salesorders) < 200:
-                            break  # no more pages
+                    match = await zoho.search_salesorder_by_reference(target_salesorder_number)
+                    if not match and order.external_order_id and order.external_order_id != target_salesorder_number:
+                        match = await zoho.search_salesorder_by_reference(str(order.external_order_id).strip())
+                    if match and match.get("salesorder_id"):
+                        order.zoho_id = str(match["salesorder_id"])
                 except Exception as lookup_exc:
                     logger.warning(
                         "sync_order_outbound: lookup existing salesorder failed: %s",
                         lookup_exc,
                     )
-
-                if existing_so_id:
-                    order.zoho_id = existing_so_id
 
             try:
                 if order.zoho_id:
@@ -2373,9 +2367,9 @@ async def sync_order_outbound(order_id: int) -> None:
                     else:
                         so = await zoho.create_sales_order(payload_retry)
                     payload = payload_retry
-                elif _is_salesorder_transaction_level_location_error(so_exc) and payload.get("location_id"):
+                elif _is_salesorder_transaction_level_location_error(so_exc):
                     logger.warning(
-                        "sync_order_outbound: retrying order %s without transaction-level location after Zoho 27520",
+                        "sync_order_outbound: retrying order %s without location fields after Zoho location error",
                         order_id,
                     )
                     payload_retry = _strip_salesorder_location_fields(payload)
@@ -2392,6 +2386,17 @@ async def sync_order_outbound(order_id: int) -> None:
                     )
                     order.zoho_id = None
                     so = await zoho.create_sales_order(payload)
+                elif "already exists" in msg.lower() or "36004" in msg:
+                    logger.warning(
+                        "sync_order_outbound: sales order %s already exists in Zoho (%s). Linking existing sales order.",
+                        target_salesorder_number, msg,
+                    )
+                    existing_so = await zoho.search_salesorder_by_reference(target_salesorder_number)
+                    if existing_so and existing_so.get("salesorder_id"):
+                        order.zoho_id = str(existing_so["salesorder_id"])
+                        so = existing_so
+                    else:
+                        raise
                 else:
                     raise
 

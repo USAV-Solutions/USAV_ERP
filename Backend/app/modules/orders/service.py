@@ -608,6 +608,10 @@ class OrderSyncService:
             existing.fulfillment_channel = OrderFulfillmentChannel.AMAZON_FBA
             changed = True
 
+        if platform == OrderPlatform.AMAZON_FBA and existing.platform == OrderPlatform.AMAZON:
+            existing.platform = OrderPlatform.AMAZON_FBA
+            changed = True
+
         if ext.platform_order_number and existing.external_order_number != ext.platform_order_number:
             existing.external_order_number = ext.platform_order_number
             changed = True

@@ -1,8 +1,8 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from app.modules.orders.models import OrderFulfillmentChannel
 from app.modules.orders.routes import list_orders, sync_status
+from app.modules.orders.models import OrderFulfillmentChannel, ShippingStatus
 
 
 @pytest.mark.asyncio
@@ -17,6 +17,20 @@ async def test_list_orders_passes_fulfillment_channel_to_repository():
 
     assert response.total == 0
     assert order_repo.list_orders.await_args.kwargs["fulfillment_channel"] == OrderFulfillmentChannel.AMAZON_FBA
+
+
+@pytest.mark.asyncio
+async def test_list_orders_passes_shipping_status_to_repository():
+    order_repo = MagicMock()
+    order_repo.list_orders = AsyncMock(return_value=([], 0))
+
+    response = await list_orders(
+        shipping_status=ShippingStatus.PENDING,
+        order_repo=order_repo,
+    )
+
+    assert response.total == 0
+    assert order_repo.list_orders.await_args.kwargs["shipping_status"] == ShippingStatus.PENDING
 
 
 @pytest.mark.asyncio

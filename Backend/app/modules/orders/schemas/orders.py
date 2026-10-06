@@ -131,6 +131,7 @@ class OrderBrief(BaseModel):
     status: OrderStatus
     shipping_status: ShippingStatus
     zoho_sync_status: ZohoSyncStatus
+    zoho_sync_error: Optional[str] = None
     customer_name: Optional[str] = None
     customer: Optional[CustomerBrief] = None
     tracking_number: Optional[str] = None
@@ -160,6 +161,7 @@ class OrderDetail(BaseModel):
     status: OrderStatus
     shipping_status: ShippingStatus
     zoho_sync_status: ZohoSyncStatus
+    zoho_sync_error: Optional[str] = None
 
     customer_name: Optional[str] = None
     customer_email: Optional[str] = None

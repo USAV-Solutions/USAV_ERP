@@ -20,6 +20,8 @@ def _build_csv(rows: list[dict[str, str]]) -> str:
         "Date - Order Date",
         "Tracking Number",
         "Source",
+        "Market - Store Name",
+        "Market - Markeplace Name",
     ]
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=headers)
@@ -243,3 +245,91 @@ def test_shipstation_detects_dragon_usav_renew_and_walk_in():
     assert by_number["RENEW-1"]["platform_name"] == "AMAZON_RENEW"
     assert by_number["WALKIN-1"]["platform_name"] == "WALK_IN"
     assert by_number["AMZ-1"]["platform_name"] == "AMAZON"
+
+
+def test_shipstation_detects_platforms_from_market_store_name_columns():
+    csv_text = _build_csv(
+        [
+            {
+                "Order - Number": "112-9412447-4200216",
+                "Bill To - Name": "Alvaro Maya",
+                "Ship To - Address 1": "593 BONITO AVE",
+                "Ship To - Postal Code": "33037",
+                "Item - Name": "Bose SoundTouch Pedestal",
+                "Item - SKU": "B0FGB55QXD",
+                "Item - Qty": "1",
+                "Item - Price": "163.88",
+                "Amount - Order Total": "176.17",
+                "Amount - Shipping Cost": "0.00",
+                "Date - Order Date": "9/6/2026 8:31",
+                "Tracking Number": "TRACK-R1",
+                "Source": "amazon",
+                "Market - Store Name": "Amazon Renewed Store",
+                "Market - Markeplace Name": "Amazon",
+            },
+            {
+                "Order - Number": "02-15142-25672",
+                "Bill To - Name": "Jonathan Hernandez",
+                "Ship To - Address 1": "1414 N SUMNER AVE",
+                "Ship To - Postal Code": "18508",
+                "Item - Name": "Bose CineMate 520",
+                "Item - SKU": "",
+                "Item - Qty": "1",
+                "Item - Price": "1198.00",
+                "Amount - Order Total": "1428.59",
+                "Amount - Shipping Cost": "46.56",
+                "Date - Order Date": "9/5/2026 7:33",
+                "Tracking Number": "TRACK-D1",
+                "Source": "ebay_v2",
+                "Market - Store Name": "eBay Dragonhn",
+                "Market - Markeplace Name": "eBay",
+            },
+            {
+                "Order - Number": "03-15140-76176",
+                "Bill To - Name": "Michael Chance",
+                "Ship To - Address 1": "4 Bollinger Rd",
+                "Ship To - Postal Code": "92270",
+                "Item - Name": "Bose Speaker Stands",
+                "Item - SKU": "",
+                "Item - Qty": "1",
+                "Item - Price": "116.00",
+                "Amount - Order Total": "124.99",
+                "Amount - Shipping Cost": "0.00",
+                "Date - Order Date": "9/5/2026 10:53",
+                "Tracking Number": "TRACK-M1",
+                "Source": "ebay_v2",
+                "Market - Store Name": "eBay Mekong",
+                "Market - Markeplace Name": "eBay",
+            },
+            {
+                "Order - Number": "09-15129-79463",
+                "Bill To - Name": "David Martin",
+                "Ship To - Address 1": "770 N Hanover St",
+                "Ship To - Postal Code": "17022",
+                "Item - Name": "Replacement Power Transformer",
+                "Item - SKU": "",
+                "Item - Qty": "1",
+                "Item - Price": "29.88",
+                "Amount - Order Total": "31.68",
+                "Amount - Shipping Cost": "0.00",
+                "Date - Order Date": "9/5/2026 11:40",
+                "Tracking Number": "TRACK-U1",
+                "Source": "ebay_v2",
+                "Market - Store Name": "eBay USAV",
+                "Market - Markeplace Name": "eBay",
+            },
+        ]
+    )
+
+    parsed, seen, skipped = routes._parse_order_csv(csv_text)
+
+    assert seen == 4
+    assert skipped == 0
+    assert len(parsed) == 4
+
+    by_number = {order["platform_order_number"]: order for order in parsed}
+    assert by_number["112-9412447-4200216"]["platform_name"] == "AMAZON_RENEW"
+    assert by_number["02-15142-25672"]["platform_name"] == "EBAY_DRAGON"
+    assert by_number["03-15140-76176"]["platform_name"] == "EBAY_MEKONG"
+    assert by_number["09-15129-79463"]["platform_name"] == "EBAY_USAV"
+
