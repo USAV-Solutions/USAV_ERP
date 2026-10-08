@@ -55,15 +55,10 @@ VALID_ZOHO_CONTACT_SOURCE_VALUES = {
     "Ebay_Dragon",
     "Ebay_Mekong",
     "Ebay_USAV",
-    "Ebay_Purchasing",
     "ECWID",
     "Amazon",
-    "Amazon_Renew",
-    "Amazon FBA",
-    "Other",
     "Walmart",
-    "Shopify",
-    "Walk-in",
+    "Other",
 }
 
 VALID_ZOHO_SO_SOURCE_VALUES = {
@@ -99,20 +94,22 @@ EXACT_ZOHO_CONTACT_SOURCE_MAP = {
     "EBAY_MEKONG_API": "Ebay_Mekong",
     "EBAY_USAV": "Ebay_USAV",
     "EBAY_USAV_API": "Ebay_USAV",
-    "EBAY_PURCHASING": "Ebay_Purchasing",
-    "EBAY_PURCHASING_API": "Ebay_Purchasing",
+    "EBAY_PURCHASING": "Other",
+    "EBAY_PURCHASING_API": "Other",
     "WALMART": "Walmart",
     "WALMART_API": "Walmart",
     "ECWID": "ECWID",
     "ECWID_API": "ECWID",
     "AMAZON": "Amazon",
     "AMAZON_API": "Amazon",
-    "AMAZON_RENEW": "Amazon_Renew",
-    "AMAZON_FBA": "Amazon FBA",
-    "AMAZON_FBA_CSV": "Amazon FBA",
-    "WALK_IN": "Walk-in",
-    "WALK-IN": "Walk-in",
-    "WALKIN": "Walk-in",
+    "AMAZON_RENEW": "Amazon",
+    "AMAZON_FBA": "Amazon",
+    "AMAZON_FBA_CSV": "Amazon",
+    "SHOPIFY": "Other",
+    "SHOPIFY_API": "Other",
+    "WALK_IN": "Other",
+    "WALK-IN": "Other",
+    "WALKIN": "Other",
     "MANUAL": "Other",
     "ZOHO_IMPORT": "Other",
 }
@@ -355,28 +352,18 @@ def _resolve_source_to_zoho_dropdown(source: str) -> str:
 
 def _normalize_customer_source_to_zoho_dropdown(source: str) -> str:
     text = str(source or "").strip().upper().replace("-", "_").replace(" ", "_")
-    if "WALK_IN" in text or "WALKIN" in text:
-        return "Walk-in"
     if "EBAY_DRAGON" in text or "DRAGON" in text:
         return "Ebay_Dragon"
     if "EBAY_MEKONG" in text or "MEKONG" in text:
         return "Ebay_Mekong"
-    if "EBAY_PURCHASING" in text or "PURCHASING" in text:
-        return "Ebay_Purchasing"
     if "EBAY" in text:
         return "Ebay_USAV"
     if "WALMART" in text:
         return "Walmart"
     if "ECWID" in text:
         return "ECWID"
-    if "AMAZON_RENEW" in text or "RENEW" in text:
-        return "Amazon_Renew"
-    if "AMAZON_FBA" in text or "FBA" in text:
-        return "Amazon FBA"
     if "AMAZON" in text:
         return "Amazon"
-    if "SHOPIFY" in text:
-        return "Shopify"
     return "Other"
 
 

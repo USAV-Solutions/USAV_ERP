@@ -66,50 +66,60 @@ async def main():
                 FROM orders
                 WHERE external_order_id = $1 AND platform IN ('AMAZON', 'AMAZON_FBA', 'AMAZON_RENEW')
                 ORDER BY
+                    CASE WHEN zoho_sync_status = 'SYNCED' THEN 0 ELSE 1 END,
+                    CASE WHEN tracking_number IS NOT NULL THEN 0 ELSE 1 END,
                     CASE WHEN zoho_id IS NOT NULL THEN 0 ELSE 1 END,
-                    CASE WHEN platform = 'AMAZON_FBA' THEN 0 ELSE 1 END,
                     id ASC
             """, order_id)
 
             # Choose the primary order to keep:
-            # Prefer order with zoho_id already assigned, or the oldest one
+            # Prefer order that is SYNCED, has tracking, has zoho_id, or lowest ID
             primary = records[0]
             duplicates = records[1:]
 
             logger.info(
-                "Order %s: Keeping primary ID=%d (platform=%s, zoho_id=%s, zoho_status=%s). Duplicates to remove: %s",
+                "Order %s: Keeping primary ID=%d (platform=%s, zoho_id=%s, zoho_status=%s, tracking=%s). Duplicates to remove: %s",
                 order_id,
                 primary["id"],
                 primary["platform"],
                 primary["zoho_id"],
                 primary["zoho_sync_status"],
+                primary["tracking_number"],
                 [d["id"] for d in duplicates],
             )
 
             if args.apply:
                 async with conn.transaction():
-                    # If primary is not yet AMAZON_FBA and is FBA fulfilled, promote it to AMAZON_FBA
-                    if primary["platform"] != "AMAZON_FBA":
-                        await conn.execute("""
-                            UPDATE orders
-                            SET platform = 'AMAZON_FBA',
-                                fulfillment_channel = 'AMAZON_FBA'
-                            WHERE id = $1
-                        """, primary["id"])
-                        total_migrated += 1
-
+                    # 1. Delete duplicates first so (platform, external_order_id) constraint will not collide
                     for dup in duplicates:
                         dup_id = dup["id"]
-                        # Re-link any sales returns pointing to the duplicate order to the primary order
-                        try:
-                            await conn.execute("UPDATE sales_returns SET linked_order_id = $1 WHERE linked_order_id = $2", primary["id"], dup_id)
-                        except Exception:
-                            pass
+                        # Re-link any returns pointing to the duplicate order to the primary order
+                        await conn.execute("UPDATE return_record SET linked_order_id = $1 WHERE linked_order_id = $2", primary["id"], dup_id)
                         # Delete line items first
                         await conn.execute("DELETE FROM order_item WHERE order_id = $1", dup_id)
                         # Delete duplicate order
                         await conn.execute("DELETE FROM orders WHERE id = $1", dup_id)
                         total_deleted += 1
+
+                    # 2. Preserve tracking number from duplicate if primary was missing it
+                    if not primary["tracking_number"]:
+                        for dup in duplicates:
+                            if dup["tracking_number"]:
+                                await conn.execute(
+                                    "UPDATE orders SET tracking_number = $1 WHERE id = $2",
+                                    dup["tracking_number"],
+                                    primary["id"],
+                                )
+                                break
+
+                    # 3. Promote primary to AMAZON_FBA
+                    await conn.execute("""
+                        UPDATE orders
+                        SET platform = 'AMAZON_FBA',
+                            fulfillment_channel = 'AMAZON_FBA'
+                        WHERE id = $1
+                    """, primary["id"])
+                    total_migrated += 1
 
         if args.apply:
             logger.info("Remediation complete: %d orders upgraded to AMAZON_FBA, %d duplicate orders deleted.", total_migrated, total_deleted)
